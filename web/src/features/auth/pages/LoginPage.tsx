@@ -78,11 +78,11 @@ export function LoginPage() {
                   color: "text.primary",
                 }}
               >
-                KMT
+                Keycloak
               </Typography>
             </Box>
             <Typography variant="body2" sx={{ color: "text.secondary" }}>
-              KEYCLOAK MONITORING TOOL
+              MONITORING TOOL
             </Typography>
           </Box>
 

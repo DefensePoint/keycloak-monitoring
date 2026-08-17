@@ -123,10 +123,10 @@ export function Layout({ children }: LayoutProps) {
                 color="text.primary"
                 sx={{ fontWeight: 700, letterSpacing: "-0.02em" }}
               >
-                KMT
+                Keycloak
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Keycloak Monitoring Tool
+                Monitoring Tool
               </Typography>
             </Box>
           </Box>

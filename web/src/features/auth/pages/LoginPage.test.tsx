@@ -313,8 +313,8 @@ describe("LoginPage", () => {
     render(<LoginPage />);
 
     expect(screen.getByAltText("DefensePoint")).toBeInTheDocument();
-    expect(screen.getByText("KMT")).toBeInTheDocument();
-    expect(screen.getByText("KEYCLOAK MONITORING TOOL")).toBeInTheDocument();
+    expect(screen.getByText("Keycloak")).toBeInTheDocument();
+    expect(screen.getByText("MONITORING TOOL")).toBeInTheDocument();
   });
 
   it("should handle null auth config gracefully", () => {
