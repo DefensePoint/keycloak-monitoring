@@ -1,10 +1,10 @@
 # Configuration Guide
 
-Complete reference for configuring the Point Monitoring Platform.
+Complete reference for configuring the Keycloak Monitoring Tool.
 
 ## Overview
 
-The Point Monitoring Platform uses a YAML configuration file (`config.yaml`) as the primary configuration source. All settings can be overridden using environment variables with the `MONITORING_` prefix.
+The Keycloak Monitoring Tool uses a YAML configuration file (`config.yaml`) as the primary configuration source. All settings can be overridden using environment variables with the `MONITORING_` prefix.
 
 ### Configuration Priority
 
@@ -497,7 +497,7 @@ Configure where security alerts are sent. Each notification channel has a minimu
 
 ```yaml
 notifications:
-  # Base URL for Point Monitoring web UI
+  # Base URL for Keycloak Monitoring Tool web UI
   # Used in notifications to provide clickable links to alert details
   # Example: "https://monitoring.example.com"
   # Leave empty to disable links in notifications
@@ -553,7 +553,7 @@ notifications:
     channel: "#security-alerts"
 
     # Optional: Custom bot username
-    username: "Point Monitoring"
+    username: "Keycloak Monitoring Tool"
 
     # Optional: Bot icon emoji
     icon_emoji: ":shield:"
@@ -581,7 +581,7 @@ notifications:
     password: "${SMTP_PASSWORD}"
 
     # Sender email address
-    from: "Point Monitoring <alerts@example.com>"
+    from: "Keycloak Monitoring Tool <alerts@example.com>"
 
     # Recipient email addresses
     to:
@@ -596,7 +596,7 @@ notifications:
     skip_verify: false
 
     # Optional: Custom email subject template
-    # Default: "[Point Monitoring] {severity} Alert: {check_name}"
+    # Default: "[Keycloak Monitoring Tool] {severity} Alert: {check_name}"
     subject: "[Keycloak Security] {severity}: {check_name}"
 
     # Minimum severity level to send emails
@@ -629,7 +629,7 @@ export MONITORING_NOTIFICATIONS_EMAIL_SMTP_HOST=smtp.gmail.com
 export MONITORING_NOTIFICATIONS_EMAIL_SMTP_PORT=587
 export MONITORING_NOTIFICATIONS_EMAIL_USERNAME=alerts@example.com
 export MONITORING_NOTIFICATIONS_EMAIL_PASSWORD=your_app_password
-export MONITORING_NOTIFICATIONS_EMAIL_FROM="Point Monitoring <alerts@example.com>"
+export MONITORING_NOTIFICATIONS_EMAIL_FROM="Keycloak Monitoring Tool <alerts@example.com>"
 export MONITORING_NOTIFICATIONS_EMAIL_MIN_SEVERITY=error
 ```
 
@@ -823,7 +823,7 @@ database:
   # Docker: Use service name from docker-compose.yml
   # Local: "localhost" or "127.0.0.1"
   # Default: "localhost"
-  host: "point-monitoring-postgres"
+  host: "kmt-postgres"
 
   # PostgreSQL port
   # Default: 5432
@@ -1289,7 +1289,7 @@ notifications:
     enabled: true
     # Use environment variable: MONITORING_NOTIFICATIONS_SLACK_WEBHOOK_URL
     channel: "#security-alerts"
-    username: "Point Monitoring"
+    username: "Keycloak Monitoring Tool"
     min_severity: "warning"
 
   email:
@@ -1299,7 +1299,7 @@ notifications:
     # Use environment variables:
     # MONITORING_NOTIFICATIONS_EMAIL_USERNAME
     # MONITORING_NOTIFICATIONS_EMAIL_PASSWORD
-    from: "Point Monitoring <alerts@example.com>"
+    from: "Keycloak Monitoring Tool <alerts@example.com>"
     to:
       - "security-team@example.com"
     use_tls: true
@@ -1323,7 +1323,7 @@ web:
     api_host_url: "http://api-server:7888"
 
 database:
-  host: "point-monitoring-postgres"  # Docker service name
+  host: "kmt-postgres"  # Docker service name
   port: 5432
   database: "monitoring"
   user: "monitoring"

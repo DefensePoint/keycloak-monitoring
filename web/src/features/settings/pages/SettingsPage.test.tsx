@@ -148,7 +148,7 @@ describe("SettingsPage", () => {
       expect(screen.getByText("About")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("POINT Monitoring Platform")).toBeInTheDocument();
+    expect(screen.getByText("Keycloak Monitoring Tool")).toBeInTheDocument();
     expect(screen.getByText("1.0.0")).toBeInTheDocument();
     expect(screen.getByText("abc123def")).toBeInTheDocument();
     expect(screen.getByText("go1.21.0")).toBeInTheDocument();

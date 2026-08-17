@@ -78,7 +78,7 @@ export function LoginPage() {
                   color: "text.primary",
                 }}
               >
-                POINT
+                KMT
               </Typography>
             </Box>
             <Typography variant="body2" sx={{ color: "text.secondary" }}>

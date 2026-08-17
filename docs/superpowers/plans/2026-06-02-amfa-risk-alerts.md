@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a background service that converts high-risk AMFA login events into POINT alerts, which then flow through POINT's existing alert lifecycle and notification fan-out.
+**Goal:** Add a background service that converts high-risk AMFA login events into KMT alerts, which then flow through KMT's existing alert lifecycle and notification fan-out.
 
 **Architecture:** A new `amfacheck/` package, modeled closely on the existing `eventscheck/` package, runs one per-tenant poll loop. Each loop executes five `Check` implementations (one per alert rule) that query a tenant's read-only AMFA Postgres database (via additive methods on `amfa.Repository`), build `*domain.Alert` rows, and hand them to the existing `alerts` repository and `notifications` service for persistence and fan-out. Wiring is done with a new Uber-fx module that builds one service per AMFA-enabled tenant.
 
@@ -781,7 +781,7 @@ Expected: PASS.
 - [ ] **Step 5: Create `amfacheck/interfaces.go`**
 
 ```go
-// Package amfacheck converts high-risk AMFA login events into POINT alerts.
+// Package amfacheck converts high-risk AMFA login events into KMT alerts.
 // It deliberately mirrors the shape of the eventscheck package: one per-tenant
 // poll loop running a set of Check implementations whose alerts flow through
 // the existing alerts repository and notification fan-out. It is a sibling of
@@ -2795,7 +2795,7 @@ git commit -m "feat(amfacheck): wire per-tenant services via fx module"
 **Files:**
 - Create: `amfacheck/integration_test.go`
 
-This test is gated by `//go:build integration` and skips without `AMFA_TEST_DSN`. It exercises one full tick against a real AMFA DB and a real POINT alerts repo. On this host it will only compile + skip; it is the executable spec for a CI/staging run.
+This test is gated by `//go:build integration` and skips without `AMFA_TEST_DSN`. It exercises one full tick against a real AMFA DB and a real KMT alerts repo. On this host it will only compile + skip; it is the executable spec for a CI/staging run.
 
 - [ ] **Step 1: Create `amfacheck/integration_test.go`**
 
@@ -2917,7 +2917,7 @@ git commit -m "test(amfacheck): add DB-gated integration test for one tick"
 Under `keycloak: global:` (the same level as the existing `event_checker:` block — locate it with `grep -n "event_checker" config.yaml.example`), add:
 
 ```yaml
-      # AMFA risk-alert checker. Converts high-risk AMFA login events into POINT
+      # AMFA risk-alert checker. Converts high-risk AMFA login events into KMT
       # alerts that flow through the normal alert lifecycle and notification
       # fan-out. Disabled by default; opt in per check. See docs/amfa-integration.md.
       amfa_checker:
@@ -2933,7 +2933,7 @@ Under `keycloak: global:` (the same level as the existing `event_checker:` block
 
 - [ ] **Step 2: Add an Alerts section to `docs/amfa-integration.md`**
 
-Append a new section. Include: what each rule detects and its severity (rule 1 → critical; rules 2/3/4a/4b → warning); the config block above; the expected startup log lines (`AMFA checker services constructed count=N`, `amfacheck service starting tenant_id=<id> ...`, or `AMFA checker globally disabled; ...` when off); a manual smoke test (trigger one rejection via AMFA's `/decision` endpoint, wait one poll interval, see the alert on POINT's Alerts page and a notification in the configured Slack channel); a rollback note (`enabled: false` + restart); and a troubleshooting table with at least these rows:
+Append a new section. Include: what each rule detects and its severity (rule 1 → critical; rules 2/3/4a/4b → warning); the config block above; the expected startup log lines (`AMFA checker services constructed count=N`, `amfacheck service starting tenant_id=<id> ...`, or `AMFA checker globally disabled; ...` when off); a manual smoke test (trigger one rejection via AMFA's `/decision` endpoint, wait one poll interval, see the alert on KMT's Alerts page and a notification in the configured Slack channel); a rollback note (`enabled: false` + restart); and a troubleshooting table with at least these rows:
 
 | Symptom | Likely cause | Action |
 |---|---|---|

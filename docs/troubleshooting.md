@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-Common issues and solutions for the Point Monitoring Platform.
+Common issues and solutions for the Keycloak Monitoring Tool.
 
 ## Table of Contents
 
@@ -46,7 +46,7 @@ FATAL: password authentication failed for user "monitoring"
    ```yaml
    # config.yaml
    database:
-     host: "localhost"  # or "point-monitoring-postgres" for Docker
+     host: "localhost"  # or "kmt-postgres" for Docker
      port: 5432
      database: "monitoring"
      user: "monitoring"
@@ -502,7 +502,7 @@ Container exits immediately
 2. **Verify image exists**:
 
    ```bash
-   docker images | grep point-monitoring
+   docker images | grep kmt
    ```
 
 3. **Rebuild images**:
@@ -586,7 +586,7 @@ api-server cannot connect to postgres
    ```yaml
    # config.yaml
    database:
-     host: "point-monitoring-postgres"  # Docker service name
+     host: "kmt-postgres"  # Docker service name
 
    web:
      server:

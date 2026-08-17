@@ -1,7 +1,7 @@
 services:
   postgres:
     image: timescale/timescaledb:latest-pg16
-    container_name: point-monitoring-postgres
+    container_name: kmt-postgres
     ports:
       - "5432:5432"
     environment:
@@ -11,7 +11,7 @@ services:
     volumes:
       - point-postgres-data:/var/lib/postgresql/data
     networks:
-      - point-monitoring-network
+      - kmt-network
     restart: unless-stopped
     # TimescaleDB configuration
     command: >
@@ -31,28 +31,28 @@ services:
       -c max_wal_size=4GB
 
   api-server:
-    image: POINT_API_DOCKER_IMAGE
-    container_name: point-monitoring-server
+    image: KMT_API_DOCKER_IMAGE
+    container_name: kmt-server
     ports:
       - "7888:7888"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     networks:
-      - point-monitoring-network
+      - kmt-network
       - traefik-network
     restart: unless-stopped
     depends_on:
       - postgres
 
   web:
-    image: POINT_WEB_DOCKER_IMAGE
-    container_name: point-monitoring-web
+    image: KMT_WEB_DOCKER_IMAGE
+    container_name: kmt-web
     ports:
       - "7880:7880"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     networks:
-      - point-monitoring-network
+      - kmt-network
       - traefik-network
     restart: unless-stopped
     depends_on:
@@ -60,22 +60,22 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-network"
-      - "traefik.http.routers.point-monitoring-web.rule=Host(`point-monitoring-dev.defensepoint.com`)"
-      - "traefik.http.routers.point-monitoring-web.entrypoints=web"
-      - "traefik.http.routers.point-monitoring-web.middlewares=point-monitoring-https-redirect"
-      - "traefik.http.middlewares.point-monitoring-https-redirect.redirectscheme.scheme=https"
-      - "traefik.http.middlewares.point-monitoring-https-redirect.redirectscheme.permanent=true"
-      - "traefik.http.routers.point-monitoring-web-secure.rule=Host(`point-monitoring-dev.defensepoint.com`)"
-      - "traefik.http.routers.point-monitoring-web-secure.entrypoints=websecure"
-      - "traefik.http.routers.point-monitoring-web-secure.tls=true"
-      - "traefik.http.routers.point-monitoring-web-secure.tls.certresolver=letsencrypt"
-      - "traefik.http.services.point-monitoring-web.loadbalancer.server.port=7880"
+      - "traefik.http.routers.kmt-web.rule=Host(`kmt-dev.defensepoint.com`)"
+      - "traefik.http.routers.kmt-web.entrypoints=web"
+      - "traefik.http.routers.kmt-web.middlewares=kmt-https-redirect"
+      - "traefik.http.middlewares.kmt-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.kmt-https-redirect.redirectscheme.permanent=true"
+      - "traefik.http.routers.kmt-web-secure.rule=Host(`kmt-dev.defensepoint.com`)"
+      - "traefik.http.routers.kmt-web-secure.entrypoints=websecure"
+      - "traefik.http.routers.kmt-web-secure.tls=true"
+      - "traefik.http.routers.kmt-web-secure.tls.certresolver=letsencrypt"
+      - "traefik.http.services.kmt-web.loadbalancer.server.port=7880"
 
 volumes:
   point-postgres-data:
 
 networks:
-  point-monitoring-network:
+  kmt-network:
     driver: bridge
   traefik-network:
     external: true

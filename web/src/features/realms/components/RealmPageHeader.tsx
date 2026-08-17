@@ -58,7 +58,7 @@ export const RealmPageHeader: React.FC<RealmPageHeaderProps> = ({
                   fontSize: "0.875rem",
                 }}
               >
-                POINT
+                KMT
               </Link>
               <Typography color="text.secondary">/</Typography>
               <Typography

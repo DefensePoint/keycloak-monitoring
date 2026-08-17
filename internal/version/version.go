@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	// Version is the current version of the Point Monitoring
+	// Version is the current version of the Keycloak Monitoring Tool
 	Version = "0.1.0"
 
 	// GitCommit is the git commit hash (set during build)
@@ -52,6 +52,6 @@ func GetPublic() PublicInfo {
 
 // String returns a formatted version string
 func (i Info) String() string {
-	return fmt.Sprintf("point-monitoring %s (commit: %s, built: %s, %s, %s)",
+	return fmt.Sprintf("kmt %s (commit: %s, built: %s, %s, %s)",
 		i.Version, i.GitCommit, i.BuildDate, i.GoVersion, i.Platform)
 }

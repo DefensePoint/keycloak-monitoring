@@ -149,10 +149,10 @@ describe("RealmPageHeader", () => {
     expect(logoLink).toHaveAttribute("href", "/tenant-1");
   });
 
-  it("should render POINT link to tenant dashboard", () => {
+  it("should render KMT link to tenant dashboard", () => {
     renderWithProviders(<RealmPageHeader {...defaultProps} />);
 
-    const pointLink = screen.getByText("POINT").closest("a");
+    const pointLink = screen.getByText("KMT").closest("a");
     expect(pointLink).toHaveAttribute("href", "/tenant-1");
   });
 });

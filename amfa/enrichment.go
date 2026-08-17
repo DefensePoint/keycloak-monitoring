@@ -21,7 +21,7 @@ var ErrKeycloakUserNotFound = errors.New("amfa enrichment: keycloak user not fou
 // NewEnrichmentWithSize if you expect much higher cardinality.
 const DefaultEnrichmentCacheSize = 50_000
 
-// KeycloakUser is the minimal projection POINT needs for display.
+// KeycloakUser is the minimal projection KMT needs for display.
 type KeycloakUser struct {
 	Username *string
 	Email    *string

@@ -1,4 +1,4 @@
-# Point Monitoring Platform - Frontend
+# Keycloak Monitoring Tool - Frontend
 
 ## Overview
 Multi-tenant Keycloak monitoring system with RBAC.

@@ -34,7 +34,7 @@ type KeycloakClientLookup interface {
 
 // poolKeycloakAdapter implements KeycloakClient by looking up the right
 // per-tenant admin client at call time. Use this when the underlying
-// admin clients are owned by a pool (e.g., POINT's MonitorPoolManager)
+// admin clients are owned by a pool (e.g., KMT's MonitorPoolManager)
 // rather than constructed per-request. Because resolution happens on every
 // call, changes to the underlying pool (tenants added or removed) are
 // picked up automatically without re-wiring the adapter.

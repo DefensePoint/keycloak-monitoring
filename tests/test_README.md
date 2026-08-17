@@ -1,6 +1,6 @@
 # Integration Tests
 
-This directory contains end-to-end integration tests for the Point Monitoring Platform.
+This directory contains end-to-end integration tests for the Keycloak Monitoring Tool.
 
 ## Prerequisites
 
@@ -93,7 +93,7 @@ PASS
 **Cause**: Event checker or config checker not running, or poll intervals too long
 
 **Fix**:
-1. Check server is running: `ps aux | grep point-monitoring`
+1. Check server is running: `ps aux | grep kmt`
 2. Check server logs for checker activity
 3. Verify config.yaml poll intervals (should be 5m or less)
 4. Check database connection

@@ -148,7 +148,7 @@ func (s *SlackNotifier) buildSlackMessage(alert *domain.Alert) *slackMessage {
 		TitleLink: titleLink,
 		Text:      alert.Description,
 		Timestamp: alert.FirstDetected.Unix(),
-		Footer:    "Point Monitoring Platform",
+		Footer:    "Keycloak Monitoring Tool",
 		Fields: []slackField{
 			{
 				Title: "Severity",
@@ -203,7 +203,7 @@ func (s *SlackNotifier) buildSlackMessage(alert *domain.Alert) *slackMessage {
 
 	// Add quick link button if base URL is configured
 	if s.baseURL != "" {
-		quickLinkText := fmt.Sprintf("<%s/%s/alerts/%s|View Alert in Point Monitoring>",
+		quickLinkText := fmt.Sprintf("<%s/%s/alerts/%s|View Alert in Keycloak Monitoring Tool>",
 			strings.TrimSuffix(s.baseURL, "/"),
 			alert.TenantID,
 			alert.AlertID)

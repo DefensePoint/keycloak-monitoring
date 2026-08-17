@@ -23,7 +23,7 @@ echo ""
 echo "======================================"
 echo "📋 Showing recent logs..."
 echo "======================================"
-docker logs --tail 100 point-monitoring-server
+docker logs --tail 100 kmt-server
 
 echo ""
 echo "======================================"
@@ -32,4 +32,4 @@ echo "======================================"
 echo "Press Ctrl+C to stop"
 echo ""
 
-docker logs -f point-monitoring-server 2>&1 | grep --line-buffered -E "\[DEBUG\]|ERROR|WARN|Starting|Collected"
+docker logs -f kmt-server 2>&1 | grep --line-buffered -E "\[DEBUG\]|ERROR|WARN|Starting|Collected"

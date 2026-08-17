@@ -1,4 +1,4 @@
-# Redeployment Checklist — New Point Monitoring Version
+# Redeployment Checklist — New Keycloak Monitoring Tool Version
 
 **Breaking change (Authentication switch)**:  
 The monitor now authenticates to the Keycloak Admin API with the OAuth2  

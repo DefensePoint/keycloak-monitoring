@@ -133,7 +133,7 @@ type monitorPoolKeycloakAdminLookup struct {
 var _ amfa.KeycloakAdmin = (*keycloakadmin.Client)(nil)
 
 // GetKeycloakAdmin resolves the admin client for tenantID by routing through
-// the same monitor-pool plumbing the rest of POINT uses. Returns nil when
+// the same monitor-pool plumbing the rest of KMT uses. Returns nil when
 // the tenant has no active monitor; the caller (amfa.poolKeycloakAdapter)
 // translates that into a transient error so Enrichment does not negative-
 // cache the gap.

@@ -1,6 +1,6 @@
 # Engineering Guide
 
-Developer guide for working with the Point Monitoring Platform codebase.
+Developer guide for working with the Keycloak Monitoring Tool codebase.
 
 ## Table of Contents
 
@@ -32,8 +32,8 @@ Developer guide for working with the Point Monitoring Platform codebase.
 
 ```bash
 # Clone repository
-git clone git@repos.defensepoint.com:ai/soc/point-monitoring-platform.git
-cd point-monitoring-platform
+git clone git@repos.defensepoint.com:ai/soc/kmt.git
+cd kmt
 
 # Install dependencies
 make deps
@@ -249,7 +249,7 @@ Create a pull request on GitHub/GitLab.
 |---|---|---|---|
 | **Unit tests** (Go) | Logic in isolation. No DB, no network. Stdlib `testing` only — no `testify`. | `go test -short ./...` | Always run |
 | **Unit tests** (frontend) | React components + service URL/param construction. JSDOM, mocked deps. | `cd web && npm test -- --run` | Always run |
-| **DB-backed tests** (env-gated) | POINT's own migrations / RBAC seeders against a real PostgreSQL. | Skip when `POINT_TEST_DATABASE_DSN` unset. | Export `POINT_TEST_DATABASE_DSN`. |
+| **DB-backed tests** (env-gated) | KMT's own migrations / RBAC seeders against a real PostgreSQL. | Skip when `KMT_TEST_DATABASE_DSN` unset. | Export `KMT_TEST_DATABASE_DSN`. |
 | **AMFA integration tests** (build-tag + env-gated) | AMFA repository SQL queries against a real AMFA Postgres. Tagged `//go:build integration`. | Skip in default run. | `go test -tags=integration ./amfa/postgres/...` with `AMFA_TEST_DSN` set. |
 | **Full e2e smoke** (manual) | UI walkthrough against running stacks. Not automated. | N/A | See `docs/amfa-integration.md` § Verification. |
 
@@ -312,7 +312,7 @@ docker run -d --name pmp-test-db --rm \
   -p 5433:5432 postgres:17-alpine
 
 # Run with the DSN set:
-POINT_TEST_DATABASE_DSN="host=localhost port=5433 dbname=pmp_test user=pmp password=pmp sslmode=disable" \
+KMT_TEST_DATABASE_DSN="host=localhost port=5433 dbname=pmp_test user=pmp password=pmp sslmode=disable" \
   go test -v ./pkg/database/...
 
 # Tear down:
@@ -343,7 +343,7 @@ docker exec point-adaptive-authentication-postgres-1 \
 **Run the integration tests (locally with Go):**
 
 ```bash
-cd /path/to/point-monitoring-platform
+cd /path/to/kmt
 AMFA_TEST_DSN="host=localhost port=5455 dbname=adaptive_mfa user=keycloak password=password sslmode=disable" \
   go test -tags=integration -v ./amfa/postgres/...
 ```
@@ -493,7 +493,7 @@ A short list of footguns and the fixes. Add to this section when you find new on
 
 ### 1. `docker restart` does NOT pick up new images
 
-After `make docker-build`, running `docker restart point-monitoring-server` (or `-web`) restarts the **same container instance** with the **same image** it was originally created from. Tagging a new image as `:latest` doesn't migrate the running container to it.
+After `make docker-build`, running `docker restart kmt-server` (or `-web`) restarts the **same container instance** with the **same image** it was originally created from. Tagging a new image as `:latest` doesn't migrate the running container to it.
 
 To actually pick up a freshly rebuilt image:
 
@@ -529,7 +529,7 @@ Cannot find module '@rollup/rollup-linux-arm64-musl'
 **Fix — always regenerate the lockfile in the same image:**
 
 ```bash
-cd /path/to/point-monitoring-platform
+cd /path/to/kmt
 docker run --rm \
   -v "$PWD/web:/web" -w /web \
   --platform linux/arm64 \

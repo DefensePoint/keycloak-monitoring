@@ -120,7 +120,7 @@ describe("Layout", () => {
     );
 
     expect(screen.getByAltText("DefensePoint")).toBeInTheDocument();
-    expect(screen.getByText("POINT")).toBeInTheDocument();
+    expect(screen.getByText("KMT")).toBeInTheDocument();
     expect(screen.getByText("Monitoring Platform")).toBeInTheDocument();
   });
 

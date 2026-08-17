@@ -15,7 +15,7 @@ import (
 
 // NewClient opens a read-only GORM connection to one tenant's AMFA database.
 // AutoMigrate is NEVER called on this connection — the AMFA database schema
-// is owned by AMFA, not POINT. A nil logger is tolerated for tests.
+// is owned by AMFA, not KMT. A nil logger is tolerated for tests.
 func NewClient(cfg config.AmfaDatabaseConfig, log *logger.Logger) (*gorm.DB, error) {
 	if cfg.Host == "" {
 		return nil, fmt.Errorf("amfa client: database.host is required")

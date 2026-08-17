@@ -6,27 +6,27 @@
 | **Date**    | 2026-05-26                                                                                                               |
 | **Author**  | Jonas Figu (with Claude)                                                                                                 |
 | **Status**  | Draft — awaiting user review                                                                                             |
-| **Scope**   | Add an "AMFA Events" section to POINT Monitoring Platform with KPI metrics, paginated event logs, and a geolocation map. |
-| **Touches** | POINT Monitoring Platform only. AMFA codebase is **not** modified.                                                       |
+| **Scope**   | Add an "AMFA Events" section to Keycloak Monitoring Tool with KPI metrics, paginated event logs, and a geolocation map. |
+| **Touches** | Keycloak Monitoring Tool only. AMFA codebase is **not** modified.                                                       |
 
 
 ---
 
 ## 1. Goal
 
-POINT Monitoring administrators need a single page in the dashboard that surfaces authentication-risk activity coming from the AMFA (Adaptive MFA) service, so they can:
+Keycloak Monitoring Tool administrators need a single page in the dashboard that surfaces authentication-risk activity coming from the AMFA (Adaptive MFA) service, so they can:
 
 - See at a glance how many login attempts are happening and how many are risky.
 - Audit recent AMFA login events with full context (user, IP, client, risk level).
 - Visually identify the geographic distribution of login attempts to spot anomalies.
 
-The page must be tenant-scoped (so per-customer admins see only their data), gated by RBAC, and follow the existing POINT Monitoring architecture and patterns without breaking existing functionality.
+The page must be tenant-scoped (so per-customer admins see only their data), gated by RBAC, and follow the existing Keycloak Monitoring Tool architecture and patterns without breaking existing functionality.
 
 ## 2. Non-goals
 
 - **Writes to AMFA.** Read-only first; actions on events (block IP, force MFA, etc.) are future work.
 - **Real-time push** (websockets/SSE). 30 s polling via React Query is sufficient.
-- **Historical backfill.** POINT shows whatever AMFA already has; no import step.
+- **Historical backfill.** KMT shows whatever AMFA already has; no import step.
 - **Cross-realm aggregation.** Page shows one realm at a time, matching the existing `EventsPage` behaviour.
 - **Editing AMFA risk-evaluation parameters.** AMFA owns that UI/API; out of scope here.
 
@@ -36,19 +36,19 @@ The page must be tenant-scoped (so per-customer admins see only their data), gat
 | Decision           | Choice                                                                      | Rationale                                                                                                                                                                                                                                                                                                                             |
 | ------------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | AMFA data access   | **Direct read from AMFA's PostgreSQL** (no AMFA code changes)               | User chose DB-direct over HTTP API for speed-to-ship and single-repo PR; coupling risks mitigated by read-only role + schema check                                                                                                                                                                                                    |
-| AMFA DB credential | **Dedicated `point_monitoring_ro` read-only role**                          | Defense in depth; ~30 s of DBA work for least-privilege guarantee                                                                                                                                                                                                                                                                     |
-| Tenant model       | **One AMFA per Keycloak instance, owned by the same POINT tenant**          | Confirmed by user: deployments will run one AMFA service alongside each Keycloak. POINT therefore connects to a *different* AMFA database for each tenant. Realm-name collisions across tenants become impossible by topology (Keycloak enforces realm-name uniqueness within itself, and no other tenant's data lives in this AMFA). |
+| AMFA DB credential | **Dedicated `kmt_ro` read-only role**                          | Defense in depth; ~30 s of DBA work for least-privilege guarantee                                                                                                                                                                                                                                                                     |
+| Tenant model       | **One AMFA per Keycloak instance, owned by the same KMT tenant**          | Confirmed by user: deployments will run one AMFA service alongside each Keycloak. KMT therefore connects to a *different* AMFA database for each tenant. Realm-name collisions across tenants become impossible by topology (Keycloak enforces realm-name uniqueness within itself, and no other tenant's data lives in this AMFA). |
 | User display       | UUIDs enriched with username/email via Keycloak admin client                | Better UX; reuses existing `pkg/keycloakadmin`                                                                                                                                                                                                                                                                                        |
 | Map library        | `react-leaflet` + `leaflet.markercluster` with CartoDB Dark Matter tiles    | Free, no API key, mature, dark theme matches mockup, supports dynamic world→country→city zoom                                                                                                                                                                                                                                         |
 | RBAC               | New `amfa:read` permission, granted to admin / operator / viewer by default | Future-proof: AMFA-specific data can be restricted later without affecting `events:read`                                                                                                                                                                                                                                              |
-| Backend approach   | Pure pass-through (no POINT-side caching of AMFA data)                      | Simplest; AMFA stays source of truth; can add cache layer later if AMFA load becomes a concern                                                                                                                                                                                                                                        |
+| Backend approach   | Pure pass-through (no KMT-side caching of AMFA data)                      | Simplest; AMFA stays source of truth; can add cache layer later if AMFA load becomes a concern                                                                                                                                                                                                                                        |
 
 
 ## 4. Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  POINT Monitoring Web (React)                                    │
+│  Keycloak Monitoring Tool Web (React)                                    │
 │  features/amfa/  ── new isolated feature folder                  │
 │    pages/AmfaEventsPage.tsx                                      │
 │    components/  AmfaKpiRow, AmfaEventsTable, AmfaGeoMap, ...     │
@@ -61,7 +61,7 @@ The page must be tenant-scoped (so per-customer admins see only their data), gat
                               │  GET /api/tenants/{id}/amfa/geo
                               ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  POINT Monitoring API (Go, Chi)                                  │
+│  Keycloak Monitoring Tool API (Go, Chi)                                  │
 │                                                                  │
 │  internal/http/chi/amfa_handlers.go                              │
 │    handlers gated by validateTenant + RequireTenantAccess +      │
@@ -85,12 +85,12 @@ The page must be tenant-scoped (so per-customer admins see only their data), gat
 └──────┬─────────────────────────────────────────┬─────────────────┘
        │                                         │
        │ Read-only Postgres                      │ Keycloak Admin API
-       │ ONE connection per POINT tenant         │ (user enrichment, cached)
+       │ ONE connection per KMT tenant         │ (user enrichment, cached)
        │ Dispatched at request time              │ Per-tenant credentials
        ▼                                         ▼
 ┌──────────────────────────────────┐    ┌─────────────────────────┐
 │  AMFA PostgreSQL                 │    │  Keycloak (per tenant)  │
-│  ONE INSTANCE PER POINT TENANT   │    │  /admin/realms/{r}/users│
+│  ONE INSTANCE PER KMT TENANT   │    │  /admin/realms/{r}/users│
 │  Connected via tenant-specific   │    │  via existing           │
 │  read-only role                  │    │  keycloakadmin package  │
 │                                  │    └─────────────────────────┘
@@ -141,7 +141,7 @@ type AmfaDatabaseConfig struct {
 }
 ```
 
-`config.yaml.example` documents the new per-tenant `amfa:` block. Env-var overrides follow POINT's existing per-tenant Keycloak env-var pattern, so secrets like the AMFA DB password stay outside YAML.
+`config.yaml.example` documents the new per-tenant `amfa:` block. Env-var overrides follow KMT's existing per-tenant Keycloak env-var pattern, so secrets like the AMFA DB password stay outside YAML.
 
 ### 5.2 New `amfa/` root package
 
@@ -312,7 +312,7 @@ Outcomes:
 - Drift → WARN; service continues. UI shows an admin-visible banner via a `/amfa/health` endpoint (small follow-up).
 - Read error → WARN; treated as "could not verify."
 
-Never fatal — POINT always boots.
+Never fatal — KMT always boots.
 
 ### 5.6 Service layer
 
@@ -415,8 +415,8 @@ export interface AmfaEvent {
   event_time: string;                           // ISO 8601
   event_type: "LOGIN" | "LOGIN_ERROR" | "CLIENT_LOGIN" | "CLIENT_LOGIN_ERROR";
   user_id: string | null;
-  username: string | null;                      // enriched by POINT
-  email: string | null;                         // enriched by POINT
+  username: string | null;                      // enriched by KMT
+  email: string | null;                         // enriched by KMT
   client: string;
   ip_address: string;
   country: string | null;
@@ -632,7 +632,7 @@ JSON response → React Query → MaterialReactTable / KPI cards / Leaflet
 | Failure point                                   | Behavior                                                                                                            | User sees                                                                                 |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | Tenant has no `amfa:` block in config           | Handler returns 404 `{error: "amfa_not_configured"}`                                                                | Empty-state: "AMFA Events is not configured for this tenant. Contact your administrator." |
-| AMFA DB unreachable at startup (for one tenant) | POINT still boots; that tenant's AMFA registry entry is absent; its endpoints return 503. Other tenants unaffected. | KPIs `—`; table empty state "AMFA data source unavailable"; map empty                     |
+| AMFA DB unreachable at startup (for one tenant) | KMT still boots; that tenant's AMFA registry entry is absent; its endpoints return 503. Other tenants unaffected. | KPIs `—`; table empty state "AMFA data source unavailable"; map empty                     |
 | AMFA DB unreachable mid-request                 | Handler returns 503 `{error: "amfa_unavailable"}`                                                                   | Toast + React Query retry on next 30 s tick                                               |
 | Schema-version drift                            | Boots; WARN log; admin-visible banner                                                                               | "AMFA schema may have changed" banner; page still works for known fields                  |
 | Keycloak admin call fails                       | WARN log; fall back to UUID only                                                                                    | UUID with "(?)" hint; rest of row renders                                                 |
@@ -660,29 +660,29 @@ Knobs to turn if missed:
   CREATE INDEX IF NOT EXISTS idx_auth_process_realm_id
       ON auth_process ((auth_context_json->>'realm_id'));
   ```
-- Move POINT to AMFA's read replica.
-- Add a short-TTL cache layer in POINT (deferred until needed).
+- Move KMT to AMFA's read replica.
+- Add a short-TTL cache layer in KMT (deferred until needed).
 
 ## 10. Deployment
 
 ### 10.1 One-time setup on **each** AMFA's PostgreSQL (run by DBA, once per AMFA instance)
 
 ```sql
--- Run on every AMFA database that POINT will read from.
--- Each POINT tenant has its own AMFA, so this is run N times for N tenants.
-CREATE USER point_monitoring_ro WITH PASSWORD '<strong-pw>';
-GRANT CONNECT ON DATABASE adaptive_mfa TO point_monitoring_ro;
-GRANT USAGE ON SCHEMA public TO point_monitoring_ro;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO point_monitoring_ro;
+-- Run on every AMFA database that KMT will read from.
+-- Each KMT tenant has its own AMFA, so this is run N times for N tenants.
+CREATE USER kmt_ro WITH PASSWORD '<strong-pw>';
+GRANT CONNECT ON DATABASE adaptive_mfa TO kmt_ro;
+GRANT USAGE ON SCHEMA public TO kmt_ro;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO kmt_ro;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT ON TABLES TO point_monitoring_ro;
+    GRANT SELECT ON TABLES TO kmt_ro;
 
 -- Recommended for query performance:
 CREATE INDEX IF NOT EXISTS idx_auth_process_realm_id
     ON auth_process ((auth_context_json->>'realm_id'));
 ```
 
-### 10.2 POINT Monitoring per-tenant config
+### 10.2 Keycloak Monitoring Tool per-tenant config
 
 AMFA is configured per-tenant inside the existing `keycloak.tenants` section. Example for two tenants — one with AMFA, one without:
 
@@ -702,7 +702,7 @@ keycloak:
           host: amfa-prod.internal
           port: 5432
           database: adaptive_mfa
-          user: point_monitoring_ro
+          user: kmt_ro
           password: "${PROD_AMFA_DB_PASSWORD}"
           sslmode: require
           read_replica_host: amfa-prod-replica.internal   # optional
@@ -713,11 +713,11 @@ keycloak:
       # no amfa: block → AMFA Events page returns "not configured" for this tenant
 ```
 
-Secrets (DB passwords) come from env vars using POINT's existing per-tenant override pattern. AMFA-related env vars only — no existing env-var conventions are changed.
+Secrets (DB passwords) come from env vars using KMT's existing per-tenant override pattern. AMFA-related env vars only — no existing env-var conventions are changed.
 
 ### 10.3 Verification
 
-Expected POINT startup log lines:
+Expected KMT startup log lines:
 
 ```
 [INFO] AMFA enabled for 1 tenant(s)
@@ -734,11 +734,11 @@ If a tenant has `amfa.enabled: true` but its AMFA is unreachable:
 
 ### 10.4 Rollback (per tenant)
 
-To disable for a single tenant, set its `amfa.enabled: false`, restart POINT. Other tenants keep working. To fully disable, remove or set `enabled: false` on every tenant's `amfa:` block. AMFA itself is never touched, so there's nothing to roll back on the AMFA side. Each AMFA's read-only DB role can stay or be revoked at leisure.
+To disable for a single tenant, set its `amfa.enabled: false`, restart KMT. Other tenants keep working. To fully disable, remove or set `enabled: false` on every tenant's `amfa:` block. AMFA itself is never touched, so there's nothing to roll back on the AMFA side. Each AMFA's read-only DB role can stay or be revoked at leisure.
 
 ### 10.5 Feature flag
 
-`amfa.enabled` defaults to `false` per tenant. Tenants without an `amfa:` block are equivalent to disabled. Standard "enabled per tenant per environment" pattern, consistent with how POINT already gates other per-tenant features.
+`amfa.enabled` defaults to `false` per tenant. Tenants without an `amfa:` block are equivalent to disabled. Standard "enabled per tenant per environment" pattern, consistent with how KMT already gates other per-tenant features.
 
 ## 11. Testing strategy
 
@@ -760,7 +760,7 @@ To disable for a single tenant, set its `amfa.enabled: false`, restart POINT. Ot
 
 ## 12. Files changed (summary)
 
-**New (POINT Monitoring):**
+**New (Keycloak Monitoring Tool):**
 
 ```
 amfa/
@@ -803,7 +803,7 @@ web/src/features/amfa/
   index.ts
 ```
 
-**Modified (POINT Monitoring, additive only — no existing logic changes):**
+**Modified (Keycloak Monitoring Tool, additive only — no existing logic changes):**
 
 ```
 internal/config/models.go              + optional Amfa *AmfaTenantConfig field on
@@ -829,15 +829,15 @@ docs/architecture.md                   + new section describing AMFA module
 **Not modified (zero changes):**
 
 - AMFA codebase: zero.
-- Existing POINT logic for auth, tenants, events, alerts, keycloak monitoring, RBAC enforcement: zero behavior changes.
+- Existing KMT logic for auth, tenants, events, alerts, keycloak monitoring, RBAC enforcement: zero behavior changes.
 - Existing tenant configurations (without an `amfa:` block) continue to work exactly as before.
 
 ## 13. Open items / known follow-ups
 
 - Sidebar permission filtering (cosmetic — hide "AMFA Events" when permission missing). Optional.
-- Cache layer between POINT and AMFA's DB (only if performance becomes an issue).
-- AMFA write actions from POINT (e.g., "block this IP") — explicit follow-up feature.
-- **Automatic POINT alerts from high-risk AMFA events** — wire AMFA events with `risk_level >= 3` (or repeated `LOGIN_ERROR` patterns) into POINT's existing `alerts/` package so they flow through the standard alert lifecycle (Slack / Email / GitLab notifications, ack/resolve workflow). This MVP surfaces risky events in the dashboard only; alert generation is a clean follow-up that builds on the existing notification infrastructure.
+- Cache layer between KMT and AMFA's DB (only if performance becomes an issue).
+- AMFA write actions from KMT (e.g., "block this IP") — explicit follow-up feature.
+- **Automatic KMT alerts from high-risk AMFA events** — wire AMFA events with `risk_level >= 3` (or repeated `LOGIN_ERROR` patterns) into KMT's existing `alerts/` package so they flow through the standard alert lifecycle (Slack / Email / GitLab notifications, ack/resolve workflow). This MVP surfaces risky events in the dashboard only; alert generation is a clean follow-up that builds on the existing notification infrastructure.
 - Real-time updates via SSE — only if 30 s polling proves insufficient.
 
 ## 14. Risks acknowledged
@@ -845,10 +845,10 @@ docs/architecture.md                   + new section describing AMFA module
 
 | Risk                                                                                                          | Mitigation in this design                                                                                                                                                                                                                                      |
 | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| AMFA renames columns / restructures tables                                                                    | Per-tenant schema-version check at startup logs immediate WARN; read-only role prevents accidental writes; spec mandates POINT CI runs against expected AMFA schema                                                                                            |
+| AMFA renames columns / restructures tables                                                                    | Per-tenant schema-version check at startup logs immediate WARN; read-only role prevents accidental writes; spec mandates KMT CI runs against expected AMFA schema                                                                                            |
 | AMFA changes the JSON key name in `auth_context_json` (e.g. `realm_id` → `realmId`) — silently returns 0 rows | Known risk introduced by DB-direct integration. Documented as future improvement; alembic version check catches DDL but not JSON-shape changes. A stricter probe could be added (`SELECT auth_context_json->>'realm_id' FROM auth_process LIMIT 1`) if needed. |
-| Heavy POINT queries impact AMFA's live `/decision` latency                                                    | Per-tenant `read_replica_host` config option; recommended `idx_auth_process_realm_id` functional index on each AMFA's database                                                                                                                                 |
-| Persistent DB credentials per tenant in POINT config                                                          | Per-tenant least-privilege read-only role; rotatable per tenant without coordinating with AMFA                                                                                                                                                                 |
+| Heavy KMT queries impact AMFA's live `/decision` latency                                                    | Per-tenant `read_replica_host` config option; recommended `idx_auth_process_realm_id` functional index on each AMFA's database                                                                                                                                 |
+| Persistent DB credentials per tenant in KMT config                                                          | Per-tenant least-privilege read-only role; rotatable per tenant without coordinating with AMFA                                                                                                                                                                 |
 | User UUID lookup hammering Keycloak                                                                           | TTL cache + per-page dedup + negative caching of 404s                                                                                                                                                                                                          |
 | Historical AMFA rows without `realm_id` in JSON                                                               | Documented limitation; counts may be lower than raw event count                                                                                                                                                                                                |
 | One tenant's AMFA being down affects only that tenant                                                         | Registry isolates per-tenant connections; failures in one tenant's AMFA never affect others                                                                                                                                                                    |

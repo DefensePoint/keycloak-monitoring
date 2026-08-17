@@ -4,7 +4,7 @@ package postgres
 //
 // AMFA has a denormalized auth_context table, but the adaptive-auth service
 // never writes rows to it: its AuthContextService only computes and returns a
-// hash. The values POINT displays therefore have to fall back to the
+// hash. The values KMT displays therefore have to fall back to the
 // auth_context_json snapshot that auth_process always carries.
 //
 // These expressions exist so every query applies that fallback identically.

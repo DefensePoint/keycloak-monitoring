@@ -1,6 +1,6 @@
 # Keycloak Setup Guide
 
-This guide explains how to configure Keycloak for monitoring with the Point Monitoring Platform.
+This guide explains how to configure Keycloak for monitoring with the Keycloak Monitoring Tool.
 
 ## Table of Contents
 
@@ -18,7 +18,7 @@ This guide explains how to configure Keycloak for monitoring with the Point Moni
 
 ## Overview
 
-The Point Monitoring Platform monitors Keycloak by:
+The Keycloak Monitoring Tool monitors Keycloak by:
 
 1. Connecting to the Keycloak Admin API
 2. Collecting metrics (users, clients, sessions)

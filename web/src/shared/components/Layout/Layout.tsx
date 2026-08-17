@@ -123,7 +123,7 @@ export function Layout({ children }: LayoutProps) {
                 color="text.primary"
                 sx={{ fontWeight: 700, letterSpacing: "-0.02em" }}
               >
-                POINT
+                KMT
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 Monitoring Platform

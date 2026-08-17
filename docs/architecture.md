@@ -1,10 +1,10 @@
 # Architecture Guide
 
-This document describes the system architecture, design decisions, and component interactions of the Point Monitoring Platform.
+This document describes the system architecture, design decisions, and component interactions of the Keycloak Monitoring Tool.
 
 ## Overview
 
-The Point Monitoring Platform is a distributed monitoring system designed to collect, store, and visualize metrics and events from Keycloak identity management systems. It follows a clean architecture approach with clear separation of concerns and dependency injection.
+The Keycloak Monitoring Tool is a distributed monitoring system designed to collect, store, and visualize metrics and events from Keycloak identity management systems. It follows a clean architecture approach with clear separation of concerns and dependency injection.
 
 ### Key Design Goals
 
@@ -1455,24 +1455,24 @@ CREATE INDEX idx_operator_actions_alert ON operator_alert_actions(alert_id);
 
 ### 22. AMFA Module (`amfa/`)
 
-**Purpose:** Read-only access to per-tenant AMFA (Adaptive Multi-Factor Authentication) PostgreSQL databases, surfacing AMFA login events, risk metrics, and geolocation in the POINT monitoring dashboard.
+**Purpose:** Read-only access to per-tenant AMFA (Adaptive Multi-Factor Authentication) PostgreSQL databases, surfacing AMFA login events, risk metrics, and geolocation in the KMT monitoring dashboard.
 
-**Deployment model:** One AMFA service per Keycloak instance, owned by the same POINT tenant. POINT opens one read-only DB connection per tenant whose `amfa.enabled` is `true`. 
+**Deployment model:** One AMFA service per Keycloak instance, owned by the same KMT tenant. KMT opens one read-only DB connection per tenant whose `amfa.enabled` is `true`. 
 
 **Components:**
 
 - `amfa.Registry` — per-tenant `Repository` registry built at startup by iterating `cfg.Keycloak.Tenants`. Tenants without `amfa.enabled = true` are absent; lookups for them return `ErrAmfaNotConfigured`.
-- `amfa/postgres/` — read-only GORM client + repository. Uses the `gorm:"->"` read-only tag plus a dedicated least-privilege Postgres role (`point_monitoring_ro`); `AutoMigrate` is never called on this connection. Per-tenant `EventsLookbackDays` (config) drives the default query window via `NewRepositoryWithLookback`; capped at 90 days regardless.
+- `amfa/postgres/` — read-only GORM client + repository. Uses the `gorm:"->"` read-only tag plus a dedicated least-privilege Postgres role (`kmt_ro`); `AutoMigrate` is never called on this connection. Per-tenant `EventsLookbackDays` (config) drives the default query window via `NewRepositoryWithLookback`; capped at 90 days regardless.
 - `amfa/postgres/errors.go` — translates low-level driver / pgconn / network errors into `amfa.ErrAmfaUnavailable` so DB outages surface as HTTP 503 rather than 500. Query/syntax errors continue to bubble up as 500.
-- `amfa/postgres/schema_check.go` — non-fatal `alembic_version` check at startup, with its own 5s deadline so a hung AMFA DB can never block POINT's monitoring boot. Logs WARN on drift, never returns a fatal error.
+- `amfa/postgres/schema_check.go` — non-fatal `alembic_version` check at startup, with its own 5s deadline so a hung AMFA DB can never block KMT's monitoring boot. Logs WARN on drift, never returns a fatal error.
 - `amfa.Enrichment` — Keycloak user-lookup cache backed by `hashicorp/golang-lru/v2` (bounded at 50k entries by default; capacity is configurable). 5-minute success TTL, 30-second negative TTL. Concurrent lookups for the same `(tenant, realm, user)` coalesce through `golang.org/x/sync/singleflight` so a cold cache or TTL boundary doesn't produce a thundering herd against Keycloak. Cache keys are typed structs (no delimiter collisions).
 - `amfa.Service` — orchestrates `Registry` + `Enrichment` behind the `Service` interface.
 - `internal/http/chi/amfa_handlers.go` — HTTP layer under `/api/tenants/{id}/amfa/{events,stats,geo}`, gated by `auth` → `RequireTenantAccess` → `RequirePermission("amfa:read")`. Input validation rejects malformed RFC3339 timestamps, inverted time ranges, and oversized offsets (`> 50_000`) with 400; `ErrAmfaUnavailable` from the data layer produces 503.
 - `internal/fx/amfa.go` — fx module wiring the above; if no tenants enable AMFA, the registry is empty and all `/amfa/*` endpoints return 404 cleanly. The monitor-pool type-assertion logs a per-tenant WARN if a future Keycloak-client wrapper breaks the cast (regression guard).
 
-**Permissions:** A new `amfa:read` permission is added by an idempotent data migration on POINT startup, granted to the default `admin`, `operator`, and `viewer` roles.
+**Permissions:** A new `amfa:read` permission is added by an idempotent data migration on KMT startup, granted to the default `admin`, `operator`, and `viewer` roles.
 
-**Existing AMFA codebase is not modified.** All integration is purely additive on the POINT monitoring side; the only AMFA-side change is the operator-run `CREATE USER ... GRANT SELECT` block documented in `docs/amfa-integration.md`.
+**Existing AMFA codebase is not modified.** All integration is purely additive on the KMT monitoring side; the only AMFA-side change is the operator-run `CREATE USER ... GRANT SELECT` block documented in `docs/amfa-integration.md`.
 
 **Risk-alert checker (`amfacheck/`):** A per-tenant poll loop, sibling to `eventscheck/`, that turns high-risk AMFA login events into `domain.Alert`s routed through the existing alerts and notifications infrastructure (same lifecycle and notification fan-out as the Keycloak event checker). It reads AMFA's database through additive `amfa.Repository` methods, never modifying the AMFA schema. The package is deliberately kept parallel to `eventscheck/` rather than refactored behind a shared abstraction; see the design spec for the rationale. The checker is gated by the `keycloak.global.amfa_checker` config block (master switch off by default) and is documented operationally in `docs/amfa-integration.md`.
 

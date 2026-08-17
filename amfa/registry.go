@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-// Registry holds one Repository per POINT tenant. Lookups are O(1) and
+// Registry holds one Repository per KMT tenant. Lookups are O(1) and
 // concurrent-safe. Tenants without AMFA configured are simply absent.
 type Registry struct {
 	mu    sync.RWMutex

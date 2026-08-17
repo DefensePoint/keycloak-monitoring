@@ -1,6 +1,6 @@
 # Local Setup
 
-How this machine is configured to run Point Monitoring Platform against the
+How this machine is configured to run Keycloak Monitoring Tool against the
 existing `keycloak-deployment` stack (RHBK 26.4 on host `:8080`).
 
 ## Prerequisites
@@ -13,7 +13,7 @@ existing `keycloak-deployment` stack (RHBK 26.4 on host `:8080`).
 - `**.env**` holds the dashboard admin bootstrap credentials.
 - `**config.yaml**` has one tenant `local-kc` pointing at the host's Keycloak via `host.docker.internal:8080/auth`.
 - `**deployments/local/docker-compose.yml**` has two local deviations from the committed defaults:
-  - `point-monitoring-postgres` publishes `5433:5432` (avoids clash with `keycloak-deployment-postgres-1` on `:5432`).
+  - `kmt-postgres` publishes `5433:5432` (avoids clash with `keycloak-deployment-postgres-1` on `:5432`).
   - The bundled `keycloak-1`, `keycloak-2`, and their DBs are under the `bundled-kc` Compose profile, so they are skipped by default.
 
 ## Run
@@ -30,13 +30,13 @@ make docker-build-web && make docker-down && make docker-up # to build and resta
 ## Verify
 
 ```bash
-docker ps --filter name=point-monitoring
-# expect: point-monitoring-postgres (healthy), point-monitoring-server, point-monitoring-web
+docker ps --filter name=kmt
+# expect: kmt-postgres (healthy), kmt-server, kmt-web
 
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:7888/health   # 200
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:7880/          # 200
 
-docker logs point-monitoring-server | grep -E "Keycloak client initialized|Health check completed" | head -3
+docker logs kmt-server | grep -E "Keycloak client initialized|Health check completed" | head -3
 ```
 
 You should see realms `master`, `AdaptiveAuth`, `SSOIdP`, `ExtensionTest` being polled and events being saved.
@@ -56,7 +56,7 @@ You should see realms `master`, `AdaptiveAuth`, `SSOIdP`, `ExtensionTest` being 
 
 ```bash
 make docker-logs                              # tail all services
-docker logs -f point-monitoring-server        # tail just the API server
+docker logs -f kmt-server        # tail just the API server
 make docker-down                              # stop the platform
 make docker-rebuild                           # build + restart after code changes
 make docker-clean                             # stop AND wipe the postgres volume (resets all data)

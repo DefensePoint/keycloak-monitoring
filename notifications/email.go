@@ -86,7 +86,7 @@ func (e *EmailNotifier) buildSubject(alert *domain.Alert) string {
 	}
 
 	// Default subject format
-	return fmt.Sprintf("[%s] Point Monitoring Alert: %s - %s",
+	return fmt.Sprintf("[%s] Keycloak Monitoring Tool Alert: %s - %s",
 		strings.ToUpper(alert.Severity.String()),
 		alert.Title,
 		alert.ResourceName)
@@ -226,7 +226,7 @@ const emailTemplate = `<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Point Monitoring Alert</title>
+    <title>Keycloak Monitoring Tool Alert</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -362,8 +362,8 @@ const emailTemplate = `<!DOCTYPE html>
             </div>
         </div>
         <div class="footer">
-            <p>This is an automated alert from Point Monitoring Platform</p>
-            <p>&copy; {{.Year}} Point Monitoring Platform. All rights reserved.</p>
+            <p>This is an automated alert from Keycloak Monitoring Tool</p>
+            <p>&copy; {{.Year}} Keycloak Monitoring Tool. All rights reserved.</p>
         </div>
     </div>
 </body>

@@ -24,14 +24,14 @@ var testTenantIDs = []string{
 
 // newTenantMigrationTestClient opens a postgres-backed client with the
 // keycloak_tenants table migrated, following the same opt-in convention as
-// newTestClient: the DSN comes from POINT_TEST_DATABASE_DSN and the test is
+// newTestClient: the DSN comes from KMT_TEST_DATABASE_DSN and the test is
 // skipped when it isn't set.
 func newTenantMigrationTestClient(t *testing.T) *Client {
 	t.Helper()
 
-	dsn := os.Getenv("POINT_TEST_DATABASE_DSN")
+	dsn := os.Getenv("KMT_TEST_DATABASE_DSN")
 	if dsn == "" {
-		t.Skip("POINT_TEST_DATABASE_DSN not set; skipping integration test")
+		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
 	}
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{

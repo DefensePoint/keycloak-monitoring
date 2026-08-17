@@ -2,16 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add an AMFA Events section to POINT Monitoring Platform with KPI metrics, paginated event logs, and a geolocation map. Tenant-scoped, RBAC-gated, one AMFA per Keycloak instance.
+**Goal:** Add an AMFA Events section to Keycloak Monitoring Tool with KPI metrics, paginated event logs, and a geolocation map. Tenant-scoped, RBAC-gated, one AMFA per Keycloak instance.
 
-**Architecture:** New Go package `amfa/` reads AMFA's Postgres directly via a per-tenant connection registry (one tenant = one AMFA). HTTP handlers under `/api/tenants/{id}/amfa/*`. New React feature folder `features/amfa/` using existing shared components. New `amfa:read` RBAC permission. Zero AMFA-codebase changes; all POINT-side changes are additive to existing files.
+**Architecture:** New Go package `amfa/` reads AMFA's Postgres directly via a per-tenant connection registry (one tenant = one AMFA). HTTP handlers under `/api/tenants/{id}/amfa/*`. New React feature folder `features/amfa/` using existing shared components. New `amfa:read` RBAC permission. Zero AMFA-codebase changes; all KMT-side changes are additive to existing files.
 
 **Tech Stack:** Go 1.23 (Chi router, Uber Fx DI, GORM); React 18 + TS + MUI + TanStack Query + Material React Table; react-leaflet + leaflet.markercluster + CartoDB Dark Matter tiles; PostgreSQL/TimescaleDB.
 
 **Reference spec:** `docs/superpowers/specs/2026-05-26-amfa-events-design.md` — read it before starting.
 
 **Important constraints to keep:**
-- Don't modify pre-existing logic. Only additive changes to existing POINT files (new field, new entry, new line).
+- Don't modify pre-existing logic. Only additive changes to existing KMT files (new field, new entry, new line).
 - AMFA codebase: zero changes.
 - Use existing patterns: see `internal/http/chi/system_handlers.go` for handler shape, `features/events/` for frontend shape, `pkg/keycloakadmin` for Keycloak client patterns.
 
@@ -58,7 +58,7 @@ amfa:
     host: "amfa.internal"
     port: 5432
     database: "adaptive_mfa"
-    user: "point_monitoring_ro"
+    user: "kmt_ro"
     password: "pw"
     sslmode: "require"
 `
@@ -1047,7 +1047,7 @@ import (
 
 // CheckAmfaSchema reads AMFA's alembic_version table and logs a warning if it
 // differs from the expected version this build was tested against. Never fatal:
-// schema drift logs a WARN and returns nil so POINT continues to boot.
+// schema drift logs a WARN and returns nil so KMT continues to boot.
 func CheckAmfaSchema(db *gorm.DB, expected string, log *logger.Logger) error {
     if expected == "" {
         log.Debug("AMFA expected_schema_version not set; skipping schema check")
@@ -1060,7 +1060,7 @@ func CheckAmfaSchema(db *gorm.DB, expected string, log *logger.Logger) error {
         return nil
     }
     if actual != expected {
-        log.Warn("AMFA schema version drift detected — POINT may need updating",
+        log.Warn("AMFA schema version drift detected — KMT may need updating",
             logger.Str("expected", expected),
             logger.Str("actual", actual))
         return nil
@@ -1574,7 +1574,7 @@ import (
     "sync"
 )
 
-// Registry holds one Repository per POINT tenant. Lookups are O(1) and
+// Registry holds one Repository per KMT tenant. Lookups are O(1) and
 // concurrent-safe. Tenants without AMFA configured are simply absent.
 type Registry struct {
     mu   sync.RWMutex
@@ -1732,13 +1732,13 @@ import (
 // ErrKeycloakUserNotFound mirrors a 404 from Keycloak's admin API.
 var ErrKeycloakUserNotFound = errors.New("amfa enrichment: keycloak user not found")
 
-// KeycloakUser is the minimal projection of a Keycloak user POINT needs for display.
+// KeycloakUser is the minimal projection of a Keycloak user KMT needs for display.
 type KeycloakUser struct {
     Username *string
     Email    *string
 }
 
-// KeycloakClient is the small interface Enrichment depends on. POINT's existing
+// KeycloakClient is the small interface Enrichment depends on. KMT's existing
 // pkg/keycloakadmin client should be wrapped to satisfy this.
 type KeycloakClient interface {
     GetUser(ctx context.Context, tenantID, realm, userID string) (*KeycloakUser, error)
@@ -2312,7 +2312,7 @@ git commit -m "feat(amfa): HTTP handlers under /api/tenants/{id}/amfa/*"
 **Files:**
 - Create: `amfa/keycloak_adapter.go`
 
-This adapts POINT's existing `pkg/keycloakadmin` client to the `amfa.KeycloakClient` interface defined in Task 14.
+This adapts KMT's existing `pkg/keycloakadmin` client to the `amfa.KeycloakClient` interface defined in Task 14.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2363,7 +2363,7 @@ Expected: FAIL — adapter undefined.
 
 - [ ] **Step 3: Implement adapter**
 
-Create `amfa/keycloak_adapter.go`. The exact method name on POINT's `pkg/keycloakadmin` client must be matched — confirm by reading that package; common names are `GetUserByID` or `GetUser`. Pseudocode:
+Create `amfa/keycloak_adapter.go`. The exact method name on KMT's `pkg/keycloakadmin` client must be matched — confirm by reading that package; common names are `GetUserByID` or `GetUser`. Pseudocode:
 
 ```go
 package amfa
@@ -2373,12 +2373,12 @@ import (
     "errors"
 )
 
-// ErrKeycloakAdminNotFound is the sentinel returned by POINT's keycloak admin
+// ErrKeycloakAdminNotFound is the sentinel returned by KMT's keycloak admin
 // client for 404 responses. If a different sentinel exists in pkg/keycloakadmin,
 // use that one in errors.Is comparisons.
 var ErrKeycloakAdminNotFound = errors.New("keycloak admin: user not found")
 
-// keycloakAdmin is the minimal interface this adapter needs from POINT's
+// keycloakAdmin is the minimal interface this adapter needs from KMT's
 // pkg/keycloakadmin. Adjust the method signature to match the real one.
 type keycloakAdmin interface {
     GetUserByID(ctx context.Context, tenantID, realm, userID string) (interface{}, error)
@@ -2572,7 +2572,7 @@ func logAmfaStartup(reg *amfa.Registry, log *logger.Logger) {
 }
 ```
 
-**Note for implementer:** The exact constructor pattern for handlers and the exact `keycloakadmin.Client` type may differ from above; the implementer should align it to POINT's existing `internal/fx/handlers.go` and `pkg/keycloakadmin` shape. The principle — build the registry by iterating tenant configs, skip those without AMFA, log failures non-fatally — is what matters.
+**Note for implementer:** The exact constructor pattern for handlers and the exact `keycloakadmin.Client` type may differ from above; the implementer should align it to KMT's existing `internal/fx/handlers.go` and `pkg/keycloakadmin` shape. The principle — build the registry by iterating tenant configs, skip those without AMFA, log failures non-fatally — is what matters.
 
 - [ ] **Step 4: Run test — passes**
 
@@ -2646,7 +2646,7 @@ keycloak:
       #     host: amfa.internal
       #     port: 5432
       #     database: adaptive_mfa
-      #     user: point_monitoring_ro
+      #     user: kmt_ro
       #     password: ${AMFA_DB_PASSWORD}
       #     sslmode: require
       #     max_conns: 5
@@ -3883,7 +3883,7 @@ Create `web/src/features/amfa/claude.md`:
 # Feature: AMFA Events
 
 ## Domain
-Adaptive MFA (AMFA) login event logs, risk metrics, and geolocation. Sourced from a per-tenant AMFA PostgreSQL database via POINT's backend.
+Adaptive MFA (AMFA) login event logs, risk metrics, and geolocation. Sourced from a per-tenant AMFA PostgreSQL database via KMT's backend.
 
 ## Responsibilities
 - KPI display (Total, Risky 3+, Unique Users 24h, Flagged IPs)
@@ -3959,31 +3959,31 @@ Create `docs/amfa-integration.md` with:
 ```markdown
 # AMFA Integration Guide
 
-POINT Monitoring's AMFA Events feature reads from each tenant's AMFA PostgreSQL database. This guide walks through enabling it.
+Keycloak Monitoring Tool's AMFA Events feature reads from each tenant's AMFA PostgreSQL database. This guide walks through enabling it.
 
 ## Prerequisites
-- One AMFA service per POINT tenant (one AMFA per Keycloak instance).
-- Network reachability from POINT to each AMFA's PostgreSQL.
+- One AMFA service per KMT tenant (one AMFA per Keycloak instance).
+- Network reachability from KMT to each AMFA's PostgreSQL.
 - Optionally a read replica per AMFA DB (recommended in production).
 
 ## One-time DBA work per AMFA database
 
-Run on every AMFA PostgreSQL the operator wants POINT to read from:
+Run on every AMFA PostgreSQL the operator wants KMT to read from:
 
 \`\`\`sql
-CREATE USER point_monitoring_ro WITH PASSWORD '<strong-password>';
-GRANT CONNECT ON DATABASE adaptive_mfa TO point_monitoring_ro;
-GRANT USAGE ON SCHEMA public TO point_monitoring_ro;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO point_monitoring_ro;
+CREATE USER kmt_ro WITH PASSWORD '<strong-password>';
+GRANT CONNECT ON DATABASE adaptive_mfa TO kmt_ro;
+GRANT USAGE ON SCHEMA public TO kmt_ro;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO kmt_ro;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT ON TABLES TO point_monitoring_ro;
+    GRANT SELECT ON TABLES TO kmt_ro;
 
 -- Recommended for query performance:
 CREATE INDEX IF NOT EXISTS idx_auth_process_realm_id
     ON auth_process ((auth_context_json->>'realm_id'));
 \`\`\`
 
-## POINT config (per tenant)
+## KMT config (per tenant)
 
 Add an `amfa:` block under the tenant in `config.yaml`:
 
@@ -4000,18 +4000,18 @@ keycloak:
           host: amfa-prod.internal
           port: 5432
           database: adaptive_mfa
-          user: point_monitoring_ro
+          user: kmt_ro
           password: ${PROD_AMFA_DB_PASSWORD}
           sslmode: require
           read_replica_host: amfa-prod-replica.internal  # optional
 \`\`\`
 
 ## RBAC
-The `amfa:read` permission is granted to the default `admin`, `operator`, and `viewer` roles by an idempotent migration on POINT startup. Custom roles must be granted explicitly.
+The `amfa:read` permission is granted to the default `admin`, `operator`, and `viewer` roles by an idempotent migration on KMT startup. Custom roles must be granted explicitly.
 
 ## Verification
 
-Look for these log lines on POINT startup:
+Look for these log lines on KMT startup:
 \`\`\`
 [INFO] AMFA registered for tenant: tenant_id=prod-keycloak
 [INFO] AMFA schema version matches: tenant=prod-keycloak version=c00d6d7d197c
@@ -4023,11 +4023,11 @@ Then open the AMFA Events page in the dashboard.
 ## Troubleshooting
 
 - **`amfa_not_configured` 404 on a tenant page** — that tenant has no `amfa:` block or has `enabled: false`.
-- **All AMFA endpoints return 503** — POINT failed to connect to AMFA's DB at startup. Check `host`, `port`, and that the `point_monitoring_ro` role exists with the right password.
-- **`AMFA schema version drift detected` WARN** — AMFA's schema has moved past the version POINT was built against. Test before bumping `expected_schema_version` in config.
+- **All AMFA endpoints return 503** — KMT failed to connect to AMFA's DB at startup. Check `host`, `port`, and that the `kmt_ro` role exists with the right password.
+- **`AMFA schema version drift detected` WARN** — AMFA's schema has moved past the version KMT was built against. Test before bumping `expected_schema_version` in config.
 
 ## Rollback
-Set `amfa.enabled: false` for a tenant and restart POINT. Other tenants and POINT itself are unaffected. The read-only role on AMFA's DB can be revoked at leisure.
+Set `amfa.enabled: false` for a tenant and restart KMT. Other tenants and KMT itself are unaffected. The read-only role on AMFA's DB can be revoked at leisure.
 ```
 
 - [ ] **Step 2: Commit**
@@ -4054,13 +4054,13 @@ Append a new subsection to `docs/architecture.md`:
 **Purpose:** Read-only access to per-tenant AMFA (Adaptive MFA) databases for the AMFA Events feature.
 
 **Components:**
-- `amfa.Registry` — per-tenant GORM connection registry (1:1 with POINT tenants that have AMFA enabled).
+- `amfa.Registry` — per-tenant GORM connection registry (1:1 with KMT tenants that have AMFA enabled).
 - `amfa.Enrichment` — Keycloak user-lookup cache (5 min TTL, 30 s negative cache).
 - `amfa.Service` — orchestrates registry lookup + enrichment.
 - `amfa/postgres/` — GORM repository against AMFA's existing tables (read-only by both ORM tag and DB role).
 - `internal/http/chi/amfa_handlers.go` — HTTP layer under `/api/tenants/{id}/amfa/*`.
 
-**Key design:** one AMFA per Keycloak/POINT tenant; never modifies AMFA. See `docs/amfa-integration.md` for setup.
+**Key design:** one AMFA per Keycloak/KMT tenant; never modifies AMFA. See `docs/amfa-integration.md` for setup.
 ```
 
 - [ ] **Step 2: Commit**
@@ -4093,11 +4093,11 @@ psql -h localhost -p 5455 -U keycloak -d adaptive_mfa
 
 Run the SQL block from `docs/amfa-integration.md` (CREATE USER etc.). Use AMFA's webhook endpoint to seed a few events with a known realm.
 
-- [ ] **Step 3: Configure POINT for that tenant**
+- [ ] **Step 3: Configure KMT for that tenant**
 
 Add an `amfa:` block to the `prod-keycloak` tenant in `config.yaml` pointing at `localhost:5455` with the new role's credentials.
 
-- [ ] **Step 4: Bring up POINT**
+- [ ] **Step 4: Bring up KMT**
 
 ```bash
 make docker-up
@@ -4112,7 +4112,7 @@ Open `http://localhost:7880/prod-keycloak/amfa-events`, log in. Verify:
 
 - [ ] **Step 6: Verify rollback**
 
-Set `amfa.enabled: false` in the tenant's `amfa:` block. Restart POINT. Confirm the page returns `amfa_not_configured` (404 → empty-state).
+Set `amfa.enabled: false` in the tenant's `amfa:` block. Restart KMT. Confirm the page returns `amfa_not_configured` (404 → empty-state).
 
 - [ ] **Step 7: No commit needed** (operational verification only).
 

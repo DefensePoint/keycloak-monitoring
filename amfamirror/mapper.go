@@ -29,7 +29,7 @@ func SourceForRealm(realm string) string {
 // raw_data for the details view. Severity derives from the event type ONLY
 // (never from risk level — risk is its own dimension in the UI).
 func ToDomainEvent(row amfa.EventRow, realm string, user *amfa.KeycloakUser) *domain.Event {
-	// amfaEventID is the raw AMFA auth_event.id — the exact value the POINT
+	// amfaEventID is the raw AMFA auth_event.id — the exact value the KMT
 	// extension stamps onto the Keycloak event as "amfa_event_id", so it is the
 	// merge key between the two rows.
 	amfaEventID := row.EventID

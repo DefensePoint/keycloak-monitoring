@@ -1,10 +1,10 @@
 # Quick Start Guide
 
-This guide will help you get Point Monitoring Platform up and running in under 10 minutes.
+This guide will help you get Keycloak Monitoring Tool up and running in under 10 minutes.
 
-## What is Point Monitoring Platform?
+## What is Keycloak Monitoring Tool?
 
-Point Monitoring Platform is a comprehensive monitoring and security compliance solution for Keycloak identity and access management systems. It provides:
+Keycloak Monitoring Tool is a comprehensive monitoring and security compliance solution for Keycloak identity and access management systems. It provides:
 
 - **Multi-Tenant Monitoring**: Monitor multiple Keycloak instances from a single dashboard
 - **Real-Time Event Tracking**: Track logins, logouts, registrations, and security events
@@ -34,8 +34,8 @@ This is the fastest way to get started. The entire stack (API server, web fronte
 ### Step 1: Clone the Repository
 
 ```bash
-git clone git@repos.defensepoint.com:ai/soc/point-monitoring-platform.git
-cd point-monitoring-platform
+git clone git@repos.defensepoint.com:ai/soc/kmt.git
+cd kmt
 ```
 
 ### Step 2: Create Configuration
@@ -247,7 +247,7 @@ Restart the application to load the new configuration.
 
 ## Configuring Alerts
 
-Point Monitoring Platform automatically scans your Keycloak configuration for security issues and misconfigurations.
+Keycloak Monitoring Tool automatically scans your Keycloak configuration for security issues and misconfigurations.
 
 ### What Gets Checked
 
@@ -345,7 +345,7 @@ Get notified about critical security issues via Slack, Email, or GitLab.
         enabled: true
         webhook_url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
         channel: "#security-alerts"  # Optional: override webhook channel
-        username: "Point Monitoring"
+        username: "Keycloak Monitoring Tool"
         icon_emoji: ":shield:"
 
         # Only send warnings and above to Slack
@@ -509,7 +509,7 @@ Example alert distribution:
 
 - Verify Keycloak URL is correct
 - Check admin credentials are valid
-- Ensure network connectivity between Point Monitoring and Keycloak
+- Ensure network connectivity between Keycloak Monitoring Tool and Keycloak
 - For Keycloak < 17, include `/auth` in server_url
 
 ### No events showing up

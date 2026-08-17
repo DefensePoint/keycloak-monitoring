@@ -1,7 +1,7 @@
 // Monitoring Dashboard API Server (Fx version)
 // This is the new entry point using Uber Fx for dependency injection.
 
-//	@title			Point Monitoring Platform API
+//	@title			Keycloak Monitoring Tool API
 //	@version		1.0
 //	@description	API for monitoring Keycloak instances, managing alerts, and security operations
 //	@termsOfService	https://defensepoint.com/terms

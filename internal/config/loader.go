@@ -327,7 +327,7 @@ func setDefaults(v *viper.Viper) {
 	// =============================================================================
 	// Notification Integrations Defaults
 	// =============================================================================
-	// Base URL for Point Monitoring web UI (used in notification links)
+	// Base URL for Keycloak Monitoring Tool web UI (used in notification links)
 	v.SetDefault("notifications.base_url", "")
 
 	// GitLab defaults
@@ -342,7 +342,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("notifications.slack.enabled", false)
 	v.SetDefault("notifications.slack.webhook_url", "")
 	v.SetDefault("notifications.slack.channel", "")
-	v.SetDefault("notifications.slack.username", "Point Monitoring")
+	v.SetDefault("notifications.slack.username", "Keycloak Monitoring Tool")
 	v.SetDefault("notifications.slack.icon_emoji", ":shield:")
 	v.SetDefault("notifications.slack.min_severity", "warning") // Only send Slack messages for warning and above
 
@@ -356,7 +356,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("notifications.email.to", []string{"admin@example.com"})
 	v.SetDefault("notifications.email.use_tls", true)
 	v.SetDefault("notifications.email.skip_verify", false)
-	v.SetDefault("notifications.email.subject", "[{{severity}}] Point Monitoring Alert: {{title}}")
+	v.SetDefault("notifications.email.subject", "[{{severity}}] Keycloak Monitoring Tool Alert: {{title}}")
 	v.SetDefault("notifications.email.min_severity", "error") // Only send emails for error and above
 }
 

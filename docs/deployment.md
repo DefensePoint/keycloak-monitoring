@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Complete guide for deploying the Point Monitoring Platform to production environments.
+Complete guide for deploying the Keycloak Monitoring Tool to production environments.
 
 ## Table of Contents
 
@@ -19,7 +19,7 @@ Complete guide for deploying the Point Monitoring Platform to production environ
 
 ## Overview
 
-The Point Monitoring Platform can be deployed in various environments. This guide covers production-ready deployment strategies with emphasis on security, reliability, and performance.
+The Keycloak Monitoring Tool can be deployed in various environments. This guide covers production-ready deployment strategies with emphasis on security, reliability, and performance.
 
 ### Deployment Architecture
 
@@ -123,8 +123,8 @@ The Point Monitoring Platform can be deployed in various environments. This guid
 
 ```bash
 # Clone repository
-git clone git@repos.defensepoint.com:ai/soc/point-monitoring-platform.git
-cd point-monitoring-platform
+git clone git@repos.defensepoint.com:ai/soc/kmt.git
+cd kmt
 
 # Create configuration
 cp config.yaml.example config.yaml
@@ -148,7 +148,7 @@ web:
     api_host_url: "http://api-server:7888"
 
 database:
-  host: "point-monitoring-postgres"
+  host: "kmt-postgres"
   port: 5432
   database: "monitoring"
   user: "monitoring"
@@ -196,8 +196,8 @@ chmod 600 .env
 make docker-build
 
 # Or build individually
-docker build --build-arg SERVICE=server -t point-monitoring-server:latest .
-docker build --build-arg SERVICE=web -t point-monitoring-web:latest .
+docker build --build-arg SERVICE=server -t kmt-server:latest .
+docker build --build-arg SERVICE=web -t kmt-web:latest .
 ```
 
 ### Step 4: Start Services
@@ -234,7 +234,7 @@ version: '3.8'
 services:
   postgres:
     image: timescale/timescaledb:latest-pg16
-    container_name: point-monitoring-postgres
+    container_name: kmt-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: monitoring
@@ -251,8 +251,8 @@ services:
       retries: 5
 
   api-server:
-    image: point-monitoring-server:latest
-    container_name: point-monitoring-server
+    image: kmt-server:latest
+    container_name: kmt-server
     restart: unless-stopped
     depends_on:
       postgres:
@@ -272,8 +272,8 @@ services:
       retries: 3
 
   web:
-    image: point-monitoring-web:latest
-    container_name: point-monitoring-web
+    image: kmt-web:latest
+    container_name: kmt-web
     restart: unless-stopped
     depends_on:
       api-server:
@@ -415,7 +415,7 @@ spec:
     spec:
       containers:
       - name: api-server
-        image: point-monitoring-server:latest
+        image: kmt-server:latest
         env:
         - name: MONITORING_DATABASE_PASSWORD
           valueFrom:
@@ -490,7 +490,7 @@ spec:
     spec:
       containers:
       - name: web
-        image: point-monitoring-web:latest
+        image: kmt-web:latest
         ports:
         - containerPort: 7880
         volumeMounts:
@@ -614,7 +614,7 @@ sudo chown -R monitoring:monitoring /opt/monitoring-platform
 
 ```ini
 [Unit]
-Description=Point Monitoring Platform API Server
+Description=Keycloak Monitoring Tool API Server
 After=network.target postgresql.service
 
 [Service]
@@ -647,7 +647,7 @@ WantedBy=multi-user.target
 
 ```ini
 [Unit]
-Description=Point Monitoring Platform Web Server
+Description=Keycloak Monitoring Tool Web Server
 After=network.target monitoring-api.service
 
 [Service]

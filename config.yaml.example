@@ -449,7 +449,7 @@ keycloak:
     # =========================================================================
     # AMFA CHECKER
     # =========================================================================
-    # AMFA risk-alert checker. Converts high-risk AMFA login events into POINT
+    # AMFA risk-alert checker. Converts high-risk AMFA login events into KMT
     # alerts that flow through the normal alert lifecycle and notification
     # fan-out. Disabled by default; opt in per check. See docs/amfa-integration.md.
     amfa_checker:
@@ -587,12 +587,12 @@ keycloak:
         infinispan_port: 9000
 
       # AMFA Events integration (optional, per-tenant).
-      # When enabled, POINT monitoring connects (read-only) to this tenant's Adaptive MFA PostgreSQL database
+      # When enabled, KMT monitoring connects (read-only) to this tenant's Adaptive MFA PostgreSQL database
       # to surface AMFA events under /api/tenants/<tenant_id>/amfa/{events,stats,geo}.
       # Omit the block or set `enabled: false` to disable AMFA Events for this tenant.
       # Tenants with invalid or unreachable AMFA configuration are logged and skipped
       # at startup; they do NOT abort boot.
-      # SECURITY: Use a dedicated read-only Postgres role for `user`. POINT monitoring 
+      # SECURITY: Use a dedicated read-only Postgres role for `user`. KMT monitoring 
       # never writes to AMFA. Pass `password` via an env var in production
       # (the env-var name follows the existing MONITORING_KEYCLOAK_TENANTS_*
       # convention used for admin credentials above).
@@ -602,14 +602,14 @@ keycloak:
       #   # How many days of AMFA history to query by default. Hard-capped at
       #   # 90 by Validate(); values <= 0 default to 30.
       #   events_lookback_days: 30
-      #   # alembic_version this POINT monitoring build was tested against. Leave empty
+      #   # alembic_version this KMT monitoring build was tested against. Leave empty
       #   # to skip the schema check; mismatches log a WARN and continue.
       #   expected_schema_version: ""
       #   database:
       #     host: "amfa.internal"
       #     port: 5432
       #     database: "adaptive_mfa"
-      #     user: "point_monitoring_ro"
+      #     user: "kmt_ro"
       #     password: "${AMFA_DB_PASSWORD}"
       #     # sslmode defaults to "require" when omitted. Supported values:
       #     # disable, require, verify-ca, verify-full.
@@ -653,7 +653,7 @@ keycloak:
     #   owner: "developers"
 
 notifications:
-  # Base URL for Point Monitoring web UI
+  # Base URL for Keycloak Monitoring Tool web UI
   # Used in notifications to provide clickable links to alert details
   # Example: "https://monitoring.example.com"
   # Leave empty to disable links in notifications
@@ -734,7 +734,7 @@ notifications:
 
     # Optional: Custom bot username for messages
     # If not specified, uses the webhook's configured name
-    username: "Point Monitoring"
+    username: "Keycloak Monitoring Tool"
 
     # Optional: Custom emoji icon for bot
     # Examples: ":robot_face:", ":shield:", ":warning:"
@@ -806,7 +806,7 @@ notifications:
     # Optional: Custom email subject template
     # Available placeholders: {{severity}}, {{title}}, {{resource}}
     # If not specified, uses default format
-    subject: "[{{severity}}] Point Monitoring Alert: {{title}}"
+    subject: "[{{severity}}] Keycloak Monitoring Tool Alert: {{title}}"
 
     # Minimum severity level for sending email notifications
     # Only alerts with this severity or higher will trigger emails
@@ -954,7 +954,7 @@ database:
   # PostgreSQL server hostname or IP address
   # In Docker: use service name from docker-compose.yml (e.g., "postgres")
   # In local dev: use "localhost" or "127.0.0.1"
-  host: "point-monitoring-postgres"
+  host: "kmt-postgres"
 
   # PostgreSQL server port
   port: 5432

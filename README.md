@@ -1,4 +1,4 @@
-# Point Monitoring Platform
+# Keycloak Monitoring Tool
 
 A comprehensive monitoring and security compliance platform for Keycloak identity and access management systems. Built with Go and React, this platform provides real-time monitoring, automated security configuration scanning, alert management, and integrated notifications for multi-tenant Keycloak deployments.
 
@@ -74,8 +74,8 @@ The fastest way to get started is with Docker. See the **[Quick Start Guide](doc
 
 ```bash
 # 1. Clone the repository
-git clone git@repos.defensepoint.com:ai/soc/point-monitoring-platform.git
-cd point-monitoring-platform
+git clone git@repos.defensepoint.com:ai/soc/kmt.git
+cd kmt
 
 # 2. Copy and edit configuration
 cp config.yaml.example config.yaml
@@ -184,7 +184,7 @@ make test-frontend
 go test -v ./pkg/keycloak/...
 ```
 
-For the full testing reference — including running backend tests via Docker without a local Go install, env-gated DB tests (`POINT_TEST_DATABASE_DSN`), and the build-tagged AMFA integration tests (`-tags=integration`, `AMFA_TEST_DSN`) — see [docs/engineering-guide.md § Testing](docs/engineering-guide.md#testing).
+For the full testing reference — including running backend tests via Docker without a local Go install, env-gated DB tests (`KMT_TEST_DATABASE_DSN`), and the build-tagged AMFA integration tests (`-tags=integration`, `AMFA_TEST_DSN`) — see [docs/engineering-guide.md § Testing](docs/engineering-guide.md#testing).
 
 ## Deployment
 

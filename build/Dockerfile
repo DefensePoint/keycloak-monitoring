@@ -70,7 +70,7 @@ RUN GOOS=linux GOARCH=amd64 go build \
       -X 'repos.defensepoint.com/iam/oss-pmt/kmt/internal/version.Version=${VERSION}' \
       -X 'repos.defensepoint.com/iam/oss-pmt/kmt/internal/version.GitCommit=${VCS_REF}' \
       -X 'repos.defensepoint.com/iam/oss-pmt/kmt/internal/version.BuildDate=${BUILD_DATE}'" \
-    -o /build/point-monitoring-${SERVICE} ./cmd/${SERVICE}
+    -o /build/kmt-${SERVICE} ./cmd/${SERVICE}
 
 # -------- Runtime: Conditional base image selection --------
 # For server: use debian-slim with Chrome for PDF generation
@@ -96,7 +96,7 @@ RUN groupadd -g 65532 nonroot && \
 WORKDIR /app
 
 # Copy the server binary
-COPY --chown=nonroot:nonroot --chmod=0555 --from=backend-builder /build/point-monitoring-server /app/point-monitoring
+COPY --chown=nonroot:nonroot --chmod=0555 --from=backend-builder /build/kmt-server /app/kmt
 
 # Copy report assets (logo, cover, footer)
 COPY --chown=nonroot:nonroot assets /app/assets
@@ -116,7 +116,7 @@ USER nonroot:nonroot
 
 EXPOSE 7888
 
-ENTRYPOINT ["/app/point-monitoring"]
+ENTRYPOINT ["/app/kmt"]
 CMD ["-config", "/app/config.yaml"]
 
 # Web runtime with distroless
@@ -125,7 +125,7 @@ FROM gcr.io/distroless/static-debian12:nonroot AS runtime-web
 WORKDIR /app
 
 # Copy the web binary
-COPY --chown=nonroot:nonroot --chmod=0555 --from=backend-builder /build/point-monitoring-web /app/point-monitoring
+COPY --chown=nonroot:nonroot --chmod=0555 --from=backend-builder /build/kmt-web /app/kmt
 
 # Copy frontend assets
 COPY --chown=nonroot:nonroot --chmod=0555 --from=frontend-builder /frontend/dist /app/web/dist
@@ -139,7 +139,7 @@ WORKDIR /app
 
 EXPOSE 7880
 
-ENTRYPOINT ["/app/point-monitoring"]
+ENTRYPOINT ["/app/kmt"]
 CMD ["-config", "/app/config.yaml"]
 
 # Final stage: select appropriate runtime based on SERVICE arg

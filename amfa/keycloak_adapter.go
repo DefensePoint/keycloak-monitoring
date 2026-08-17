@@ -41,7 +41,7 @@ func NewKeycloakAdapter(admin keycloakAdmin) KeycloakClient {
 var _ KeycloakClient = (*keycloakAdapter)(nil)
 
 // GetUser fetches a user from Keycloak by realm + userID and returns the
-// minimal KeycloakUser projection POINT needs for AMFA event enrichment.
+// minimal KeycloakUser projection KMT needs for AMFA event enrichment.
 // The tenantID arg is part of the KeycloakClient contract but is unused
 // here because pkg/keycloakadmin is configured per-process, not per-tenant.
 func (k *keycloakAdapter) GetUser(ctx context.Context, _ /*tenantID*/, realm, userID string) (*KeycloakUser, error) {

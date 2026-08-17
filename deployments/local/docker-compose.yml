@@ -18,7 +18,7 @@ services:
   # ==========================================================================
   postgres:
     image: timescale/timescaledb:latest-pg16
-    container_name: point-monitoring-postgres
+    container_name: kmt-postgres
     ports:
       - "5433:5432"
     environment:
@@ -28,7 +28,7 @@ services:
     volumes:
       - point-postgres-data:/var/lib/postgresql/data
     networks:
-      - point-monitoring-network
+      - kmt-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U monitoring -d monitoring"]
@@ -65,7 +65,7 @@ services:
     volumes:
       - keycloak-db-1-data:/var/lib/postgresql/data
     networks:
-      - point-monitoring-network
+      - kmt-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
@@ -92,7 +92,7 @@ services:
       KC_HTTP_ENABLED: "true"
     command: start-dev
     networks:
-      - point-monitoring-network
+      - kmt-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && exit 0 || exit 1"]
@@ -118,7 +118,7 @@ services:
     volumes:
       - keycloak-db-2-data:/var/lib/postgresql/data
     networks:
-      - point-monitoring-network
+      - kmt-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
@@ -145,7 +145,7 @@ services:
       KC_HTTP_ENABLED: "true"
     command: start-dev
     networks:
-      - point-monitoring-network
+      - kmt-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && exit 0 || exit 1"]
@@ -158,7 +158,7 @@ services:
         condition: service_healthy
 
   # ==========================================================================
-  # API SERVER - Point Monitoring Platform
+  # API SERVER - Keycloak Monitoring Tool
   # ==========================================================================
   api-server:
     build:
@@ -166,8 +166,8 @@ services:
       dockerfile: build/Dockerfile
       args:
         SERVICE: server
-    image: point-monitoring-server:latest
-    container_name: point-monitoring-server
+    image: kmt-server:latest
+    container_name: kmt-server
     ports:
       - "7888:7888"
     env_file:
@@ -182,14 +182,14 @@ services:
     volumes:
       - ../../config.yaml:/app/config.yaml:ro
     networks:
-      - point-monitoring-network
+      - kmt-network
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
 
   # ==========================================================================
-  # WEB UI - Point Monitoring Frontend
+  # WEB UI - Keycloak Monitoring Tool Frontend
   # ==========================================================================
   web:
     build:
@@ -197,8 +197,8 @@ services:
       dockerfile: build/Dockerfile
       args:
         SERVICE: web
-    image: point-monitoring-web:latest
-    container_name: point-monitoring-web
+    image: kmt-web:latest
+    container_name: kmt-web
     ports:
       - "7880:3000"
     volumes:
@@ -206,7 +206,7 @@ services:
     env_file:
       - ../../.env
     networks:
-      - point-monitoring-network
+      - kmt-network
     restart: unless-stopped
     depends_on:
       - api-server
@@ -217,5 +217,5 @@ volumes:
   keycloak-db-2-data:
 
 networks:
-  point-monitoring-network:
+  kmt-network:
     driver: bridge

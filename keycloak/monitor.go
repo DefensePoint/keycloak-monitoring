@@ -277,7 +277,7 @@ func (m *Monitor) collectEvents(ctx context.Context) {
 				CreatedAt:    eventTime,
 				UpdatedAt:    eventTime,
 			}
-			// The POINT adaptive-auth extension stamps these onto interactive
+			// The KMT adaptive-auth extension stamps these onto interactive
 			// login events. amfa_event_id is the merge key with AMFA; risk_level
 			// is already computed, so we surface it directly without an AMFA join.
 			if amfaID := event.Details["amfa_event_id"]; amfaID != "" {

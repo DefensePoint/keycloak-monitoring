@@ -1,6 +1,6 @@
 # Hacking Guide
 
-Guide for contributors and developers who want to understand and modify the Point Monitoring Platform codebase.
+Guide for contributors and developers who want to understand and modify the Keycloak Monitoring Tool codebase.
 
 ## Table of Contents
 
@@ -462,8 +462,8 @@ Add to relevant documentation files:
 
 ```bash
 # Fork on GitHub/GitLab
-git clone git@repos.defensepoint.com:ai/soc/point-monitoring-platform.git
-cd point-monitoring-platform
+git clone git@repos.defensepoint.com:ai/soc/kmt.git
+cd kmt
 git remote add upstream <original-repo-url>
 ```
 

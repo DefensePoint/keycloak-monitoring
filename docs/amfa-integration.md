@@ -1,32 +1,32 @@
 # AMFA Integration Guide
 
-POINT Monitoring's **AMFA Events** feature reads from each tenant's AMFA (Adaptive MFA) PostgreSQL database. This guide walks an operator through enabling it.
+Keycloak Monitoring Tool's **AMFA Events** feature reads from each tenant's AMFA (Adaptive MFA) PostgreSQL database. This guide walks an operator through enabling it.
 
 ## Architecture summary
 
-- One AMFA service per POINT tenant (one AMFA per Keycloak instance).
-- POINT opens a per-tenant read-only PostgreSQL connection to each enabled tenant's AMFA database.
-- POINT never modifies AMFA's code or data — the integration is purely read-only.
+- One AMFA service per KMT tenant (one AMFA per Keycloak instance).
+- KMT opens a per-tenant read-only PostgreSQL connection to each enabled tenant's AMFA database.
+- KMT never modifies AMFA's code or data — the integration is purely read-only.
 - AMFA Events is disabled by default. It is enabled per tenant via config.
 
 ## Prerequisites
 
-- One AMFA service per POINT tenant (one AMFA per Keycloak instance).
-- Network reachability from POINT to each AMFA's PostgreSQL.
+- One AMFA service per KMT tenant (one AMFA per Keycloak instance).
+- Network reachability from KMT to each AMFA's PostgreSQL.
 - Optionally a read replica per AMFA database (recommended for production deployments).
-- The `amfa:read` permission (added automatically to the default `admin`, `operator`, and `viewer` roles by an idempotent migration on POINT startup).
+- The `amfa:read` permission (added automatically to the default `admin`, `operator`, and `viewer` roles by an idempotent migration on KMT startup).
 
 ## One-time setup on each AMFA database
 
-Run on every AMFA PostgreSQL instance POINT will read from. The dedicated role enforces least privilege at the database level — even a bug in POINT cannot write to AMFA.
+Run on every AMFA PostgreSQL instance KMT will read from. The dedicated role enforces least privilege at the database level — even a bug in KMT cannot write to AMFA.
 
 ```sql
-CREATE USER point_monitoring_ro WITH PASSWORD '<strong-password>';
-GRANT CONNECT ON DATABASE adaptive_mfa TO point_monitoring_ro;
-GRANT USAGE ON SCHEMA public TO point_monitoring_ro;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO point_monitoring_ro;
+CREATE USER kmt_ro WITH PASSWORD '<strong-password>';
+GRANT CONNECT ON DATABASE adaptive_mfa TO kmt_ro;
+GRANT USAGE ON SCHEMA public TO kmt_ro;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO kmt_ro;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT ON TABLES TO point_monitoring_ro;
+    GRANT SELECT ON TABLES TO kmt_ro;
 
 -- Recommended for AMFA Events query performance (filters via
 -- auth_context_json->>'realm_id' on every query):
@@ -34,7 +34,7 @@ CREATE INDEX IF NOT EXISTS idx_auth_process_realm_id
     ON auth_process ((auth_context_json->>'realm_id'));
 ```
 
-## POINT configuration (per tenant)
+## KMT configuration (per tenant)
 
 Add an `amfa:` block under any tenant in `config.yaml`. Tenants without an `amfa:` block — or with `enabled: false` — get a "not configured" empty state on the AMFA Events page; everything else continues to work.
 
@@ -54,7 +54,7 @@ keycloak:
           host: amfa-prod.internal
           port: 5432
           database: adaptive_mfa
-          user: point_monitoring_ro
+          user: kmt_ro
           password: ${PROD_AMFA_DB_PASSWORD}
           sslmode: require
           max_conns: 5
@@ -68,11 +68,11 @@ keycloak:
       # No amfa: block → AMFA Events page returns "not configured" for this tenant
 ```
 
-Sensitive values (DB passwords) come from environment variables using POINT's existing per-tenant override pattern. Do not commit secrets to `config.yaml`.
+Sensitive values (DB passwords) come from environment variables using KMT's existing per-tenant override pattern. Do not commit secrets to `config.yaml`.
 
 ## RBAC
 
-The `amfa:read` permission is added by an idempotent migration on POINT startup:
+The `amfa:read` permission is added by an idempotent migration on KMT startup:
 
 - The permission row is created if it doesn't exist.
 - The default `admin`, `operator`, and `viewer` roles each get granted `amfa:read` (skipped if already granted).
@@ -80,7 +80,7 @@ The `amfa:read` permission is added by an idempotent migration on POINT startup:
 
 ## Verification
 
-Expected POINT startup log lines (per enabled tenant):
+Expected KMT startup log lines (per enabled tenant):
 
 ```
 [INFO] AMFA enabled tenant detected: tenant_id=prod-keycloak
@@ -102,11 +102,11 @@ Then open the AMFA Events page from the sidebar (`/{tenantId}/amfa-events`) and 
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Page returns 404 `amfa_not_configured` for a tenant | That tenant has no `amfa:` block, or `amfa.enabled: false`. | Add or enable the block. |
-| AMFA endpoint returns 503 `amfa_unavailable` | The tenant's AMFA DB is temporarily unreachable: connection refused, dial timeout, dropped connection, or a Postgres SQLSTATE class `08` (Connection Exception). | Check `docker logs` for the underlying error. Verify host/port reachability and that the `point_monitoring_ro` role still works. Distinct from `500 internal error`, which indicates a query/schema bug rather than availability. |
+| AMFA endpoint returns 503 `amfa_unavailable` | The tenant's AMFA DB is temporarily unreachable: connection refused, dial timeout, dropped connection, or a Postgres SQLSTATE class `08` (Connection Exception). | Check `docker logs` for the underlying error. Verify host/port reachability and that the `kmt_ro` role still works. Distinct from `500 internal error`, which indicates a query/schema bug rather than availability. |
 | AMFA endpoint returns 400 with `invalid start_time` / `invalid end_time` / `invalid time range` | Frontend or curl sent a non-RFC3339 timestamp, or a window where start > end. | Use RFC3339 (e.g. `2026-05-01T00:00:00Z`) and make sure start ≤ end. |
 | AMFA endpoint returns 400 with `offset must be <= 50000` | Pagination offset is too deep — this is a guard against full-scan DoS on AMFA's `auth_event/auth_process` join. | Use a tighter time range to surface older events instead of paging deep. 50k offset is 250 pages at the max page size (200). |
-| Log line `AMFA schema version drift detected — POINT may need updating` | AMFA's database schema has moved past the version POINT was built against. The feature still works for the fields POINT knows about, but new columns or renames will not be picked up. | Test against the new AMFA schema and bump `expected_schema_version` once verified. |
-| Log line `Could not read AMFA alembic_version table` | The `alembic_version` table is missing from AMFA's DB (e.g., a partial volume wipe). The schema check is non-fatal — POINT continues to operate. | Re-create the table from the current head: `CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY); INSERT INTO alembic_version VALUES ('<current_head_hash>');` Confirm the head by inspecting `migrations/versions/` in the AMFA repo. |
+| Log line `AMFA schema version drift detected — KMT may need updating` | AMFA's database schema has moved past the version KMT was built against. The feature still works for the fields KMT knows about, but new columns or renames will not be picked up. | Test against the new AMFA schema and bump `expected_schema_version` once verified. |
+| Log line `Could not read AMFA alembic_version table` | The `alembic_version` table is missing from AMFA's DB (e.g., a partial volume wipe). The schema check is non-fatal — KMT continues to operate. | Re-create the table from the current head: `CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY); INSERT INTO alembic_version VALUES ('<current_head_hash>');` Confirm the head by inspecting `migrations/versions/` in the AMFA repo. |
 | Events table shows raw UUIDs instead of usernames | Either the Keycloak admin client isn't healthy for that tenant, or the AMFA event references a `user_id` that no longer exists in Keycloak. AMFA Events falls back to UUID display so the page still loads. | Check Keycloak is up and the monitor pool reports `Keycloak client initialized successfully` at startup. If the user genuinely doesn't exist in Keycloak (e.g. deleted), the UUID display is correct. |
 | Page shows nothing when "All Realms" is selected in the dropdown | AMFA endpoints require a specific `realm_id` — they don't aggregate cross-realm. The hooks are intentionally disabled when no specific realm is picked. | Select a specific realm. An info banner now explains this directly on the page. |
 | Geolocation map area is empty (no tiles, no markers) | If you're maintaining the map component: react-leaflet 4 strips non-`height/width` keys from its `style` prop, and a percentage height races MUI's layout pass at first paint. Leaflet measures `0×0` and never re-measures, so the map renders invisible. | Always pass an explicit pixel height to `MapContainer style={{ height: <number>, width: "100%" }}`. See the inline comment in `web/src/features/amfa/components/AmfaGeoMap.tsx`. |
@@ -115,7 +115,7 @@ Then open the AMFA Events page from the sidebar (`/{tenantId}/amfa-events`) and 
 
 ## Running an end-to-end smoke locally
 
-The following walks through a full local smoke against the `keycloak-deployment` Keycloak + a local AMFA instance. It assumes you already have those projects checked out alongside `point-monitoring-platform`.
+The following walks through a full local smoke against the `keycloak-deployment` Keycloak + a local AMFA instance. It assumes you already have those projects checked out alongside `kmt`.
 
 ### Prerequisites
 
@@ -125,32 +125,32 @@ The following walks through a full local smoke against the `keycloak-deployment`
 ### Step 1: Bring up Keycloak and AMFA
 
 ```bash
-# Keycloak (provides the realms POINT will discover and the users for enrichment)
+# Keycloak (provides the realms KMT will discover and the users for enrichment)
 cd ../point-iam/keycloak-deployment
 docker compose up -d
 # wait until 'docker inspect keycloak-deployment-keycloak-1 --format "{{.State.Health.Status}}"' is "healthy"
 
-# AMFA (the database POINT will read from)
+# AMFA (the database KMT will read from)
 cd ../../point-adaptive-authentication
 docker compose -f docker-compose.local.yml up -d postgres adaptive_auth
 ```
 
-### Step 2: Set up POINT's read-only role on AMFA's PostgreSQL
+### Step 2: Set up KMT's read-only role on AMFA's PostgreSQL
 
 ```bash
 docker exec point-adaptive-authentication-postgres-1 psql -U keycloak -d adaptive_mfa <<'SQL'
-CREATE USER point_monitoring_ro WITH PASSWORD '<your-strong-password>';
-GRANT CONNECT ON DATABASE adaptive_mfa TO point_monitoring_ro;
-GRANT USAGE ON SCHEMA public TO point_monitoring_ro;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO point_monitoring_ro;
+CREATE USER kmt_ro WITH PASSWORD '<your-strong-password>';
+GRANT CONNECT ON DATABASE adaptive_mfa TO kmt_ro;
+GRANT USAGE ON SCHEMA public TO kmt_ro;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO kmt_ro;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT ON TABLES TO point_monitoring_ro;
+    GRANT SELECT ON TABLES TO kmt_ro;
 SQL
 ```
 
-> **Note on indexes:** the spec recommends `CREATE INDEX idx_auth_process_realm_id ON auth_process ((auth_context_json->>'realm_id'))` for production performance. This is an *operator-discretion* schema change on AMFA's DB — POINT does not create it automatically. Skip it for local smoke (only 16 rows); add it for any deployment with non-trivial event volume, with sign-off from whoever owns AMFA's schema.
+> **Note on indexes:** the spec recommends `CREATE INDEX idx_auth_process_realm_id ON auth_process ((auth_context_json->>'realm_id'))` for production performance. This is an *operator-discretion* schema change on AMFA's DB — KMT does not create it automatically. Skip it for local smoke (only 16 rows); add it for any deployment with non-trivial event volume, with sign-off from whoever owns AMFA's schema.
 
-### Step 3: Add the AMFA block to a POINT tenant
+### Step 3: Add the AMFA block to a KMT tenant
 
 Pick an existing tenant in `config.yaml` (e.g. `local-kc`) and add an `amfa:` block under it:
 
@@ -164,10 +164,10 @@ keycloak:
         events_lookback_days: 30
         expected_schema_version: "<current AMFA alembic head>"
         database:
-          host: "host.docker.internal"  # POINT runs in Docker; AMFA Postgres is on host
+          host: "host.docker.internal"  # KMT runs in Docker; AMFA Postgres is on host
           port: 5455
           database: "adaptive_mfa"
-          user: "point_monitoring_ro"
+          user: "kmt_ro"
           password: "<the password from Step 2>"
           sslmode: "disable"             # local-only; use require in production
 ```
@@ -179,20 +179,20 @@ docker exec point-adaptive-authentication-postgres-1 \
   psql -U keycloak -d adaptive_mfa -tAc "SELECT version_num FROM alembic_version"
 ```
 
-### Step 4: Build POINT images and bring up the stack
+### Step 4: Build KMT images and bring up the stack
 
 ```bash
-cd ../point-monitoring-platform
+cd ../kmt
 make docker-build
 make docker-up
 ```
 
-**Important:** if you've previously had POINT running and only need to pick up new images, use `make docker-down && make docker-up`. **`docker restart` will NOT pick up a freshly rebuilt image** — it restarts the same container instance with whatever image it was created from. To pick up `:latest` after a rebuild, the container must be recreated.
+**Important:** if you've previously had KMT running and only need to pick up new images, use `make docker-down && make docker-up`. **`docker restart` will NOT pick up a freshly rebuilt image** — it restarts the same container instance with whatever image it was created from. To pick up `:latest` after a rebuild, the container must be recreated.
 
 ### Step 5 — Verify startup
 
 ```bash
-docker logs point-monitoring-server 2>&1 | grep -iE "amfa|enrichment" | tail -10
+docker logs kmt-server 2>&1 | grep -iE "amfa|enrichment" | tail -10
 ```
 
 Expect these lines (one-time, at boot):
@@ -214,7 +214,7 @@ Real Keycloak users in that realm will display with their username/email. AMFA e
 ### Step 7 — Tail logs while exercising the UI
 
 ```bash
-docker logs -f point-monitoring-server 2>&1 | grep "amfa/"
+docker logs -f kmt-server 2>&1 | grep "amfa/"
 ```
 
 Each page refresh should produce three `200` lines (one each for `/amfa/events`, `/amfa/stats`, `/amfa/geo`).
@@ -233,10 +233,10 @@ docker compose stop
 
 # Optionally drop the RO role on AMFA's DB:
 docker exec point-adaptive-authentication-postgres-1 psql -U keycloak -d adaptive_mfa <<'SQL'
-REVOKE ALL ON ALL TABLES IN SCHEMA public FROM point_monitoring_ro;
-REVOKE USAGE ON SCHEMA public FROM point_monitoring_ro;
-REVOKE CONNECT ON DATABASE adaptive_mfa FROM point_monitoring_ro;
-DROP USER point_monitoring_ro;
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM kmt_ro;
+REVOKE USAGE ON SCHEMA public FROM kmt_ro;
+REVOKE CONNECT ON DATABASE adaptive_mfa FROM kmt_ro;
+DROP USER kmt_ro;
 SQL
 ```
 
@@ -263,13 +263,13 @@ amfa:
   enabled: false
 ```
 
-Restart POINT. Other tenants are unaffected. AMFA itself was never touched — there is nothing to roll back on the AMFA side. The read-only DB role on AMFA can stay (it's harmless) or be revoked at leisure.
+Restart KMT. Other tenants are unaffected. AMFA itself was never touched — there is nothing to roll back on the AMFA side. The read-only DB role on AMFA can stay (it's harmless) or be revoked at leisure.
 
 To disable globally: remove or set `enabled: false` on every tenant's `amfa:` block.
 
 ## Known limitation (follow-up)
 
-In the current implementation, AMFA event enrichment with Keycloak usernames/emails requires a Keycloak admin client to be available to the AMFA fx module. POINT currently constructs Keycloak admin clients per-tenant inside the monitor pool, not as a process-scope singleton, so AMFA enrichment falls back to UUID-only display until one of the following is done:
+In the current implementation, AMFA event enrichment with Keycloak usernames/emails requires a Keycloak admin client to be available to the AMFA fx module. KMT currently constructs Keycloak admin clients per-tenant inside the monitor pool, not as a process-scope singleton, so AMFA enrichment falls back to UUID-only display until one of the following is done:
 
 1. Expose a per-tenant Keycloak admin client lookup function to `internal/fx/amfa.go` (small refactor of `internal/fx/monitoring.go`'s `MonitorPoolManager`).
 2. Or construct a dedicated process-scope admin client for AMFA in `internal/fx/amfa.go`.
@@ -278,7 +278,7 @@ The UUID-only fallback is documented in the spec at `docs/superpowers/specs/2026
 
 ## Alerts
 
-The AMFA risk-alert checker (`amfacheck/`) is a per-tenant poll loop that turns high-risk AMFA login events into POINT alerts. Alerts flow through the normal alert lifecycle and notification fan-out, so they appear on the Alerts page and trigger any configured notifications (e.g. Slack) exactly like Keycloak event-checker alerts. The checker reads AMFA's database read-only through the same `point_monitoring_ro` role used by the rest of the integration; it never writes to AMFA.
+The AMFA risk-alert checker (`amfacheck/`) is a per-tenant poll loop that turns high-risk AMFA login events into KMT alerts. Alerts flow through the normal alert lifecycle and notification fan-out, so they appear on the Alerts page and trigger any configured notifications (e.g. Slack) exactly like Keycloak event-checker alerts. The checker reads AMFA's database read-only through the same `kmt_ro` role used by the rest of the integration; it never writes to AMFA.
 
 ### Rules and severities
 
@@ -292,10 +292,10 @@ The AMFA risk-alert checker (`amfacheck/`) is a per-tenant poll loop that turns 
 
 ### Configuration
 
-The checker lives under `keycloak.global` in your POINT config, at the same level as `event_checker`. The master switch is off by default; opt in per check:
+The checker lives under `keycloak.global` in your KMT config, at the same level as `event_checker`. The master switch is off by default; opt in per check:
 
 ```yaml
-      # AMFA risk-alert checker. Converts high-risk AMFA login events into POINT
+      # AMFA risk-alert checker. Converts high-risk AMFA login events into KMT
       # alerts that flow through the normal alert lifecycle and notification
       # fan-out. Disabled by default; opt in per check. See docs/amfa-integration.md.
       amfa_checker:
@@ -311,7 +311,7 @@ The checker lives under `keycloak.global` in your POINT config, at the same leve
 
 ### Expected startup logs
 
-With the checker enabled, POINT logs something like:
+With the checker enabled, KMT logs something like:
 
 ```
 amfacheck service constructed tenant_id=<id> checks=5 poll_interval=30s
@@ -335,10 +335,10 @@ amfacheck lifecycle hooks registered service_count=0
 
 ### Manual smoke test
 
-1. Set `amfa_checker.enabled: true` for a tenant whose `amfa:` block is enabled, and restart POINT.
+1. Set `amfa_checker.enabled: true` for a tenant whose `amfa:` block is enabled, and restart KMT.
 2. Trigger one risk-engine rejection via AMFA's `/decision` endpoint (a login that AMFA's risk engine rejects).
 3. Wait one poll interval (default 1m).
-4. Confirm the alert appears on POINT's Alerts page and that a notification lands in the configured Slack channel.
+4. Confirm the alert appears on KMT's Alerts page and that a notification lands in the configured Slack channel.
 
 ### Reload AMFA alerts (on demand)
 
@@ -360,7 +360,7 @@ Endpoints (both require `amfa:read`, under `/api/tenants/{tenantId}`):
 
 ### Rollback
 
-To disable the checker, set `enabled: false` on the `amfa_checker` block and restart POINT. No alerts are generated while it is off, and AMFA itself is never touched.
+To disable the checker, set `enabled: false` on the `amfa_checker` block and restart KMT. No alerts are generated while it is off, and AMFA itself is never touched.
 
 ### Troubleshooting
 
@@ -376,10 +376,10 @@ To disable the checker, set `enabled: false` on the `amfa_checker` block and res
 
 - **Per-tenant lifecycle.** One `amfacheck.Service` goroutine is constructed per tenant whose `amfa.enabled: true` AND `keycloak.global.amfa_checker.enabled: true`. The fx module starts each on `OnStart` and stops it on `OnStop`.
 - **Poll-loop context.** The poll loop runs on a long-lived background context owned by the fx hook, NOT fx's `OnStart` context. fx cancels the `OnStart` context once startup finishes, so passing it to the loop would stop polling moments after boot (the loop would log `amfacheck polling cancelled`). Shutdown happens via `OnStop`, which cancels the background context and calls `Stop()` for a graceful drain.
-- **Realm discovery.** Each tick the checker resolves the tenant's realms via `keycloak.Service.ListRealms` (the realms POINT has discovered/stored), so realms added or removed in Keycloak are picked up without a restart. AMFA events are matched by `auth_context_json->>'realm_id'`, so a realm only produces alerts if POINT has discovered a realm of that name.
+- **Realm discovery.** Each tick the checker resolves the tenant's realms via `keycloak.Service.ListRealms` (the realms KMT has discovered/stored), so realms added or removed in Keycloak are picked up without a restart. AMFA events are matched by `auth_context_json->>'realm_id'`, so a realm only produces alerts if KMT has discovered a realm of that name.
 - **Checkpoints.** Per-event rules (1, 3) keep an in-memory per-realm "last seen event time" and query `event_time > since`. The checkpoint is lost on restart; the first tick after a restart re-scans the last `poll_interval` and per-event `AlertID` dedup absorbs the replay. Because the checkpoint advances even when a downstream `SaveAlert` fails, a transient save failure is not retried for that exact event (rare; acceptable given dedup).
 - **Threshold rules (4a, 4b) use a rolling window.** `login_error` and `client_login_error` count events of their type over a rolling `[now - window, now]` window (the same rolling style as rule 2), NOT a fixed clock-aligned bucket. This means a recent burst is always counted regardless of when the check runs, so a manual "Reload AMFA alerts" click (or a poll) reliably catches a burst even if it landed just before a clock boundary. The `AlertID` is stable per `(realm, eventType)`, so repeated polls and manual runs dedup to one alert row (the service bumps `LastSeen` on recurrence), mirroring how `eventscheck` handles its error-threshold alerts. (An earlier design used a fixed window-aligned bucket keyed into the `AlertID`; it was changed because a manual trigger could miss a burst that fell in the previous bucket.)
-- **Alert storage.** Alerts are `domain.Alert` rows in POINT's `configuration_alerts` table with `source=event` and `check_type` one of `amfa-risk-rejected`, `amfa-repeated-risky`, `amfa-vpn-risky`, `amfa-login-error`, `amfa-client-login-error`.
+- **Alert storage.** Alerts are `domain.Alert` rows in KMT's `configuration_alerts` table with `source=event` and `check_type` one of `amfa-risk-rejected`, `amfa-repeated-risky`, `amfa-vpn-risky`, `amfa-login-error`, `amfa-client-login-error`.
 
 ### Testing the checker
 
@@ -409,9 +409,9 @@ docker run --rm -v "$PWD:/app" -v go-mod-cache:/go/pkg/mod -w /app \
 
 These confirm the four new query methods are valid against the real `auth_event` / `auth_process` / `auth_context` schema and that one checker tick runs cleanly. They assert only that queries execute and return sane shapes (the seed data varies), so they are safe on any AMFA DB.
 
-**3. Live end-to-end against the running stack.** This proves the fx graph assembles, the poll loop runs, and alerts land in POINT's DB. It injects fresh AMFA rows, so do it only against a local/dev AMFA database and clean up afterward.
+**3. Live end-to-end against the running stack.** This proves the fx graph assembles, the poll loop runs, and alerts land in KMT's DB. It injects fresh AMFA rows, so do it only against a local/dev AMFA database and clean up afterward.
 
-Step 1: enable the checker with a short interval and low thresholds (under `keycloak.global` in `config.yaml`), then rebuild and restart POINT:
+Step 1: enable the checker with a short interval and low thresholds (under `keycloak.global` in `config.yaml`), then rebuild and restart KMT:
 
 ```yaml
     amfa_checker:
@@ -428,10 +428,10 @@ Step 1: enable the checker with a short interval and low thresholds (under `keyc
 ```bash
 docker compose -f deployments/local/docker-compose.yml build api-server
 docker compose -f deployments/local/docker-compose.yml up -d --force-recreate api-server
-docker logs point-monitoring-server 2>&1 | grep -i amfacheck    # expect "amfacheck service starting ... num_checks=5"
+docker logs kmt-server 2>&1 | grep -i amfacheck    # expect "amfacheck service starting ... num_checks=5"
 ```
 
-Step 2: inject fresh events that trigger all five rules for a realm POINT has discovered (e.g. `AdaptiveAuth`). Insert via AMFA's superuser, not the read-only role. `auth_process` has NOT NULL + FK columns (`auth_context_hash`, `device_info_hash`, `network_location_hash`, `parameters_config_id`), so reuse values from an existing row:
+Step 2: inject fresh events that trigger all five rules for a realm KMT has discovered (e.g. `AdaptiveAuth`). Insert via AMFA's superuser, not the read-only role. `auth_process` has NOT NULL + FK columns (`auth_context_hash`, `device_info_hash`, `network_location_hash`, `parameters_config_id`), so reuse values from an existing row:
 
 ```bash
 # grab reusable FK-satisfying values from any existing auth_process
@@ -444,7 +444,7 @@ Then insert recent (`NOW()`) `auth_process` rows with `auth_context_json='{"real
 Step 3: wait one poll interval and confirm the alerts:
 
 ```bash
-docker exec point-monitoring-postgres psql -U monitoring -d monitoring -c \
+docker exec kmt-postgres psql -U monitoring -d monitoring -c \
   "SELECT check_type, severity, status, realm_name, count(*) \
    FROM configuration_alerts WHERE check_type LIKE 'amfa-%' GROUP BY 1,2,3,4 ORDER BY 1"
 ```
@@ -458,8 +458,8 @@ Step 4: clean up and restore:
 docker exec point-adaptive-authentication-postgres-1 psql -U keycloak -d adaptive_mfa -c \
   "DELETE FROM auth_event WHERE details='AMFACHECK_LIVE_TEST'; \
    DELETE FROM auth_process WHERE id::text LIKE '00000000-0000-0000-0000-%';"
-# remove the test alerts from POINT
-docker exec point-monitoring-postgres psql -U monitoring -d monitoring -c \
+# remove the test alerts from KMT
+docker exec kmt-postgres psql -U monitoring -d monitoring -c \
   "DELETE FROM configuration_alerts WHERE check_type LIKE 'amfa-%'"
 # revert config.yaml (set amfa_checker.enabled: false or remove the block) and restart
 docker compose -f deployments/local/docker-compose.yml up -d --force-recreate api-server

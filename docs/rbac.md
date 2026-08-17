@@ -4,7 +4,7 @@
 
 ## Overview
 
-The Point Monitoring Platform enforces access control through **two independent layers**:
+The Keycloak Monitoring Tool enforces access control through **two independent layers**:
 
 1. **Permissions** — gate *what actions* a user can perform (e.g. `alerts:read`, `tenants:write`).
 2. **Tenant policies** — gate *which tenants' data* a non-admin user can access.
@@ -153,7 +153,7 @@ All permissions follow the format `resource:action`. Defined in `rbac/constants.
 
 ### Platform Users
 
-> These are **platform users** (users of Point Monitoring itself), not Keycloak users.
+> These are **platform users** (users of Keycloak Monitoring Tool itself), not Keycloak users.
 
 | Permission | Description |
 |------------|-------------|

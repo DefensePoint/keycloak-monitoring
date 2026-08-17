@@ -423,7 +423,7 @@ export function SettingsPage() {
                   Application
                 </Typography>
                 <Typography variant="body2">
-                  POINT Monitoring Platform
+                  Keycloak Monitoring Tool
                 </Typography>
               </Box>
               <Box>

@@ -497,7 +497,7 @@ func (c *AmfaCheckerConfig) ApplyDefaults() {
 
 // NotificationsConfig represents notification integrations configuration
 type NotificationsConfig struct {
-	BaseURL string       `mapstructure:"base_url"` // Base URL for the Point Monitoring web UI (e.g., https://monitoring.example.com)
+	BaseURL string       `mapstructure:"base_url"` // Base URL for the Keycloak Monitoring Tool web UI (e.g., https://monitoring.example.com)
 	GitLab  GitLabConfig `mapstructure:"gitlab"`
 	Slack   SlackConfig  `mapstructure:"slack"`
 	Email   EmailConfig  `mapstructure:"email"`

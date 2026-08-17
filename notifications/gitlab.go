@@ -427,7 +427,7 @@ func (g *GitLabNotifier) buildIssueDescription(alert *domain.Alert) string {
 	}
 
 	buf.WriteString("---\n")
-	buf.WriteString("*This issue was automatically created by the Point Monitoring Platform*\n")
+	buf.WriteString("*This issue was automatically created by the Keycloak Monitoring Tool*\n")
 
 	return buf.String()
 }

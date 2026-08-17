@@ -313,7 +313,7 @@ describe("LoginPage", () => {
     render(<LoginPage />);
 
     expect(screen.getByAltText("DefensePoint")).toBeInTheDocument();
-    expect(screen.getByText("POINT")).toBeInTheDocument();
+    expect(screen.getByText("KMT")).toBeInTheDocument();
     expect(screen.getByText("MONITORING PLATFORM")).toBeInTheDocument();
   });
 

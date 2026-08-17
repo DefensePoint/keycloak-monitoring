@@ -130,20 +130,20 @@ docker-build-server: ## Build server Docker image
 	@echo "Building server Docker image..."
 	@docker build \
 		--build-arg SERVICE=server \
-		-t point-monitoring-server:$(VERSION) \
-		-t point-monitoring-server:latest \
+		-t kmt-server:$(VERSION) \
+		-t kmt-server:latest \
 		-f build/Dockerfile .
-	@echo "Server image built: point-monitoring-server:$(VERSION)"
+	@echo "Server image built: kmt-server:$(VERSION)"
 
 .PHONY: docker-build-web
 docker-build-web: ## Build web Docker image
 	@echo "Building web Docker image..."
 	@docker build \
 		--build-arg SERVICE=web \
-		-t point-monitoring-web:$(VERSION) \
-		-t point-monitoring-web:latest \
+		-t kmt-web:$(VERSION) \
+		-t kmt-web:latest \
 		-f build/Dockerfile .
-	@echo "Web image built: point-monitoring-web:$(VERSION)"
+	@echo "Web image built: kmt-web:$(VERSION)"
 
 .PHONY: docker-build
 docker-build: docker-build-server docker-build-web ## Build all Docker images

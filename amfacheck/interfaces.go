@@ -1,4 +1,4 @@
-// Package amfacheck converts high-risk AMFA login events into POINT alerts.
+// Package amfacheck converts high-risk AMFA login events into KMT alerts.
 // It deliberately mirrors the shape of the eventscheck package: one per-tenant
 // poll loop running a set of Check implementations whose alerts flow through
 // the existing alerts repository and notification fan-out. It is a sibling of

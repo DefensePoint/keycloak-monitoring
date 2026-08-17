@@ -15,21 +15,21 @@ import (
 
 // newTestClient opens a postgres-backed GORM connection for migration tests.
 //
-// The connection DSN is taken from the POINT_TEST_DATABASE_DSN environment
+// The connection DSN is taken from the KMT_TEST_DATABASE_DSN environment
 // variable. If unset, the test is skipped. The test connects to a real
 // PostgreSQL instance (sqlite is not a dependency of this project), so these
 // tests are integration-style and only run when an operator opts in.
 //
 // Example:
 //
-//	POINT_TEST_DATABASE_DSN="host=localhost port=5432 dbname=point_test user=point password=point sslmode=disable" \
+//	KMT_TEST_DATABASE_DSN="host=localhost port=5432 dbname=point_test user=point password=point sslmode=disable" \
 //	    go test ./pkg/database/...
 func newTestClient(t *testing.T) *Client {
 	t.Helper()
 
-	dsn := os.Getenv("POINT_TEST_DATABASE_DSN")
+	dsn := os.Getenv("KMT_TEST_DATABASE_DSN")
 	if dsn == "" {
-		t.Skip("POINT_TEST_DATABASE_DSN not set; skipping integration test")
+		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
 	}
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{

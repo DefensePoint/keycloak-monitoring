@@ -3,7 +3,7 @@
 // GORM will never attempt INSERT/UPDATE/DELETE through these structs; this is
 // defense in depth on top of DB-role-level least-privilege enforcement, and
 // AutoMigrate is never invoked on this connection because the AMFA database
-// schema is owned by AMFA, not POINT.
+// schema is owned by AMFA, not KMT.
 package postgres
 
 import (

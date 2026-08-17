@@ -6,7 +6,7 @@
 | **Author** | Jonas Figu (with Claude) |
 | **Status** | Draft - awaiting user review |
 | **Scope** | Add an on-demand way to run the AMFA risk-alert checker from the Alerts page, via a dedicated "Reload AMFA alerts" button. Builds on the AMFA Risk Alerts feature (2026-06-02). |
-| **Touches** | POINT Monitoring Platform only. AMFA codebase is **not** modified. No pre-existing alerts logic is changed; only additive code. |
+| **Touches** | Keycloak Monitoring Tool only. AMFA codebase is **not** modified. No pre-existing alerts logic is changed; only additive code. |
 
 ---
 
@@ -51,7 +51,7 @@ The button reuses the checker's existing `RunCheckNow` path, so it produces exac
                                  │ HTTP (chi)
                                  ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  POINT API server                                                  │
+│  KMT API server                                                  │
 │   NEW endpoints (AMFA checker handlers):                           │
 │     GET  /tenants/{id}/amfa-checker      -> { enabled: bool }      │
 │     POST /tenants/{id}/amfa-checker/run  -> { status: "ok" }       │

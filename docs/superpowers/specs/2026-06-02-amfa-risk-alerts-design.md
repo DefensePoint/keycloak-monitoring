@@ -5,18 +5,18 @@
 | **Date** | 2026-06-02 |
 | **Author** | Jonas Figu (with Claude) |
 | **Status** | Draft — awaiting user review |
-| **Scope** | Add automatic POINT alerts triggered by high-risk AMFA events. Builds on the existing AMFA Events feature (2026-05-26) and POINT's existing `alerts/` + `notifications/` infrastructure. |
-| **Touches** | POINT Monitoring Platform only. AMFA codebase is **not** modified. Pre-existing POINT logic is **not** changed; only additive code. |
+| **Scope** | Add automatic KMT alerts triggered by high-risk AMFA events. Builds on the existing AMFA Events feature (2026-05-26) and KMT's existing `alerts/` + `notifications/` infrastructure. |
+| **Touches** | Keycloak Monitoring Tool only. AMFA codebase is **not** modified. Pre-existing KMT logic is **not** changed; only additive code. |
 
 ---
 
 ## 1. Goal
 
-POINT Monitoring already surfaces AMFA login activity in a dashboard page (risky KPI, events table, geolocation map). Operators currently have to *look* at the page to notice problems. This spec adds a background service that **automatically converts high-risk AMFA events into POINT alerts**, which then flow through the existing alert lifecycle (active → acknowledged → resolved → ignored) and notification fan-out (Slack / Email / GitLab) — making AMFA risk signals first-class alerting citizens alongside Keycloak configuration alerts.
+Keycloak Monitoring Tool already surfaces AMFA login activity in a dashboard page (risky KPI, events table, geolocation map). Operators currently have to *look* at the page to notice problems. This spec adds a background service that **automatically converts high-risk AMFA events into KMT alerts**, which then flow through the existing alert lifecycle (active → acknowledged → resolved → ignored) and notification fan-out (Slack / Email / GitLab) — making AMFA risk signals first-class alerting citizens alongside Keycloak configuration alerts.
 
 ## 2. Non-goals
 
-- **Modifying AMFA.** AMFA's codebase is read-only from POINT's perspective.
+- **Modifying AMFA.** AMFA's codebase is read-only from KMT's perspective.
 - **Activating the dormant `eventscheck/` package.** It contains `LoginErrorCheck`, `ClientErrorCheck`, etc. but is not wired into runtime today. Activating it is a separate decision tracked elsewhere; this spec deliberately mirrors its shape in a sibling `amfacheck/` package rather than touching it.
 - **Persistent checkpoint state.** First MVP keeps the "last-seen event time" per-Check in memory only. Lost on restart, recovered by re-scanning the most recent poll window; per-event AlertID dedup absorbs the replay.
 - **Per-tenant config of thresholds.** Thresholds are global (under `keycloak.global.amfa_checker`), matching the existing `event_checker` shape. Per-tenant overrides are a future enhancement.
@@ -40,7 +40,7 @@ POINT Monitoring already surfaces AMFA login activity in a dashboard page (risky
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  POINT API server (cmd/server, Go)                                │
+│  KMT API server (cmd/server, Go)                                │
 │                                                                  │
 │  Existing infrastructure used as-is:                             │
 │    amfa.Registry          — tenantID → *amfa/postgres.Repository │
@@ -70,13 +70,13 @@ POINT Monitoring already surfaces AMFA login activity in a dashboard page (risky
                               │ Reads per-tenant
                               ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  AMFA's PostgreSQL (existing, read-only via point_monitoring_ro) │
+│  AMFA's PostgreSQL (existing, read-only via kmt_ro) │
 └──────────────────────────────────────────────────────────────────┘
                               │
                               │ Writes alerts (via alerts.Repository)
                               ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  POINT's PostgreSQL — alerts table (existing schema, unchanged)  │
+│  KMT's PostgreSQL — alerts table (existing schema, unchanged)  │
 └──────────────────────────────────────────────────────────────────┘
                               │
                               │ Notifications via existing fan-out
@@ -469,7 +469,7 @@ on tick:
 | Repository returns `amfa.ErrAmfaUnavailable` | Log WARN, skip this Check this tick, retry next tick. No partial alerts. |
 | Repository returns other error | Log ERROR with context, skip this Check this tick. |
 | `alertStore.SaveAlert` fails | Log ERROR; do NOT notify; next tick retries via Check re-execution. |
-| `notifier.NotifyAlert` fails | Log ERROR; alert still saved in POINT's DB and visible in UI; future recurrences trigger fresh notification attempts. |
+| `notifier.NotifyAlert` fails | Log ERROR; alert still saved in KMT's DB and visible in UI; future recurrences trigger fresh notification attempts. |
 | Tenant's Repository missing from registry at startup | Service for that tenant not constructed; logged WARN; other tenants unaffected. |
 | Shutdown deadline exceeded | 10s timeout; in-flight queries respect ctx cancellation. |
 
@@ -483,7 +483,7 @@ Errors from one Check never block other Checks on the same tick or other tenants
 | Realm list changes mid-runtime | Each Check holds a `realmsFn` closure that calls `keycloak.Repository.GetRealms(ctx, tenantID)` on every tick — new/removed realms are picked up without restart |
 | Tenant removed at runtime | Out of scope; config is read at boot only. Documented limitation. |
 | 1000+ risky events in one tick | Rule 1 produces 1000+ alerts (per-event dedup means no consolidation). Operators see the flood; this is the documented intent. Operators can use the existing `alerts.SilenceManager` to suppress noisy IPs/realms. |
-| AMFA / POINT DB clock skew | Both use UTC; minute-scale skew is absorbed by per-event AlertID dedup |
+| AMFA / KMT DB clock skew | Both use UTC; minute-scale skew is absorbed by per-event AlertID dedup |
 | Rule 2 at UTC midnight | Day boundary is UTC. 2 events at 23:50 + 1 event at 00:10 won't cross the 3-event threshold (split across two days). Acceptable; documented. |
 | Check threshold = 0 in config | Treated as "disabled" (matches eventscheck behavior) |
 | Empty realms list for a tenant | Service starts; every tick is no-op until realms appear |
@@ -506,15 +506,15 @@ Errors from one Check never block other Checks on the same tick or other tenants
 **Integration test (`//go:build integration`):**
 
 - Seed AMFA's test DB with known events covering all 5 rules' triggers.
-- Construct `amfacheck.Service` against the real AMFA DB and POINT's test alerts repo.
-- Run one tick; assert correct alert rows in POINT's DB.
+- Construct `amfacheck.Service` against the real AMFA DB and KMT's test alerts repo.
+- Run one tick; assert correct alert rows in KMT's DB.
 - Skips with `t.Skip` when `AMFA_TEST_DSN` is missing (same pattern as existing AMFA integration tests).
 
 **Manual smoke** (documented in `docs/amfa-integration.md`):
 
 - After deploy, trigger one rejection via AMFA's `/decision` endpoint.
 - Wait one poll interval (default 1m).
-- See the alert appear on POINT's Alerts page.
+- See the alert appear on KMT's Alerts page.
 - Verify notification arrived in the configured Slack channel.
 
 ## 10. Deployment
@@ -564,7 +564,7 @@ INFO when alerts are produced:
 
 ### 10.4 Rollback
 
-Set `keycloak.global.amfa_checker.enabled: false` and restart POINT. All `amfacheck.Service` instances stop; no new alerts produced. Existing alerts in POINT's DB remain visible in the UI for the operator to ack/resolve/ignore.
+Set `keycloak.global.amfa_checker.enabled: false` and restart KMT. All `amfacheck.Service` instances stop; no new alerts produced. Existing alerts in KMT's DB remain visible in the UI for the operator to ack/resolve/ignore.
 
 ## 11. Files changed (summary)
 

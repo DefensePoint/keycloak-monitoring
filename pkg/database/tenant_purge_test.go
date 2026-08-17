@@ -25,7 +25,7 @@ func testDBConfig() *config.DatabaseConfig {
 // each test a database shaped exactly like a fresh install.
 //
 // Named distinctly from client_test.go's newTestClient (which is gated on
-// POINT_TEST_DATABASE_DSN and only migrates the RBAC tables) to avoid a
+// KMT_TEST_DATABASE_DSN and only migrates the RBAC tables) to avoid a
 // redeclaration in this package.
 func newPurgeTestClient(t *testing.T) *Client {
 	t.Helper()

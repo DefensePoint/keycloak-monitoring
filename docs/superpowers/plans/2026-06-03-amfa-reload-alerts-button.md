@@ -12,7 +12,7 @@
 
 ## ⚠️ Execution notes (read before starting)
 
-1. **No Go toolchain on this host - run Go in Docker.** Convenience function (run from repo root `/Users/user/work-dir/point-monitoring-platform`):
+1. **No Go toolchain on this host - run Go in Docker.** Convenience function (run from repo root `/Users/user/work-dir/kmt`):
    ```bash
    gotest() { docker run --rm -v "$PWD:/app" -v go-mod-cache:/go/pkg/mod -w /app \
      golang:1.25.1-alpine sh -c "apk add --no-cache git build-base >/dev/null 2>&1 && $*"; }
