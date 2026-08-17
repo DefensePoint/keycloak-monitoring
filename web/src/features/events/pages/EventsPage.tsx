@@ -32,6 +32,7 @@ import {
   useEvents,
   useAmfaStats,
   useAmfaGeo,
+  useAmfaRealms,
   useSessionStorage,
 } from "@/shared/hooks";
 import {
@@ -144,6 +145,17 @@ export function EventsPage() {
     refetchInterval: 30000, // 30 seconds instead of default 10 seconds
   });
 
+  // Realms whose Keycloak browser flow uses the AMFA authenticator. Drives
+  // whether the AMFA-only sections (KPI cards, geo map, Risk column) show:
+  // for a specific realm, only if it is AMFA-enabled; for "all realms", if any
+  // realm in the tenant is AMFA-enabled.
+  const { data: amfaRealms } = useAmfaRealms(selectedTenant?.tenant_id);
+  const amfaRealmSet = amfaRealms ?? [];
+  const currentRealmHasAmfa =
+    selectedRealm !== "all" && amfaRealmSet.includes(selectedRealm);
+  const showAmfaSections =
+    selectedRealm === "all" ? amfaRealmSet.length > 0 : currentRealmHasAmfa;
+
   // AMFA KPI counters for the selected realm. AMFA stats are per-realm, so the
   // strip only populates once a specific realm is chosen (dashes for "all").
   const { data: amfaStats } = useAmfaStats({
@@ -153,9 +165,10 @@ export function EventsPage() {
     endTime,
   });
 
-  // AMFA geo buckets for the login map. The /amfa/geo endpoint is per-realm, so
-  // the map only renders once a specific realm is chosen (hidden for "all").
-  const realmForAmfa = selectedRealm !== "all" ? selectedRealm : undefined;
+  // AMFA geo buckets for the login map. The /amfa/geo endpoint is per-realm, and
+  // the map only renders for a specific AMFA-enabled realm, so gate the query on
+  // that to avoid pointless calls for non-AMFA realms.
+  const realmForAmfa = currentRealmHasAmfa ? selectedRealm : undefined;
   const { data: amfaGeo } = useAmfaGeo({
     tenantId: selectedTenant?.tenant_id,
     realm: realmForAmfa,
@@ -352,14 +365,19 @@ export function EventsPage() {
           />
         ),
       },
-      {
-        accessorKey: "risk_level",
-        header: "Risk",
-        size: 80,
-        Cell: ({ row }: { row: MRT_Row<EventWithFormattedDate> }) => (
-          <RiskBadge risk={row.original.risk_level} />
-        ),
-      },
+      // Risk column only for AMFA-enabled realms (see showAmfaSections).
+      ...(showAmfaSections
+        ? [
+            {
+              accessorKey: "risk_level",
+              header: "Risk",
+              size: 80,
+              Cell: ({ row }: { row: MRT_Row<EventWithFormattedDate> }) => (
+                <RiskBadge risk={row.original.risk_level} />
+              ),
+            } as MRT_ColumnDef<EventWithFormattedDate>,
+          ]
+        : []),
       {
         id: "actions",
         header: "Actions",
@@ -378,7 +396,7 @@ export function EventsPage() {
         ),
       },
     ],
-    [handleEventClick],
+    [handleEventClick, showAmfaSections],
   );
 
   return (
@@ -416,8 +434,9 @@ export function EventsPage() {
         </Button>
       </PageHeader>
 
-      {/* AMFA KPI strip for the selected realm (empty for "all realms") */}
-      <AmfaKpiRow stats={amfaStats} />
+      {/* AMFA KPI strip: only for AMFA-enabled realms (or "all" when any realm
+          uses AMFA). Empty/dashes when a specific AMFA realm has no data yet. */}
+      {showAmfaSections && <AmfaKpiRow stats={amfaStats} />}
 
       {/* AMFA geolocation map: per-realm, so it only shows once a specific
           realm is selected. Collapsible, expanded by default, sits between the

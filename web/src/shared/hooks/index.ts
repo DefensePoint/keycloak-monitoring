@@ -30,5 +30,6 @@ export {
 export { useEvents, useEventStats } from "./useEvents";
 export { useAmfaStats } from "./useAmfaStats";
 export { useAmfaGeo } from "./useAmfaGeo";
+export { useAmfaRealms } from "./useAmfaRealms";
 export { useVersion, useInfinispanMetrics } from "./useHealth";
 export { useFormErrors } from "./useFormErrors";

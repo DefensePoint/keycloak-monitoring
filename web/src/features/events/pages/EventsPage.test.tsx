@@ -7,6 +7,7 @@ import { useTenant } from "@/shared/context";
 const mockSetSearchParams = vi.fn();
 const mockUseKeycloakDashboard = vi.fn();
 const mockUseEvents = vi.fn();
+const mockUseAmfaRealms = vi.fn<() => { data: string[] }>(() => ({ data: [] }));
 
 vi.mock("react-router-dom", () => ({
   useLocation: () => ({ pathname: "/tenant-1/events" }),
@@ -30,6 +31,7 @@ vi.mock("@/shared/hooks", () => ({
   useEvents: () => mockUseEvents(),
   useAmfaStats: () => ({ data: undefined }),
   useAmfaGeo: () => ({ data: undefined }),
+  useAmfaRealms: () => mockUseAmfaRealms(),
   useSessionStorage: (key: string, defaultValue: unknown) => [
     defaultValue,
     vi.fn(),
@@ -179,6 +181,8 @@ describe("EventsPage", () => {
       isLoading: false,
       isError: false,
     });
+
+    mockUseAmfaRealms.mockReturnValue({ data: [] });
   });
 
   it("should render events page header", async () => {
@@ -253,5 +257,26 @@ describe("EventsPage", () => {
     });
 
     expect(screen.getByText(/2 total events/)).toBeInTheDocument();
+  });
+
+  it("hides the AMFA KPI strip when no realm uses AMFA", async () => {
+    mockUseAmfaRealms.mockReturnValue({ data: [] });
+    render(<EventsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Events")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("amfa-kpi-row")).not.toBeInTheDocument();
+  });
+
+  it("shows the AMFA KPI strip when a realm uses AMFA", async () => {
+    // selectedRealm is "all" in this suite, so any AMFA-enabled realm turns the
+    // section on.
+    mockUseAmfaRealms.mockReturnValue({ data: ["AdaptiveAuth"] });
+    render(<EventsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("amfa-kpi-row")).toBeInTheDocument();
+    });
   });
 });

@@ -3,6 +3,7 @@ package keycloak
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
@@ -43,6 +44,11 @@ type Service interface {
 	ListRealms(ctx context.Context, tenantID string) ([]*domain.KeycloakRealmInfo, error)
 	GetRealm(ctx context.Context, tenantID, realmName string) (*domain.KeycloakRealmInfo, error)
 
+	// ListAmfaEnabledRealms returns the names of realms whose bound browser login
+	// flow uses an Adaptive MFA (AMFA) authenticator. Result is cached
+	// per tenant with a short TTL. Requires a live Keycloak client.
+	ListAmfaEnabledRealms(ctx context.Context, tenantID string) ([]string, error)
+
 	// Dashboard
 	GetDashboard(ctx context.Context, tenantID string, realmName string) (*Dashboard, error)
 
@@ -65,6 +71,22 @@ type ClientProvider interface {
 	GetClient(tenantID string) AdminAPI
 }
 
+// Provider IDs of the Adaptive MFA authenticators, as registered by the
+// Adaptive MFA Keycloak SPI. A realm "uses AMFA" when its browser login flow
+// contains one of these executions (and it is not DISABLED).
+const (
+	providerIDAdaptiveAuth            = "adaptive-auth"
+	providerIDConditionalAdaptiveAuth = "conditional-adaptive-auth"
+)
+
+// amfaRealmsCacheTTL bounds how often we walk each realm's Keycloak flow.
+const amfaRealmsCacheTTL = 5 * time.Minute
+
+type amfaRealmsCacheEntry struct {
+	realms    []string
+	expiresAt time.Time
+}
+
 // service implements the Service interface.
 type service struct {
 	eventRepo      EventRepository
@@ -73,6 +95,9 @@ type service struct {
 	realmRepo      RealmRepository
 	clientProvider ClientProvider
 	versionChecker *VersionChecker
+
+	amfaRealmsMu    sync.Mutex
+	amfaRealmsCache map[string]amfaRealmsCacheEntry
 }
 
 // NewService creates a new keycloak service.
@@ -85,12 +110,13 @@ func NewService(
 	versionChecker *VersionChecker,
 ) Service {
 	return &service{
-		eventRepo:      eventRepo,
-		metricsRepo:    metricsRepo,
-		healthRepo:     healthRepo,
-		realmRepo:      realmRepo,
-		clientProvider: clientProvider,
-		versionChecker: versionChecker,
+		eventRepo:       eventRepo,
+		metricsRepo:     metricsRepo,
+		healthRepo:      healthRepo,
+		realmRepo:       realmRepo,
+		clientProvider:  clientProvider,
+		versionChecker:  versionChecker,
+		amfaRealmsCache: make(map[string]amfaRealmsCacheEntry),
 	}
 }
 
@@ -212,6 +238,108 @@ func (s *service) ListRealms(ctx context.Context, tenantID string) ([]*domain.Ke
 // GetRealm returns a specific realm by name.
 func (s *service) GetRealm(ctx context.Context, tenantID, realmName string) (*domain.KeycloakRealmInfo, error) {
 	return s.realmRepo.GetRealmByName(ctx, tenantID, realmName)
+}
+
+// ListAmfaEnabledRealms returns the names of realms whose bound browser login
+// flow uses an Adaptive MFA (AMFA) authenticator. Results are cached per
+// tenant for amfaRealmsCacheTTL; on a Keycloak error a still-usable stale cache
+// entry is returned in preference to failing.
+func (s *service) ListAmfaEnabledRealms(ctx context.Context, tenantID string) ([]string, error) {
+	if cached, ok := s.cachedAmfaRealms(tenantID, false); ok {
+		return cached, nil
+	}
+
+	if s.clientProvider == nil {
+		return nil, ErrClientProviderNotConfigured
+	}
+	client := s.clientProvider.GetClient(tenantID)
+	if client == nil {
+		return nil, ErrClientNotAvailable
+	}
+
+	realms, err := client.GetAllRealms(ctx)
+	if err != nil {
+		if stale, ok := s.cachedAmfaRealms(tenantID, true); ok {
+			return stale, nil
+		}
+		return nil, err
+	}
+
+	enabled := make([]string, 0)
+	for _, realm := range realms {
+		if realm == nil || realm.Realm == "" {
+			continue
+		}
+		if s.realmUsesAdaptiveAuth(ctx, client, realm.Realm) {
+			enabled = append(enabled, realm.Realm)
+		}
+	}
+
+	s.amfaRealmsMu.Lock()
+	s.amfaRealmsCache[tenantID] = amfaRealmsCacheEntry{
+		realms:    enabled,
+		expiresAt: time.Now().Add(amfaRealmsCacheTTL),
+	}
+	s.amfaRealmsMu.Unlock()
+
+	return enabled, nil
+}
+
+// cachedAmfaRealms returns the cached AMFA-enabled realms for a tenant. When
+// allowStale is false only unexpired entries hit; when true any present entry
+// (even expired) is returned, used as a fallback when Keycloak is unreachable.
+func (s *service) cachedAmfaRealms(tenantID string, allowStale bool) ([]string, bool) {
+	s.amfaRealmsMu.Lock()
+	defer s.amfaRealmsMu.Unlock()
+	entry, ok := s.amfaRealmsCache[tenantID]
+	if !ok {
+		return nil, false
+	}
+	if !allowStale && time.Now().After(entry.expiresAt) {
+		return nil, false
+	}
+	return entry.realms, true
+}
+
+// realmUsesAdaptiveAuth reports whether any of a realm's top-level authentication
+// flows contains an enabled Adaptive MFA authenticator. We scan every
+// top-level flow (not just the realm's bound browserFlow) because AMFA is often
+// bound at the client level via an authentication-flow override to a custom flow
+// (e.g. "hybrid-flow") rather than as the realm-wide browser flow. A flow's
+// executions listing already includes its nested subflows, so top-level flows
+// are sufficient. Errors inspecting a realm are treated as "not AMFA".
+func (s *service) realmUsesAdaptiveAuth(ctx context.Context, client AdminAPI, realmName string) bool {
+	flows, err := client.GetAuthenticationFlows(ctx, realmName)
+	if err != nil {
+		return false
+	}
+	for _, flow := range flows {
+		if !flow.TopLevel {
+			continue
+		}
+		execs, err := client.GetFlowExecutions(ctx, realmName, flow.Alias)
+		if err != nil {
+			continue
+		}
+		if flowUsesAdaptiveAuth(execs) {
+			return true
+		}
+	}
+	return false
+}
+
+// flowUsesAdaptiveAuth reports whether a flow's executions include an enabled
+// Adaptive MFA authenticator.
+func flowUsesAdaptiveAuth(execs []keycloakadmin.AuthenticationExecutionInfoRepresentation) bool {
+	for _, e := range execs {
+		if e.Requirement == "DISABLED" {
+			continue
+		}
+		if e.ProviderID == providerIDAdaptiveAuth || e.ProviderID == providerIDConditionalAdaptiveAuth {
+			return true
+		}
+	}
+	return false
 }
 
 // GetDashboard returns aggregated dashboard data for a tenant.

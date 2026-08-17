@@ -122,6 +122,10 @@ type AdminAPI interface {
 	GetAllRealms(ctx context.Context) ([]*keycloakadmin.RealmRepresentation, error)
 	GetRealmInfo(ctx context.Context, realmName string) (*keycloakadmin.RealmRepresentation, error)
 
+	// Authentication flows
+	GetAuthenticationFlows(ctx context.Context, realmName string) ([]keycloakadmin.AuthenticationFlowRepresentation, error)
+	GetFlowExecutions(ctx context.Context, realmName, flowAlias string) ([]keycloakadmin.AuthenticationExecutionInfoRepresentation, error)
+
 	// Users
 	GetRealmUsers(ctx context.Context, realmName string, first, max int) ([]keycloakadmin.UserRepresentation, error)
 	GetUsers(ctx context.Context, realmName string, first, max int) ([]*keycloakadmin.UserRepresentation, error)

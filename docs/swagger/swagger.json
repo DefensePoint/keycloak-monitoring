@@ -2188,6 +2188,59 @@
                 }
             }
         },
+        "/api/tenants/{tenantID}/keycloak/amfa-realms": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns realm names whose browser login flow uses an Adaptive MFA authenticator",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "keycloak"
+                ],
+                "summary": "List AMFA-enabled realms",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "tenantID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/tenants/{tenantID}/keycloak/dashboard": {
             "get": {
                 "security": [

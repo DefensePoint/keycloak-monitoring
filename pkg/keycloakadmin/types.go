@@ -50,6 +50,36 @@ type RealmRepresentation struct {
 	EnabledEventTypes            []string `json:"enabledEventTypes"`
 	AdminEventsEnabled           bool     `json:"adminEventsEnabled"`
 	AdminEventsDetailsEnabled    bool     `json:"adminEventsDetailsEnabled"`
+	// BrowserFlow is the alias of the authentication flow bound to interactive
+	// browser logins at the realm level (default "browser").
+	BrowserFlow string `json:"browserFlow"`
+}
+
+// AuthenticationFlowRepresentation is one authentication flow in a realm
+// (GET /admin/realms/{realm}/authentication/flows). Only top-level flows are
+// returned by that endpoint; their executions include nested subflows.
+type AuthenticationFlowRepresentation struct {
+	ID          string `json:"id"`
+	Alias       string `json:"alias"`
+	Description string `json:"description"`
+	ProviderID  string `json:"providerId"`
+	TopLevel    bool   `json:"topLevel"`
+	BuiltIn     bool   `json:"builtIn"`
+}
+
+// AuthenticationExecutionInfoRepresentation is one entry in a realm
+// authentication flow's flattened execution list
+// (GET /admin/realms/{realm}/authentication/flows/{flowAlias}/executions).
+// Subflow rows have AuthenticationFlow=true and an empty ProviderID; authenticator
+// rows carry the ProviderID of the authenticator implementation.
+type AuthenticationExecutionInfoRepresentation struct {
+	ID                 string `json:"id"`
+	Requirement        string `json:"requirement"`
+	DisplayName        string `json:"displayName"`
+	ProviderID         string `json:"providerId"`
+	AuthenticationFlow bool   `json:"authenticationFlow"`
+	Level              int    `json:"level"`
+	Index              int    `json:"index"`
 }
 
 // ============================================================================

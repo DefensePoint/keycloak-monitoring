@@ -49,6 +49,8 @@ type mockAdminAPI struct {
 	GetRealmsFunc            func() []string
 	GetAllRealmsFunc         func(ctx context.Context) ([]*keycloakadmin.RealmRepresentation, error)
 	GetRealmInfoFunc         func(ctx context.Context, realmName string) (*keycloakadmin.RealmRepresentation, error)
+	GetAuthFlowsFunc         func(ctx context.Context, realmName string) ([]keycloakadmin.AuthenticationFlowRepresentation, error)
+	GetFlowExecutionsFunc    func(ctx context.Context, realmName, flowAlias string) ([]keycloakadmin.AuthenticationExecutionInfoRepresentation, error)
 	GetRealmUsersFunc        func(ctx context.Context, realmName string, first, max int) ([]keycloakadmin.UserRepresentation, error)
 	GetUsersFunc             func(ctx context.Context, realmName string, first, max int) ([]*keycloakadmin.UserRepresentation, error)
 	GetUserByIDFunc          func(ctx context.Context, realmName, userID string) (*keycloakadmin.UserRepresentation, error)
@@ -117,6 +119,22 @@ func (m *mockAdminAPI) GetAllRealms(ctx context.Context) ([]*keycloakadmin.Realm
 	return []*keycloakadmin.RealmRepresentation{
 		{ID: "realm-1", Realm: "test-realm", Enabled: true},
 	}, nil
+}
+
+func (m *mockAdminAPI) GetAuthenticationFlows(ctx context.Context, realmName string) ([]keycloakadmin.AuthenticationFlowRepresentation, error) {
+	m.trackCall("GetAuthenticationFlows")
+	if m.GetAuthFlowsFunc != nil {
+		return m.GetAuthFlowsFunc(ctx, realmName)
+	}
+	return nil, nil
+}
+
+func (m *mockAdminAPI) GetFlowExecutions(ctx context.Context, realmName, flowAlias string) ([]keycloakadmin.AuthenticationExecutionInfoRepresentation, error) {
+	m.trackCall("GetFlowExecutions")
+	if m.GetFlowExecutionsFunc != nil {
+		return m.GetFlowExecutionsFunc(ctx, realmName, flowAlias)
+	}
+	return nil, nil
 }
 
 func (m *mockAdminAPI) GetRealmInfo(ctx context.Context, realmName string) (*keycloakadmin.RealmRepresentation, error) {

@@ -2,6 +2,7 @@ package chi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -93,6 +94,7 @@ func (h *KeycloakHandlers) RegisterTenantRoutes(r chi.Router) {
 		r.Get("/events", h.handleKeycloakEvents)
 		r.Get("/events/stats", h.handleKeycloakEventStats)
 		r.Get("/realms", h.handleKeycloakRealms)
+		r.Get("/amfa-realms", h.handleKeycloakAmfaRealms)
 		r.Get("/realms/info", h.handleKeycloakRealmInfo)
 		r.Get("/realms/users", h.handleKeycloakUsers)
 		r.Get("/realms/clients", h.handleKeycloakClients)
@@ -501,6 +503,49 @@ func (h *KeycloakHandlers) handleKeycloakRealms(w http.ResponseWriter, r *http.R
 	if err != nil {
 		h.log.Error("Failed to list realms", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Failed to retrieve realms")
+		return
+	}
+
+	httputil.RespondSuccess(w, h.log, map[string]interface{}{
+		"realms": realms,
+		"count":  len(realms),
+	})
+}
+
+// handleKeycloakAmfaRealms returns the names of realms whose Keycloak browser
+// login flow uses an Adaptive MFA (AMFA) authenticator. The UI uses this
+// to show/hide AMFA-only sections (KPI cards, geo map, Risk column) per realm.
+//
+//	@Summary		List AMFA-enabled realms
+//	@Description	Returns realm names whose browser login flow uses an Adaptive MFA authenticator
+//	@Tags			keycloak
+//	@Produce		json
+//	@Param			tenantID	path		string	true	"Tenant ID"
+//	@Success		200			{object}	map[string]interface{}
+//	@Failure		401			{object}	dto.ErrorResponse
+//	@Failure		403			{object}	dto.ErrorResponse
+//	@Failure		500			{object}	dto.ErrorResponse
+//	@Security		BearerAuth
+//	@Router			/api/tenants/{tenantID}/keycloak/amfa-realms [get]
+func (h *KeycloakHandlers) handleKeycloakAmfaRealms(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tenantID := chi.URLParam(r, "tenantID")
+
+	realms, err := h.service.ListAmfaEnabledRealms(ctx, tenantID)
+	if err != nil {
+		// Without a live Keycloak client we cannot determine AMFA config; return
+		// an empty set (the UI fail-closes and hides AMFA sections) rather than a
+		// 500, since this endpoint gates optional UI, not core data.
+		if errors.Is(err, keycloak.ErrClientProviderNotConfigured) ||
+			errors.Is(err, keycloak.ErrClientNotAvailable) {
+			httputil.RespondSuccess(w, h.log, map[string]interface{}{
+				"realms": []string{},
+				"count":  0,
+			})
+			return
+		}
+		h.log.Error("Failed to list AMFA-enabled realms", logger.Err(err))
+		httputil.RespondInternalError(w, h.log, "Failed to determine AMFA-enabled realms")
 		return
 	}
 
