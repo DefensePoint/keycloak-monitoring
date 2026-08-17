@@ -1,0 +1,81 @@
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: point-monitoring-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: monitoring
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - point-postgres-data:/var/lib/postgresql/data
+    networks:
+      - point-monitoring-network
+    restart: unless-stopped
+    # TimescaleDB configuration
+    command: >
+      postgres
+      -c shared_preload_libraries=timescaledb
+      -c max_connections=200
+      -c shared_buffers=512MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=128MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=10MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+
+  api-server:
+    image: POINT_API_DOCKER_IMAGE
+    container_name: point-monitoring-server
+    ports:
+      - "7888:7888"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    networks:
+      - point-monitoring-network
+      - traefik-network
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
+  web:
+    image: POINT_WEB_DOCKER_IMAGE
+    container_name: point-monitoring-web
+    ports:
+      - "7880:7880"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    networks:
+      - point-monitoring-network
+      - traefik-network
+    restart: unless-stopped
+    depends_on:
+      - api-server
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-network"
+      - "traefik.http.routers.point-monitoring-web.rule=Host(`point-monitoring-dev.defensepoint.com`)"
+      - "traefik.http.routers.point-monitoring-web.entrypoints=web"
+      - "traefik.http.routers.point-monitoring-web.middlewares=point-monitoring-https-redirect"
+      - "traefik.http.middlewares.point-monitoring-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.point-monitoring-https-redirect.redirectscheme.permanent=true"
+      - "traefik.http.routers.point-monitoring-web-secure.rule=Host(`point-monitoring-dev.defensepoint.com`)"
+      - "traefik.http.routers.point-monitoring-web-secure.entrypoints=websecure"
+      - "traefik.http.routers.point-monitoring-web-secure.tls=true"
+      - "traefik.http.routers.point-monitoring-web-secure.tls.certresolver=letsencrypt"
+      - "traefik.http.services.point-monitoring-web.loadbalancer.server.port=7880"
+
+volumes:
+  point-postgres-data:
+
+networks:
+  point-monitoring-network:
+    driver: bridge
+  traefik-network:
+    external: true

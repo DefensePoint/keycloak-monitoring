@@ -1,0 +1,12 @@
+npx lint-staged
+
+# Check if there are staged files in web/
+if git diff --cached --name-only | grep -q "^web/"; then
+  echo "🔨 Running web build validation..."
+  npm run build
+  if [ $? -ne 0 ]; then
+    echo "❌ Build failed! Please fix the errors before committing."
+    exit 1
+  fi
+  echo "✅ Build passed!"
+fi

@@ -1,0 +1,1 @@
+export { RiskBadge } from "./RiskBadge";

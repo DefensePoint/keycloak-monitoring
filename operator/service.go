@@ -1,0 +1,61 @@
+package operator
+
+import (
+	"context"
+	"time"
+
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+)
+
+// Service defines the interface for operator metrics operations.
+type Service interface {
+	// RecordAction records a new action taken by an operator.
+	RecordAction(ctx context.Context, action *domain.OperatorAction) error
+
+	// GetMetrics retrieves metrics for a specific operator.
+	GetMetrics(ctx context.Context, tenantID, operatorEmail string, startDate, endDate time.Time) (*domain.OperatorMetricsSummary, error)
+
+	// GetAllOperatorsMetrics retrieves metrics for all operators.
+	GetAllOperatorsMetrics(ctx context.Context, tenantID string, startDate, endDate time.Time) ([]*domain.OperatorMetricsSummary, error)
+
+	// GetActions retrieves individual operator actions.
+	GetActions(ctx context.Context, tenantID, operatorEmail string, startDate, endDate time.Time, limit int) ([]*domain.OperatorAction, error)
+
+	// GetLastActionForAlert retrieves the most recent action for a specific alert.
+	GetLastActionForAlert(ctx context.Context, tenantID string, alertID uint) (*domain.OperatorAction, error)
+}
+
+// service implements the Service interface.
+type service struct {
+	repo Repository
+}
+
+// NewService creates a new operator metrics service.
+func NewService(repo Repository) Service {
+	return &service{repo: repo}
+}
+
+// RecordAction records a new action taken by an operator.
+func (s *service) RecordAction(ctx context.Context, action *domain.OperatorAction) error {
+	return s.repo.RecordAction(ctx, action)
+}
+
+// GetMetrics retrieves metrics for a specific operator.
+func (s *service) GetMetrics(ctx context.Context, tenantID, operatorEmail string, startDate, endDate time.Time) (*domain.OperatorMetricsSummary, error) {
+	return s.repo.GetMetricsSummary(ctx, tenantID, operatorEmail, startDate, endDate)
+}
+
+// GetAllOperatorsMetrics retrieves metrics for all operators.
+func (s *service) GetAllOperatorsMetrics(ctx context.Context, tenantID string, startDate, endDate time.Time) ([]*domain.OperatorMetricsSummary, error) {
+	return s.repo.GetAllOperatorsSummary(ctx, tenantID, startDate, endDate)
+}
+
+// GetActions retrieves individual operator actions.
+func (s *service) GetActions(ctx context.Context, tenantID, operatorEmail string, startDate, endDate time.Time, limit int) ([]*domain.OperatorAction, error) {
+	return s.repo.GetActions(ctx, tenantID, operatorEmail, startDate, endDate, limit)
+}
+
+// GetLastActionForAlert retrieves the most recent action for a specific alert.
+func (s *service) GetLastActionForAlert(ctx context.Context, tenantID string, alertID uint) (*domain.OperatorAction, error) {
+	return s.repo.GetLastActionForAlert(ctx, tenantID, alertID)
+}

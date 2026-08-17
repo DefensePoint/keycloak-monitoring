@@ -1,0 +1,1 @@
+export { useInfinispanMetrics } from "./useInfinispanMetrics";

@@ -1,0 +1,1 @@
+export { useLoginSimple } from "./useLoginSimple";
