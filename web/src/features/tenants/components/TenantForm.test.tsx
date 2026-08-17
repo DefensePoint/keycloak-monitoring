@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@/test-utils";
+import { fireEvent, render, screen, waitFor } from "@/test-utils";
 import userEvent from "@testing-library/user-event";
 import { TenantForm } from "./TenantForm";
 
@@ -105,19 +105,24 @@ describe("TenantForm", () => {
     const user = userEvent.setup();
     render(<TenantForm {...defaultProps} />);
 
-    await user.type(screen.getByLabelText(/tenant id/i), "test-tenant");
-    await user.type(screen.getByLabelText(/^name/i), "Test Tenant");
-    await user.type(
-      screen.getByLabelText(/server url/i),
-      "https://keycloak.example.com",
-    );
-
-    const adminRealmInput = screen.getByLabelText(/admin realm/i);
-    await user.clear(adminRealmInput);
-    await user.type(adminRealmInput, "master");
-
-    await user.type(screen.getByLabelText(/client id/i), "monitoring-service");
-    await user.type(screen.getByLabelText(/client secret/i), "client-secret");
+    fireEvent.change(screen.getByLabelText(/tenant id/i), {
+      target: { value: "test-tenant" },
+    });
+    fireEvent.change(screen.getByLabelText(/^name/i), {
+      target: { value: "Test Tenant" },
+    });
+    fireEvent.change(screen.getByLabelText(/server url/i), {
+      target: { value: "https://keycloak.example.com" },
+    });
+    fireEvent.change(screen.getByLabelText(/admin realm/i), {
+      target: { value: "master" },
+    });
+    fireEvent.change(screen.getByLabelText(/client id/i), {
+      target: { value: "monitoring-service" },
+    });
+    fireEvent.change(screen.getByLabelText(/client secret/i), {
+      target: { value: "client-secret" },
+    });
 
     const submitButton = screen.getByRole("button", {
       name: /create tenant/i,
@@ -189,10 +194,9 @@ describe("TenantForm", () => {
         />,
       );
 
-      await user.type(
-        screen.getByLabelText(/client secret/i),
-        "rotated-secret",
-      );
+      fireEvent.change(screen.getByLabelText(/client secret/i), {
+        target: { value: "rotated-secret" },
+      });
       await user.click(screen.getByRole("button", { name: /save changes/i }));
 
       await waitFor(() => {
