@@ -37,18 +37,25 @@ func (r *Repository) Save(ctx context.Context, event *domain.Event) error {
 	// Use GORM's Clauses for upsert (ON CONFLICT DO UPDATE)
 	result := r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "event_id"}},
-		// NOTE: the AMFA value columns (final_status, is_vpn, country, lat, long)
-		// are deliberately NOT in this update set. They are owned by the AMFA
-		// side and written onto a Keycloak row by ReconcileAMFAMerges; including
-		// them here would let the Keycloak monitor's periodic re-upsert of the
-		// same event clobber that enrichment back to NULL. amfa_event_id and
-		// risk_level are safe: the Keycloak event itself carries them.
+		// NOTE: the AMFA columns (amfa_event_id, risk_level, final_status, is_vpn,
+		// country, lat, long) are deliberately NOT in this update set. They are
+		// owned by the AMFA side and written onto a Keycloak row by
+		// ReconcileAMFAMerges; including them here lets the Keycloak monitor's
+		// periodic re-upsert of the same event clobber that enrichment back to
+		// NULL on the next poll.
+		//
+		// This applies to amfa_event_id and risk_level too. They used to be
+		// updatable on the assumption that the Keycloak event always carries
+		// them, which only holds where a Keycloak extension stamps them onto the
+		// login event. The open-source Adaptive MFA SPI does not, so there the
+		// values come from the merge and a re-upsert would erase them. Leaving
+		// them out costs nothing when the event does carry them: both are
+		// immutable for a given event, so the INSERT already stores the value.
 		DoUpdates: clause.AssignmentColumns([]string{
 			"type", "category", "severity", "description",
 			"source", "source_ip", "source_system",
 			"user_id", "username", "email", "client_id",
 			"location", "raw_data", "status",
-			"amfa_event_id", "risk_level",
 			"updated_at",
 		}),
 	}).Create(dbEvent)
@@ -221,10 +228,24 @@ func (r *Repository) MergeAmfaEvent(ctx context.Context, event *domain.Event) er
 }
 
 // ReconcileAMFAMerges converges each login onto one row: it copies the AMFA
-// fields from every standalone AMFA row onto its Keycloak twin (matched by
-// amfa_event_id), then soft-deletes the now-absorbed AMFA rows. Idempotent and
-// order-independent — safe to run every poll cycle. Returns the number of AMFA
-// rows absorbed. AMFA-only events (no Keycloak twin) are left untouched.
+// fields from every standalone AMFA row onto its Keycloak twin, then
+// soft-deletes the now-absorbed AMFA rows. Idempotent and order-independent —
+// safe to run every poll cycle. Returns the number of AMFA rows absorbed.
+// AMFA-only events (no Keycloak twin) are left untouched.
+//
+// Twins are matched on COALESCE(k.amfa_event_id, k.event_id), which covers both
+// ways the two rows can be related:
+//
+//   - Some Keycloak extensions stamp the AMFA id onto the login event as an
+//     "amfa_event_id" detail, which lands in k.amfa_event_id.
+//   - The open-source Adaptive MFA SPI does not stamp anything; it forwards
+//     Keycloak's own event id and stores it as auth_event.id, so the AMFA row's
+//     amfa_event_id already equals the Keycloak row's event_id.
+//
+// Falling back to k.event_id therefore merges open-source AMFA deployments
+// without changing behaviour where the detail is present. A false match would
+// need an AMFA auth_event.id to collide with an unrelated Keycloak event id;
+// both come from Keycloak's own event stream, so that cannot happen in practice.
 func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 	// 1. Enrich Keycloak rows from their AMFA twin. Keycloak keeps its own
 	//    risk_level (from the event details) when present.
@@ -242,11 +263,16 @@ func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 		    system_language = a.system_language,
 		    screen_resolution = a.screen_resolution,
 		    risk_level = COALESCE(k.risk_level, a.risk_level),
+		    -- Stamp the merge key onto the twin. Where the Keycloak event carried
+		    -- it this is a no-op; where it did not (open-source AMFA) it records
+		    -- that this row now holds AMFA data, which is what the details view
+		    -- keys its AMFA section off.
+		    amfa_event_id = a.amfa_event_id,
 		    updated_at = now()
 		FROM events AS a
 		WHERE a.source_system = 'amfa' AND a.deleted_at IS NULL
 		  AND k.source_system = 'keycloak' AND k.deleted_at IS NULL
-		  AND k.amfa_event_id = a.amfa_event_id`
+		  AND a.amfa_event_id = COALESCE(k.amfa_event_id, k.event_id)`
 	if err := r.db.WithContext(ctx).Exec(enrich).Error; err != nil {
 		return 0, fmt.Errorf("amfa reconcile enrich: %w", err)
 	}
@@ -261,7 +287,7 @@ func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 		WHERE a.source_system = 'amfa'
 		  AND k.source_system = 'keycloak'
 		  AND k.deleted_at IS NULL
-		  AND k.amfa_event_id = a.amfa_event_id`
+		  AND a.amfa_event_id = COALESCE(k.amfa_event_id, k.event_id)`
 	res := r.db.WithContext(ctx).Exec(del)
 	if res.Error != nil {
 		return 0, fmt.Errorf("amfa reconcile delete: %w", res.Error)

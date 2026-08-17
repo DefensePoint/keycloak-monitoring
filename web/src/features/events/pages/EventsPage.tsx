@@ -438,35 +438,6 @@ export function EventsPage() {
           uses AMFA). Empty/dashes when a specific AMFA realm has no data yet. */}
       {showAmfaSections && <AmfaKpiRow stats={amfaStats} />}
 
-      {/* AMFA geolocation map: per-realm, so it only shows once a specific
-          realm is selected. Collapsible, expanded by default, sits between the
-          filters/KPIs and the events table. */}
-      {realmForAmfa && (
-        <Accordion defaultExpanded sx={{ mb: 2 }}>
-          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-            <Typography
-              variant="h6"
-              sx={{
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-              }}
-            >
-              Geolocation Map
-            </Typography>
-          </AccordionSummary>
-          <AccordionDetails>
-            <FeatureErrorBoundary
-              featureId="AmfaGeoMap"
-              title="AMFA Geo Map"
-              resetKeys={[selectedTenant?.tenant_id, selectedRealm]}
-            >
-              <AmfaGeoMap buckets={amfaGeo ?? []} />
-            </FeatureErrorBoundary>
-          </AccordionDetails>
-        </Accordion>
-      )}
-
       {/* Material React Table */}
       <FeatureErrorBoundary
         featureId="EventsTable"
@@ -539,6 +510,35 @@ export function EventsPage() {
           )}
         />
       </FeatureErrorBoundary>
+
+      {/* AMFA geolocation map: per-realm, so it only shows once a specific
+          realm is selected. Collapsible, expanded by default, and placed below
+          the events table so the list stays the first thing on the page. */}
+      {realmForAmfa && (
+        <Accordion defaultExpanded sx={{ mt: 2 }}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Typography
+              variant="h6"
+              sx={{
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              Geolocation Map
+            </Typography>
+          </AccordionSummary>
+          <AccordionDetails>
+            <FeatureErrorBoundary
+              featureId="AmfaGeoMap"
+              title="AMFA Geo Map"
+              resetKeys={[selectedTenant?.tenant_id, selectedRealm]}
+            >
+              <AmfaGeoMap buckets={amfaGeo ?? []} />
+            </FeatureErrorBoundary>
+          </AccordionDetails>
+        </Accordion>
+      )}
 
       {/* Event Details Modal */}
       <Dialog
