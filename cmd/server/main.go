@@ -10,8 +10,8 @@
 //	@contact.url	https://defensepoint.com/support
 //	@contact.email	support@defensepoint.com
 
-//	@license.name	Proprietary
-//	@license.url	https://defensepoint.com/license
+//	@license.name	Apache 2.0
+//	@license.url	https://www.apache.org/licenses/LICENSE-2.0.html
 
 //	@host
 //	@BasePath	/

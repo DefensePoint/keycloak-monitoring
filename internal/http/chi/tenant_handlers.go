@@ -452,7 +452,7 @@ func (h *TenantHandlers) deleteTenant(w http.ResponseWriter, r *http.Request) {
 //	@Tags			tenants
 //	@Produce		json
 //	@Param			tenantID	path		string	true	"Tenant ID"
-//	@Success		200			{object}	tenant.Health
+//	@Success		200			{object}	tenant.HealthStatus
 //	@Failure		401			{object}	dto.ErrorResponse
 //	@Failure		403			{object}	dto.ErrorResponse
 //	@Failure		404			{object}	dto.ErrorResponse	"Tenant not found"

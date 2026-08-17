@@ -16,8 +16,8 @@ const docTemplate = `{
             "email": "support@defensepoint.com"
         },
         "license": {
-            "name": "Proprietary",
-            "url": "https://defensepoint.com/license"
+            "name": "Apache 2.0",
+            "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
         },
         "version": "{{.Version}}"
     },
@@ -51,19 +51,57 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.CurrentUser"
+                            "type": "object",
+                            "properties": {
+                                "email": {
+                                    "type": "string"
+                                },
+                                "email_verified": {
+                                    "type": "boolean"
+                                },
+                                "id": {
+                                    "type": "integer"
+                                },
+                                "name": {
+                                    "type": "string"
+                                },
+                                "permissions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "preferred_username": {
+                                    "type": "string"
+                                },
+                                "roles": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.UserRole"
+                                    }
+                                },
+                                "subject": {
+                                    "type": "string"
+                                },
+                                "tenant_policies": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.TenantPolicy"
+                                    }
+                                }
+                            }
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -96,25 +134,33 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.PermissionList"
+                            "type": "object",
+                            "properties": {
+                                "permissions": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Permission"
+                                    }
+                                }
+                            }
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -148,31 +194,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.MessageResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.MessageResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid policy ID",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -205,25 +251,33 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.RoleList"
+                            "type": "object",
+                            "properties": {
+                                "roles": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Role"
+                                    }
+                                }
+                            }
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -252,7 +306,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.CreateRole"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.CreateRole"
                         }
                     }
                 ],
@@ -260,31 +314,31 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.Role"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Role"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -318,37 +372,37 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.RoleWithPermissions"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Role"
                         }
                     },
                     "400": {
                         "description": "Invalid role ID",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Role not found",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -384,7 +438,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.UpdateRole"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.UpdateRole"
                         }
                     }
                 ],
@@ -392,37 +446,37 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.Role"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Role"
                         }
                     },
                     "400": {
                         "description": "Invalid role ID or request",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Cannot modify system roles",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Role not found",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -454,37 +508,37 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.MessageResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.MessageResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid role ID",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Cannot delete system roles",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Role not found",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -518,31 +572,39 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.TenantPolicyList"
+                            "type": "object",
+                            "properties": {
+                                "policies": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.TenantPolicy"
+                                    }
+                                }
+                            }
                         }
                     },
                     "400": {
                         "description": "Invalid user ID",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -578,7 +640,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.CreateTenantPolicy"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.CreateTenantPolicy"
                         }
                     }
                 ],
@@ -586,31 +648,31 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.MessageResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.MessageResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid user ID or request",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -650,31 +712,39 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.UserRoleList"
+                            "type": "object",
+                            "properties": {
+                                "roles": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.UserRole"
+                                    }
+                                }
+                            }
                         }
                     },
                     "400": {
                         "description": "Invalid user ID",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -710,7 +780,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.AssignRole"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.AssignRole"
                         }
                     }
                 ],
@@ -718,31 +788,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.MessageResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.MessageResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid user ID or request",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -789,31 +859,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.MessageResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.MessageResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid user or role ID",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -838,25 +908,36 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.TenantList"
+                            "type": "object",
+                            "properties": {
+                                "count": {
+                                    "type": "integer"
+                                },
+                                "tenants": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.KeycloakTenant"
+                                    }
+                                }
+                            }
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -885,7 +966,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.CreateTenant"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.CreateTenant"
                         }
                     }
                 ],
@@ -893,37 +974,42 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.Tenant"
+                            "type": "object",
+                            "properties": {
+                                "tenant": {
+                                    "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.KeycloakTenant"
+                                }
+                            }
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Another tenant is already default",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -954,7 +1040,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.TestTenantConnection"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.TestTenantConnection"
                         }
                     }
                 ],
@@ -962,25 +1048,52 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.TenantConnectionTest"
+                            "type": "object",
+                            "properties": {
+                                "message": {
+                                    "type": "string"
+                                },
+                                "status": {
+                                    "type": "string"
+                                }
+                            }
                         }
                     },
                     "400": {
                         "description": "Client creation failed",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.TenantConnectionTest"
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                },
+                                "message": {
+                                    "type": "string"
+                                },
+                                "status": {
+                                    "type": "string"
+                                }
+                            }
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "503": {
                         "description": "Connection testing unavailable",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.TenantConnectionTest"
+                            "type": "object",
+                            "properties": {
+                                "message": {
+                                    "type": "string"
+                                },
+                                "status": {
+                                    "type": "string"
+                                }
+                            }
                         }
                     }
                 }
@@ -1014,31 +1127,36 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.Tenant"
+                            "type": "object",
+                            "properties": {
+                                "tenant": {
+                                    "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.KeycloakTenant"
+                                }
+                            }
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Tenant not found",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -1074,7 +1192,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.UpdateTenant"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.UpdateTenant"
                         }
                     }
                 ],
@@ -1082,43 +1200,48 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.Tenant"
+                            "type": "object",
+                            "properties": {
+                                "tenant": {
+                                    "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.KeycloakTenant"
+                                }
+                            }
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Tenant not found",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Another tenant is already default",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -1150,31 +1273,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.MessageResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.MessageResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Tenant not found",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -1251,25 +1374,44 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": true
+                            "properties": {
+                                "alerts": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Alert"
+                                    }
+                                },
+                                "count": {
+                                    "type": "integer"
+                                },
+                                "limit": {
+                                    "type": "integer"
+                                },
+                                "offset": {
+                                    "type": "integer"
+                                },
+                                "total": {
+                                    "type": "integer"
+                                }
+                            }
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -1323,31 +1465,44 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": true
+                            "properties": {
+                                "alerts": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Alert"
+                                    }
+                                },
+                                "count": {
+                                    "type": "integer"
+                                },
+                                "realm": {
+                                    "type": "string"
+                                }
+                            }
                         }
                     },
                     "400": {
                         "description": "Missing realm",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -1389,33 +1544,35 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
+                            "properties": {
+                                "status": {
+                                    "type": "string"
+                                }
                             }
                         }
                     },
                     "400": {
                         "description": "Missing alert_id",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -1456,31 +1613,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_domain.Alert"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Alert"
                         }
                     },
                     "400": {
                         "description": "Missing alert_id",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Alert not found",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -1519,39 +1676,39 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "Resolved alert",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_domain.Alert"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Alert"
                         }
                     },
                     "400": {
                         "description": "Missing alert_id",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Alert not found",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -1597,19 +1754,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -1654,7 +1811,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.UpdateAlertStatus"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.UpdateAlertStatus"
                         }
                     }
                 ],
@@ -1662,31 +1819,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_domain.Alert"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Alert"
                         }
                     },
                     "400": {
                         "description": "Missing alert_id or invalid status",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -1727,25 +1884,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_domain.Alert"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Alert"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Alert not found",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -1784,33 +1941,33 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "Resolved alert",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_domain.Alert"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Alert"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Alert not found",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -1855,7 +2012,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.UpdateAlertStatus"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.UpdateAlertStatus"
                         }
                     }
                 ],
@@ -1863,31 +2020,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_domain.Alert"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Alert"
                         }
                     },
                     "400": {
                         "description": "Invalid status",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -1958,19 +2115,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2004,31 +2161,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.TenantHealth"
+                            "$ref": "#/definitions/tenant.HealthStatus"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Tenant not found",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2075,19 +2232,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2153,25 +2310,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm parameter",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2225,25 +2382,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm parameter",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2284,19 +2441,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2343,19 +2500,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2396,19 +2553,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2455,19 +2612,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2521,25 +2678,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm parameter",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2580,19 +2737,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2640,25 +2797,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm parameter",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2706,31 +2863,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm parameter",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Realm not found",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2790,25 +2947,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm parameter",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2863,25 +3020,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm or userId parameter",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2922,19 +3079,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -2971,7 +3128,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "Limit results (default 100)",
+                        "description": "Limit results (default 100, max 1000)",
                         "name": "limit",
                         "in": "query"
                     },
@@ -2992,32 +3149,34 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.OperatorAction"
+                            }
                         }
                     },
                     "400": {
                         "description": "Invalid date range",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3063,32 +3222,34 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.OperatorMetricsSummary"
+                            }
                         }
                     },
                     "400": {
                         "description": "Invalid date range",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3141,32 +3302,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.OperatorMetricsSummary"
                         }
                     },
                     "400": {
                         "description": "Missing email or invalid date range",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3221,25 +3381,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm name or user ID",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3293,25 +3453,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing or invalid dates",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Tenant not found",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3370,19 +3530,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3416,20 +3576,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_version.Info"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3454,25 +3613,33 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.UserList"
+                            "type": "object",
+                            "properties": {
+                                "users": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.User"
+                                    }
+                                }
+                            }
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3501,7 +3668,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.CreateUser"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.CreateUser"
                         }
                     }
                 ],
@@ -3509,37 +3676,37 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.User"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.User"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "User already exists",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3573,37 +3740,37 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.User"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.User"
                         }
                     },
                     "400": {
                         "description": "Invalid user ID",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "User not found",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3639,7 +3806,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.UpdateUser"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.UpdateUser"
                         }
                     }
                 ],
@@ -3647,43 +3814,43 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.User"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.User"
                         }
                     },
                     "400": {
                         "description": "Invalid user ID or request",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "OAuth users cannot be modified",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "User not found",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Username already taken",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3715,31 +3882,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.MessageResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.MessageResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid user ID",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3747,7 +3914,7 @@ const docTemplate = `{
         },
         "/api/version": {
             "get": {
-                "description": "Returns the application version information (public endpoint)",
+                "description": "Returns the application semantic version (public endpoint)",
                 "produces": [
                     "application/json"
                 ],
@@ -3759,8 +3926,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_version.PublicInfo"
                         }
                     }
                 }
@@ -3796,13 +3962,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Invalid parameters",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3822,7 +3988,18 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.AuthConfig"
+                            "type": "object",
+                            "properties": {
+                                "auth_required": {
+                                    "type": "boolean"
+                                },
+                                "oauth2_enabled": {
+                                    "type": "boolean"
+                                },
+                                "simple_enabled": {
+                                    "type": "boolean"
+                                }
+                            }
                         }
                     }
                 }
@@ -3842,13 +4019,13 @@ const docTemplate = `{
                     "403": {
                         "description": "OAuth2 disabled",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3874,7 +4051,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.SimpleLogin"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.SimpleLogin"
                         }
                     }
                 ],
@@ -3882,25 +4059,41 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.LoginSuccess"
+                            "type": "object",
+                            "properties": {
+                                "success": {
+                                    "type": "boolean"
+                                },
+                                "user": {
+                                    "$ref": "#/definitions/auth.UserInfo"
+                                }
+                            }
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.LoginFailure"
+                            "type": "object",
+                            "properties": {
+                                "message": {
+                                    "type": "string"
+                                },
+                                "success": {
+                                    "type": "boolean"
+                                }
+                            }
                         }
                     },
                     "403": {
                         "description": "Simple auth disabled",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3920,7 +4113,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -3951,7 +4144,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.ChangePassword"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.ChangePassword"
                         }
                     }
                 ],
@@ -3959,31 +4152,55 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.PasswordChangeSuccess"
+                            "type": "object",
+                            "properties": {
+                                "message": {
+                                    "type": "string"
+                                },
+                                "success": {
+                                    "type": "boolean"
+                                }
+                            }
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.PasswordChangeFailure"
+                            "type": "object",
+                            "properties": {
+                                "message": {
+                                    "type": "string"
+                                },
+                                "success": {
+                                    "type": "boolean"
+                                }
+                            }
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.PasswordChangeFailure"
+                            "type": "object",
+                            "properties": {
+                                "message": {
+                                    "type": "string"
+                                },
+                                "success": {
+                                    "type": "boolean"
+                                }
+                            }
                         }
                     },
                     "403": {
                         "description": "Simple auth disabled",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -4003,7 +4220,15 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.PasswordRequirements"
+                            "type": "object",
+                            "properties": {
+                                "description": {
+                                    "type": "string"
+                                },
+                                "min_length": {
+                                    "type": "integer"
+                                }
+                            }
                         }
                     }
                 }
@@ -4028,25 +4253,36 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.TokenRefreshSuccess"
+                            "type": "object",
+                            "properties": {
+                                "expiry": {
+                                    "type": "string"
+                                },
+                                "message": {
+                                    "type": "string"
+                                },
+                                "status": {
+                                    "type": "string"
+                                }
+                            }
                         }
                     },
                     "400": {
                         "description": "Token refresh not available",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -4071,13 +4307,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.UserInfo"
+                            "$ref": "#/definitions/internal_http_chi.UserDetails"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse"
                         }
                     }
                 }
@@ -4105,7 +4341,83 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_domain.Alert": {
+        "auth.UserInfo": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "email_verified": {
+                    "type": "boolean"
+                },
+                "family_name": {
+                    "type": "string"
+                },
+                "given_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "locale": {
+                    "type": "string"
+                },
+                "must_change_password": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "preferred_username": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_http_chi.UserDetails": {
+            "type": "object",
+            "properties": {
+                "Email": {
+                    "type": "string"
+                },
+                "EmailVerified": {
+                    "type": "boolean"
+                },
+                "FamilyName": {
+                    "type": "string"
+                },
+                "GivenName": {
+                    "type": "string"
+                },
+                "ID": {
+                    "type": "integer"
+                },
+                "Locale": {
+                    "type": "string"
+                },
+                "MustChangePassword": {
+                    "type": "boolean"
+                },
+                "Name": {
+                    "type": "string"
+                },
+                "PreferredUsername": {
+                    "type": "string"
+                },
+                "Subject": {
+                    "type": "string"
+                },
+                "UpdatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Alert": {
             "type": "object",
             "properties": {
                 "acknowledged_at": {
@@ -4182,7 +4494,7 @@ const docTemplate = `{
                     "description": "Severity level",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_domain.AlertSeverity"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.AlertSeverity"
                         }
                     ]
                 },
@@ -4190,7 +4502,7 @@ const docTemplate = `{
                     "description": "Where the alert originated (config, event, log, metric)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_domain.AlertSource"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.AlertSource"
                         }
                     ]
                 },
@@ -4198,7 +4510,7 @@ const docTemplate = `{
                     "description": "Current status",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_domain.AlertStatus"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.AlertStatus"
                         }
                     ]
                 },
@@ -4214,7 +4526,7 @@ const docTemplate = `{
                     "description": "Type of alert",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_domain.AlertType"
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.AlertType"
                         }
                     ]
                 },
@@ -4223,7 +4535,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_domain.AlertSeverity": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.AlertSeverity": {
             "type": "string",
             "enum": [
                 "info",
@@ -4238,7 +4550,7 @@ const docTemplate = `{
                 "AlertSeverityCritical"
             ]
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_domain.AlertSource": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.AlertSource": {
             "type": "string",
             "enum": [
                 "configuration",
@@ -4265,7 +4577,7 @@ const docTemplate = `{
                 "AlertSourceMetric"
             ]
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_domain.AlertStatus": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.AlertStatus": {
             "type": "string",
             "enum": [
                 "active",
@@ -4280,7 +4592,7 @@ const docTemplate = `{
                 "AlertStatusIgnored"
             ]
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_domain.AlertType": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.AlertType": {
             "type": "string",
             "enum": [
                 "configuration",
@@ -4316,7 +4628,499 @@ const docTemplate = `{
                 "AlertTypeEvent"
             ]
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.ErrorResponse": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.AuthMethod": {
+            "type": "string",
+            "enum": [
+                "simple",
+                "oauth"
+            ],
+            "x-enum-comments": {
+                "AuthMethodOAuth": "OAuth2/OIDC authentication",
+                "AuthMethodSimple": "Username/password authentication"
+            },
+            "x-enum-descriptions": [
+                "Username/password authentication",
+                "OAuth2/OIDC authentication"
+            ],
+            "x-enum-varnames": [
+                "AuthMethodSimple",
+                "AuthMethodOAuth"
+            ]
+        },
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.KeycloakTenant": {
+            "type": "object",
+            "properties": {
+                "admin_realm": {
+                    "type": "string"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "configuration": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "default_realm": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "health_message": {
+                    "type": "string"
+                },
+                "health_status": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "infinispan_enabled": {
+                    "type": "boolean"
+                },
+                "infinispan_port": {
+                    "type": "integer"
+                },
+                "is_default": {
+                    "type": "boolean"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "last_error_at": {
+                    "type": "string"
+                },
+                "last_health_check": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "owner": {
+                    "type": "string"
+                },
+                "server_url": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tenant_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.OperatorAction": {
+            "type": "object",
+            "properties": {
+                "ActionTime": {
+                    "type": "string"
+                },
+                "ActionType": {
+                    "type": "string"
+                },
+                "AlertID": {
+                    "type": "integer"
+                },
+                "AlertSeverity": {
+                    "type": "string"
+                },
+                "AlertType": {
+                    "type": "string"
+                },
+                "Comment": {
+                    "type": "string"
+                },
+                "CreatedAt": {
+                    "type": "string"
+                },
+                "ID": {
+                    "type": "integer"
+                },
+                "Metadata": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "OperatorEmail": {
+                    "type": "string"
+                },
+                "OperatorID": {
+                    "type": "integer"
+                },
+                "PreviousActionTime": {
+                    "type": "string"
+                },
+                "PreviousStatus": {
+                    "type": "string"
+                },
+                "RealmName": {
+                    "type": "string"
+                },
+                "ResolutionTimeSeconds": {
+                    "type": "integer"
+                },
+                "ResponseTimeSeconds": {
+                    "type": "integer"
+                },
+                "TenantID": {
+                    "type": "string"
+                },
+                "TimeFromDetectionSeconds": {
+                    "type": "integer"
+                },
+                "TimeFromPreviousActionSeconds": {
+                    "type": "integer"
+                },
+                "UpdatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.OperatorMetricsSummary": {
+            "type": "object",
+            "properties": {
+                "alerts_acknowledged": {
+                    "type": "integer"
+                },
+                "alerts_by_type": {
+                    "description": "By type",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "alerts_commented": {
+                    "type": "integer"
+                },
+                "alerts_ignored": {
+                    "type": "integer"
+                },
+                "alerts_resolved": {
+                    "type": "integer"
+                },
+                "avg_acknowledge_to_ignore_time": {
+                    "description": "Avg time from acknowledged → ignored",
+                    "type": "number"
+                },
+                "avg_acknowledge_to_resolve_time": {
+                    "description": "Transition time metrics (in seconds) - Time between state changes",
+                    "type": "number"
+                },
+                "avg_active_to_acknowledge_time": {
+                    "description": "Avg time from active → acknowledged",
+                    "type": "number"
+                },
+                "avg_active_to_ignore_time": {
+                    "description": "Avg time from active → ignored (without acknowledge)",
+                    "type": "number"
+                },
+                "avg_active_to_resolve_time": {
+                    "description": "Avg time from active → resolved (without acknowledge)",
+                    "type": "number"
+                },
+                "avg_resolution_time": {
+                    "description": "Average time to resolution",
+                    "type": "number"
+                },
+                "avg_response_time": {
+                    "description": "Time metrics (in seconds) - From detection to action",
+                    "type": "number"
+                },
+                "avg_time_to_acknowledge": {
+                    "description": "Action-specific time metrics (in seconds)",
+                    "type": "number"
+                },
+                "avg_time_to_ignore": {
+                    "description": "Average time from detection to ignore",
+                    "type": "number"
+                },
+                "avg_time_to_resolve": {
+                    "description": "Average time from detection to resolve",
+                    "type": "number"
+                },
+                "critical_alerts_handled": {
+                    "description": "By severity",
+                    "type": "integer"
+                },
+                "high_alerts_handled": {
+                    "type": "integer"
+                },
+                "low_alerts_handled": {
+                    "type": "integer"
+                },
+                "max_response_time": {
+                    "type": "integer"
+                },
+                "median_resolution_time": {
+                    "type": "number"
+                },
+                "median_response_time": {
+                    "type": "number"
+                },
+                "medium_alerts_handled": {
+                    "type": "integer"
+                },
+                "min_response_time": {
+                    "type": "integer"
+                },
+                "operator_email": {
+                    "type": "string"
+                },
+                "operator_name": {
+                    "type": "string"
+                },
+                "period_end": {
+                    "type": "string"
+                },
+                "period_start": {
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "type": "string"
+                },
+                "total_alerts_handled": {
+                    "description": "Action counts",
+                    "type": "integer"
+                },
+                "total_work_time_hours": {
+                    "description": "Converted to hours for reporting",
+                    "type": "number"
+                },
+                "total_work_time_seconds": {
+                    "description": "Performance indicators",
+                    "type": "integer"
+                }
+            }
+        },
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Permission": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_system": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "resource": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Role": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "is_system": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "permissions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Permission"
+                    }
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.TenantPolicy": {
+            "type": "object",
+            "properties": {
+                "allowed_realms": {
+                    "description": "Empty = all realms",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "granted_at": {
+                    "type": "string"
+                },
+                "granted_by": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "tenant_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.User": {
+            "type": "object",
+            "properties": {
+                "auth_method": {
+                    "description": "Authentication method (simple or oauth)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.AuthMethod"
+                        }
+                    ]
+                },
+                "blocked_at": {
+                    "type": "string"
+                },
+                "blocked_reason": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "email_verified": {
+                    "type": "boolean"
+                },
+                "family_name": {
+                    "type": "string"
+                },
+                "given_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "is_blocked": {
+                    "type": "boolean"
+                },
+                "last_accessed_at": {
+                    "type": "string"
+                },
+                "last_login_at": {
+                    "type": "string"
+                },
+                "last_login_ip": {
+                    "type": "string"
+                },
+                "locale": {
+                    "type": "string"
+                },
+                "login_count": {
+                    "type": "integer"
+                },
+                "must_change_password": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "password_changed_at": {
+                    "type": "string"
+                },
+                "preferred_username": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.UserRole": {
+            "type": "object",
+            "properties": {
+                "assigned_at": {
+                    "type": "string"
+                },
+                "assigned_by": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "role": {
+                    "$ref": "#/definitions/repos_defensepoint_com_iam_oss-pmt_kmt_internal_domain.Role"
+                },
+                "role_id": {
+                    "type": "integer"
+                },
+                "tenant_id": {
+                    "description": "Null = global, non-null = tenant-scoped",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.ErrorResponse": {
             "description": "Standard error response with optional validation details",
             "type": "object",
             "properties": {
@@ -4329,7 +5133,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto.MessageResponse": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto.MessageResponse": {
             "description": "Simple success message response",
             "type": "object",
             "properties": {
@@ -4339,7 +5143,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.AssignRole": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.AssignRole": {
             "description": "Request body for role assignment",
             "type": "object",
             "required": [
@@ -4360,7 +5164,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.ChangePassword": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.ChangePassword": {
             "description": "Request body for password change",
             "type": "object",
             "required": [
@@ -4386,7 +5190,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.CreateRole": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.CreateRole": {
             "description": "Request body for role creation",
             "type": "object",
             "required": [
@@ -4423,7 +5227,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.CreateTenant": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.CreateTenant": {
             "description": "Request body for tenant creation",
             "type": "object",
             "required": [
@@ -4442,13 +5246,11 @@ const docTemplate = `{
                 "client_id": {
                     "type": "string",
                     "maxLength": 255,
-                    "minLength": 1,
                     "example": "monitoring-service"
                 },
                 "client_secret": {
                     "type": "string",
                     "maxLength": 255,
-                    "minLength": 1,
                     "example": "client-secret"
                 },
                 "configuration": {
@@ -4506,7 +5308,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.CreateTenantPolicy": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.CreateTenantPolicy": {
             "description": "Request body for tenant policy creation",
             "type": "object",
             "required": [
@@ -4530,7 +5332,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.CreateUser": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.CreateUser": {
             "description": "Request body for user creation",
             "type": "object",
             "required": [
@@ -4561,7 +5363,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.SimpleLogin": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.SimpleLogin": {
             "description": "Request body for simple authentication",
             "type": "object",
             "required": [
@@ -4581,7 +5383,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.TestTenantConnection": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.TestTenantConnection": {
             "description": "Request body for testing Keycloak connection",
             "type": "object",
             "required": [
@@ -4598,13 +5400,11 @@ const docTemplate = `{
                 "client_id": {
                     "type": "string",
                     "maxLength": 255,
-                    "minLength": 1,
                     "example": "monitoring-service"
                 },
                 "client_secret": {
                     "type": "string",
                     "maxLength": 255,
-                    "minLength": 1,
                     "example": "client-secret"
                 },
                 "server_url": {
@@ -4613,7 +5413,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.UpdateAlertStatus": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.UpdateAlertStatus": {
             "description": "Request body for updating alert status",
             "type": "object",
             "required": [
@@ -4637,8 +5437,8 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.UpdateRole": {
-            "description": "Request body for role update (all fields optional)",
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.UpdateRole": {
+            "description": "Request body for role update",
             "type": "object",
             "properties": {
                 "description": {
@@ -4649,7 +5449,6 @@ const docTemplate = `{
                 "display_name": {
                     "type": "string",
                     "maxLength": 255,
-                    "minLength": 1,
                     "example": "Updated Display Name"
                 },
                 "permissions": {
@@ -4664,7 +5463,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.UpdateTenant": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.UpdateTenant": {
             "description": "Request body for tenant update (all fields optional)",
             "type": "object",
             "properties": {
@@ -4732,7 +5531,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_requests.UpdateUser": {
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_http_dto_requests.UpdateUser": {
             "description": "Request body for user update (all fields optional)",
             "type": "object",
             "properties": {
@@ -4766,345 +5565,42 @@ const docTemplate = `{
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.AuthConfig": {
-            "description": "Authentication configuration showing enabled methods",
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_version.Info": {
             "type": "object",
             "properties": {
-                "auth_required": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "oauth2_enabled": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "simple_enabled": {
-                    "type": "boolean",
-                    "example": true
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.CurrentUser": {
-            "description": "Current authenticated user with roles and permissions",
-            "type": "object",
-            "properties": {
-                "email": {
-                    "type": "string",
-                    "example": "user@example.com"
-                },
-                "email_verified": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "id": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "name": {
-                    "type": "string",
-                    "example": "John Doe"
-                },
-                "permissions": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "example": [
-                        "alerts:read",
-                        "tenants:write"
-                    ]
-                },
-                "preferred_username": {
-                    "type": "string",
-                    "example": "johndoe"
-                },
-                "roles": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "example": [
-                        "admin",
-                        "analyst"
-                    ]
-                },
-                "subject": {
-                    "type": "string",
-                    "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
-                },
-                "tenant_policies": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.TenantPolicy"
-                    }
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.LoginFailure": {
-            "description": "Failed login response",
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string",
-                    "example": "Invalid username or password"
-                },
-                "success": {
-                    "type": "boolean",
-                    "example": false
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.LoginSuccess": {
-            "description": "Successful login response with user information",
-            "type": "object",
-            "properties": {
-                "success": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "user": {
-                    "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.UserInfo"
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.PasswordChangeFailure": {
-            "description": "Failed password change response",
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string",
-                    "example": "Current password is incorrect"
-                },
-                "success": {
-                    "type": "boolean",
-                    "example": false
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.PasswordChangeSuccess": {
-            "description": "Successful password change response",
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string",
-                    "example": "Password changed successfully"
-                },
-                "success": {
-                    "type": "boolean",
-                    "example": true
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.PasswordRequirements": {
-            "description": "Password requirements information",
-            "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string",
-                    "example": "Password must be at least 8 characters"
-                },
-                "min_length": {
-                    "type": "integer",
-                    "example": 8
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.Permission": {
-            "description": "Permission definition",
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "example": "read"
-                },
-                "description": {
-                    "type": "string",
-                    "example": "Can view alerts"
-                },
-                "display_name": {
-                    "type": "string",
-                    "example": "Read Alerts"
-                },
-                "id": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "name": {
-                    "type": "string",
-                    "example": "alerts:read"
-                },
-                "resource": {
-                    "type": "string",
-                    "example": "alerts"
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.PermissionList": {
-            "description": "List of permissions response",
-            "type": "object",
-            "properties": {
-                "permissions": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.Permission"
-                    }
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.Role": {
-            "description": "Role with basic information",
-            "type": "object",
-            "properties": {
-                "created_at": {
+                "build_date": {
                     "type": "string"
                 },
-                "description": {
-                    "type": "string",
-                    "example": "Full system access"
+                "git_commit": {
+                    "type": "string"
                 },
-                "display_name": {
-                    "type": "string",
-                    "example": "Administrator"
+                "go_version": {
+                    "type": "string"
                 },
-                "id": {
-                    "type": "integer",
-                    "example": 1
+                "platform": {
+                    "type": "string"
                 },
-                "is_active": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "is_system": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "name": {
-                    "type": "string",
-                    "example": "admin"
-                },
-                "updated_at": {
+                "version": {
                     "type": "string"
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.RoleList": {
-            "description": "List of roles response",
+        "repos_defensepoint_com_iam_oss-pmt_kmt_internal_version.PublicInfo": {
             "type": "object",
             "properties": {
-                "roles": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.Role"
-                    }
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.RoleWithPermissions": {
-            "description": "Role with full permission details",
-            "type": "object",
-            "properties": {
-                "permissions": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.Permission"
-                    }
-                },
-                "role": {
-                    "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.Role"
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.Tenant": {
-            "description": "Keycloak tenant information",
-            "type": "object",
-            "properties": {
-                "admin_realm": {
-                    "type": "string",
-                    "example": "master"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "default_realm": {
-                    "type": "string",
-                    "example": "master"
-                },
-                "description": {
-                    "type": "string",
-                    "example": "Production Keycloak server"
-                },
-                "enabled": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "id": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "is_default": {
-                    "type": "boolean",
-                    "example": false
-                },
-                "name": {
-                    "type": "string",
-                    "example": "My Keycloak Instance"
-                },
-                "owner": {
-                    "type": "string",
-                    "example": "admin@example.com"
-                },
-                "server_url": {
-                    "type": "string",
-                    "example": "https://keycloak.example.com"
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "example": [
-                        "production",
-                        "main"
-                    ]
-                },
-                "tenant_id": {
-                    "type": "string",
-                    "example": "my-keycloak"
-                },
-                "updated_at": {
+                "version": {
                     "type": "string"
                 }
             }
         },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.TenantConnectionTest": {
-            "description": "Keycloak connection test result",
-            "type": "object",
-            "properties": {
-                "error": {
-                    "type": "string",
-                    "example": ""
-                },
-                "message": {
-                    "type": "string",
-                    "example": "Successfully connected and authenticated with Keycloak"
-                },
-                "status": {
-                    "type": "string",
-                    "example": "success"
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.TenantHealth": {
-            "description": "Tenant health status information",
+        "tenant.HealthStatus": {
             "type": "object",
             "properties": {
                 "health_message": {
-                    "type": "string",
-                    "example": "Connection successful"
+                    "type": "string"
                 },
                 "health_status": {
-                    "type": "string",
-                    "example": "healthy"
+                    "type": "string"
                 },
                 "last_error": {
                     "type": "string"
@@ -5113,253 +5609,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "last_health_check": {
-                    "type": "string",
-                    "example": "2024-01-15T10:30:00Z"
+                    "type": "string"
                 },
                 "tenant_id": {
-                    "type": "string",
-                    "example": "my-keycloak"
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.TenantList": {
-            "description": "List of Keycloak tenants",
-            "type": "object",
-            "properties": {
-                "count": {
-                    "type": "integer",
-                    "example": 5
-                },
-                "tenants": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.Tenant"
-                    }
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.TenantPolicy": {
-            "description": "Tenant access policy",
-            "type": "object",
-            "properties": {
-                "allowed_realms": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "example": [
-                        "master",
-                        "production"
-                    ]
-                },
-                "granted_at": {
                     "type": "string"
-                },
-                "granted_by": {
-                    "type": "string",
-                    "example": "admin@example.com"
-                },
-                "id": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "tenant_id": {
-                    "type": "string",
-                    "example": "my-keycloak"
-                },
-                "user_id": {
-                    "type": "integer",
-                    "example": 1
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.TenantPolicyList": {
-            "description": "List of tenant access policies",
-            "type": "object",
-            "properties": {
-                "policies": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.TenantPolicy"
-                    }
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.TokenRefreshSuccess": {
-            "description": "Successful token refresh response",
-            "type": "object",
-            "properties": {
-                "expiry": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string",
-                    "example": "Token refreshed successfully"
-                },
-                "status": {
-                    "type": "string",
-                    "example": "success"
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.User": {
-            "description": "Platform user information",
-            "type": "object",
-            "properties": {
-                "auth_method": {
-                    "type": "string",
-                    "example": "simple"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "email": {
-                    "type": "string",
-                    "example": "user@example.com"
-                },
-                "email_verified": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "id": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "is_active": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "is_blocked": {
-                    "type": "boolean",
-                    "example": false
-                },
-                "name": {
-                    "type": "string",
-                    "example": "John Doe"
-                },
-                "preferred_username": {
-                    "type": "string",
-                    "example": "johndoe"
-                },
-                "subject": {
-                    "type": "string",
-                    "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string",
-                    "example": "johndoe"
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.UserInfo": {
-            "description": "User information from authentication",
-            "type": "object",
-            "properties": {
-                "email": {
-                    "type": "string",
-                    "example": "user@example.com"
-                },
-                "email_verified": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "family_name": {
-                    "type": "string",
-                    "example": "Doe"
-                },
-                "given_name": {
-                    "type": "string",
-                    "example": "John"
-                },
-                "id": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "locale": {
-                    "type": "string",
-                    "example": "en"
-                },
-                "must_change_password": {
-                    "type": "boolean",
-                    "example": false
-                },
-                "name": {
-                    "type": "string",
-                    "example": "John Doe"
-                },
-                "preferred_username": {
-                    "type": "string",
-                    "example": "johndoe"
-                },
-                "subject": {
-                    "type": "string",
-                    "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.UserList": {
-            "description": "List of platform users",
-            "type": "object",
-            "properties": {
-                "users": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.User"
-                    }
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.UserRole": {
-            "description": "User role assignment",
-            "type": "object",
-            "properties": {
-                "assigned_at": {
-                    "type": "string"
-                },
-                "assigned_by": {
-                    "type": "string",
-                    "example": "admin@example.com"
-                },
-                "expires_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "role_id": {
-                    "type": "integer",
-                    "example": 2
-                },
-                "role_name": {
-                    "type": "string",
-                    "example": "analyst"
-                },
-                "tenant_id": {
-                    "type": "string",
-                    "example": "my-keycloak"
-                },
-                "user_id": {
-                    "type": "integer",
-                    "example": 1
-                }
-            }
-        },
-        "repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.UserRoleList": {
-            "description": "List of user role assignments",
-            "type": "object",
-            "properties": {
-                "roles": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/repos_defensepoint_com_ai_soc_point-monitoring-platform_internal_http_dto_responses.UserRole"
-                    }
                 }
             }
         }
@@ -5377,10 +5630,10 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
-	Host:             "localhost:8080",
+	Host:             "",
 	BasePath:         "/",
 	Schemes:          []string{"http", "https"},
-	Title:            "Point Monitoring Platform API",
+	Title:            "Keycloak Monitoring Tool API",
 	Description:      "API for monitoring Keycloak instances, managing alerts, and security operations",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,

@@ -223,7 +223,7 @@ func (h *RBACHandlers) createRole(w http.ResponseWriter, r *http.Request) {
 //	@Tags			rbac
 //	@Produce		json
 //	@Param			roleID	path		int	true	"Role ID"
-//	@Success		200		{object}	domain.RoleWithPermissions
+//	@Success		200		{object}	domain.Role
 //	@Failure		400		{object}	dto.ErrorResponse	"Invalid role ID"
 //	@Failure		401		{object}	dto.ErrorResponse
 //	@Failure		403		{object}	dto.ErrorResponse
@@ -265,7 +265,7 @@ func (h *RBACHandlers) getRole(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Param			roleID	path		int					true	"Role ID"
 //	@Param			request	body		requests.UpdateRole	true	"Role update request"
-//	@Success		200		{object}	domain.RoleWithPermissions
+//	@Success		200		{object}	domain.Role
 //	@Failure		400		{object}	dto.ErrorResponse	"Invalid role ID or request"
 //	@Failure		401		{object}	dto.ErrorResponse
 //	@Failure		403		{object}	dto.ErrorResponse	"Cannot modify system roles"
