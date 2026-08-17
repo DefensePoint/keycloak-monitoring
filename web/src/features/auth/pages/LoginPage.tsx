@@ -82,7 +82,7 @@ export function LoginPage() {
               </Typography>
             </Box>
             <Typography variant="body2" sx={{ color: "text.secondary" }}>
-              MONITORING PLATFORM
+              KEYCLOAK MONITORING TOOL
             </Typography>
           </Box>
 

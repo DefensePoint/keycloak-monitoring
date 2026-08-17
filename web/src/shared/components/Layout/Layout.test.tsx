@@ -121,7 +121,7 @@ describe("Layout", () => {
 
     expect(screen.getByAltText("DefensePoint")).toBeInTheDocument();
     expect(screen.getByText("KMT")).toBeInTheDocument();
-    expect(screen.getByText("Monitoring Platform")).toBeInTheDocument();
+    expect(screen.getByText("Keycloak Monitoring Tool")).toBeInTheDocument();
   });
 
   it("should render all navigation items", () => {

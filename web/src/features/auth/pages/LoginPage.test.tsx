@@ -314,7 +314,7 @@ describe("LoginPage", () => {
 
     expect(screen.getByAltText("DefensePoint")).toBeInTheDocument();
     expect(screen.getByText("KMT")).toBeInTheDocument();
-    expect(screen.getByText("MONITORING PLATFORM")).toBeInTheDocument();
+    expect(screen.getByText("KEYCLOAK MONITORING TOOL")).toBeInTheDocument();
   });
 
   it("should handle null auth config gracefully", () => {

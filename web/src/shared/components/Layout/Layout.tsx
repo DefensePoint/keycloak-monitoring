@@ -126,7 +126,7 @@ export function Layout({ children }: LayoutProps) {
                 KMT
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Monitoring Platform
+                Keycloak Monitoring Tool
               </Typography>
             </Box>
           </Box>
