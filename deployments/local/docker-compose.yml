@@ -26,7 +26,7 @@ services:
       POSTGRES_USER: monitoring
       POSTGRES_PASSWORD: monitoring_password
     volumes:
-      - point-postgres-data:/var/lib/postgresql/data
+      - kmt-postgres-data:/var/lib/postgresql/data
     networks:
       - kmt-network
     restart: unless-stopped
@@ -74,7 +74,7 @@ services:
       retries: 5
 
   keycloak-1:
-    image: quay.io/keycloak/keycloak:26.0
+    image: quay.io/keycloak/keycloak:26.7
     container_name: keycloak-1
     profiles: ["bundled-kc"]
     ports:
@@ -127,7 +127,7 @@ services:
       retries: 5
 
   keycloak-2:
-    image: quay.io/keycloak/keycloak:26.0
+    image: quay.io/keycloak/keycloak:26.7
     container_name: keycloak-2
     profiles: ["bundled-kc"]
     ports:
@@ -212,7 +212,7 @@ services:
       - api-server
 
 volumes:
-  point-postgres-data:
+  kmt-postgres-data:
   keycloak-db-1-data:
   keycloak-db-2-data:
 

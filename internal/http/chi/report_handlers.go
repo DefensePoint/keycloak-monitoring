@@ -162,7 +162,7 @@ func (h *ReportHandlers) handleGenerateReport(w http.ResponseWriter, r *http.Req
 	}
 
 	// Set response headers
-	filename := "point-report-" + tenantName + "-" + startDateStr + "-to-" + endDateStr + ".pdf"
+	filename := "kmt-report-" + tenantName + "-" + startDateStr + "-to-" + endDateStr + ".pdf"
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
 
