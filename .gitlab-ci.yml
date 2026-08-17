@@ -29,6 +29,20 @@ stages:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
 
+# Frontend tests are the heaviest workload in this pipeline. Keep the quality
+# gate for frontend and CI changes, but do not run Vitest for configuration-only
+# MRs (such as Renovate onboarding) or backend-only changes.
+.frontend_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - web/**/*
+        - .gitlab-ci.yml
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - web/**/*
+        - .gitlab-ci.yml
+
 .go_template:
   extends: .default_rules
   image: golang:${GO_VERSION}
@@ -140,7 +154,7 @@ quality:security:
 # =================================================================
 
 test:frontend:
-  extends: .default_rules
+  extends: .frontend_rules
   image: node:20-alpine
   stage: test
   needs: []
