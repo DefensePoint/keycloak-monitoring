@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - point-postgres-data:/var/lib/postgresql/data
+      - kmt-postgres-data:/var/lib/postgresql/data
     networks:
       - kmt-network
     restart: unless-stopped
@@ -72,7 +72,7 @@ services:
       - "traefik.http.services.kmt-web.loadbalancer.server.port=7880"
 
 volumes:
-  point-postgres-data:
+  kmt-postgres-data:
 
 networks:
   kmt-network:

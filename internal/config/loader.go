@@ -321,8 +321,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("keycloak.global.version_checker.github_api_base_url", "https://api.github.com")
 	v.SetDefault("keycloak.global.version_checker.keycloak_owner", "keycloak")
 	v.SetDefault("keycloak.global.version_checker.keycloak_repo", "keycloak")
-	v.SetDefault("keycloak.global.version_checker.rhbk_fallback_url", "https://access.redhat.com/products/red-hat-build-of-keycloak")
-	v.SetDefault("keycloak.global.version_checker.rhbk_docs_base_url", "https://docs.redhat.com/en/documentation/red_hat_build_of_keycloak")
 
 	// =============================================================================
 	// Notification Integrations Defaults

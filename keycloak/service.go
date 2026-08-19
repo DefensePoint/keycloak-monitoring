@@ -429,34 +429,16 @@ func (s *service) GetVersionInfo(ctx context.Context, tenantID string) (*Version
 		return nil, err
 	}
 
-	isRHBK := IsRHBKVersion(currentVersion)
 	isKeycloakOutdated := false
-	isRHBKOutdated := false
-
-	if currentVersion != "" && latestVersions != nil {
-		if isRHBK {
-			// Strip .redhat-XXXXX suffix before comparing (e.g., "25.0.1.redhat-00001" -> "25.0.1")
-			// because LatestRHBKVersion comes without the suffix
-			cleanVersion := StripRHBKSuffix(currentVersion)
-			if latestVersions.LatestRHBKVersion != "" {
-				isRHBKOutdated = IsVersionOutdated(cleanVersion, latestVersions.LatestRHBKVersion)
-			}
-		} else {
-			if latestVersions.LatestKeycloakVersion != "" {
-				isKeycloakOutdated = IsVersionOutdated(currentVersion, latestVersions.LatestKeycloakVersion)
-			}
-		}
+	if currentVersion != "" && latestVersions != nil && latestVersions.LatestKeycloakVersion != "" {
+		isKeycloakOutdated = IsVersionOutdated(currentVersion, latestVersions.LatestKeycloakVersion)
 	}
 
 	return &VersionCheckResult{
 		CurrentVersion:        currentVersion,
 		LatestKeycloakVersion: latestVersions.LatestKeycloakVersion,
-		LatestRHBKVersion:     latestVersions.LatestRHBKVersion,
 		KeycloakReleaseURL:    latestVersions.KeycloakReleaseURL,
-		RHBKReleaseURL:        latestVersions.RHBKReleaseURL,
 		IsKeycloakOutdated:    isKeycloakOutdated,
-		IsRHBKOutdated:        isRHBKOutdated,
-		IsRHBK:                isRHBK,
 		HasSecurityUpdates:    latestVersions.HasSecurityUpdates,
 		LastChecked:           latestVersions.LastChecked,
 	}, nil

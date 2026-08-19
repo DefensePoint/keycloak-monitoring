@@ -476,7 +476,7 @@ keycloak:
     # =========================================================================
     # VERSION CHECKER
     # =========================================================================
-    # The version checker monitors for new Keycloak and RHBK releases
+    # The version checker monitors for new Keycloak releases
     # and displays warnings when updates are available.
     version_checker:
       # How long to cache version information before checking again
@@ -501,13 +501,6 @@ keycloak:
       # Default: keycloak (official Keycloak repository)
       keycloak_repo: "keycloak"
 
-      # Fallback URL for Red Hat Build of Keycloak (RHBK) information
-      # This URL is used when RHBK-specific releases aren't found in GitHub
-      rhbk_fallback_url: "https://access.redhat.com/products/red-hat-build-of-keycloak"
-
-      # Base documentation URL used to discover RHBK release notes
-      rhbk_docs_base_url: "https://docs.redhat.com/en/documentation/red_hat_build_of_keycloak"
-
   # ===========================================================================
   # TENANTS
   # ===========================================================================
@@ -523,7 +516,7 @@ keycloak:
   #   MONITORING_KEYCLOAK_TENANTS_PROD_KEYCLOAK_ADMIN_PASSWORD=secret123
   tenants:
     # Example: Production Keycloak instance
-    prod-point:
+    prod-keycloak:
       # Enable monitoring for this tenant
       # Set to false to temporarily disable without removing configuration
       enabled: true

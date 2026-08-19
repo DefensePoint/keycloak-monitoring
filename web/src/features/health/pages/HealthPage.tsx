@@ -41,46 +41,17 @@ export function HealthPage() {
     keycloakDashboard && "version_info" in keycloakDashboard
       ? keycloakDashboard.version_info
       : null;
-  const isRHBKInstance =
-    versionInfo?.is_rhbk ??
-    health?.server_version?.includes(".redhat-") ??
-    false;
-  const latestVersion = versionInfo
-    ? isRHBKInstance
-      ? versionInfo.latest_rhbk_version
-      : versionInfo.latest_keycloak_version
-    : "";
-  const secondaryVersion = versionInfo
-    ? isRHBKInstance
-      ? versionInfo.latest_keycloak_version
-      : versionInfo.latest_rhbk_version
-    : "";
-  const hasSecondaryVersion = Boolean(
-    versionInfo && secondaryVersion && secondaryVersion !== latestVersion,
-  );
-  const releaseUrl = versionInfo
-    ? isRHBKInstance
-      ? versionInfo.rhbk_release_url
-      : versionInfo.keycloak_release_url
-    : "";
-  const releaseLabel = isRHBKInstance
-    ? "View RHBK Release Notes"
-    : "View Keycloak Release Notes";
-  const isOutdated = versionInfo
-    ? isRHBKInstance
-      ? versionInfo.is_rhbk_outdated
-      : versionInfo.is_keycloak_outdated
-    : false;
+  const latestVersion = versionInfo ? versionInfo.latest_keycloak_version : "";
+  const releaseUrl = versionInfo ? versionInfo.keycloak_release_url : "";
+  const releaseLabel = "View Keycloak Release Notes";
+  const isOutdated = versionInfo ? versionInfo.is_keycloak_outdated : false;
   const latestVersionDisplay = latestVersion?.trim()
     ? latestVersion
     : "Unknown";
-  const highlightSecurity =
-    !isRHBKInstance && (versionInfo?.has_security_updates ?? false);
-  const updateTitle = isRHBKInstance
-    ? "RHBK Update Available"
-    : highlightSecurity
-      ? "Security Update Required"
-      : "Update Available";
+  const highlightSecurity = versionInfo?.has_security_updates ?? false;
+  const updateTitle = highlightSecurity
+    ? "Security Update Required"
+    : "Update Available";
 
   return (
     <Box sx={{ p: { xs: 2, sm: 4 } }}>
@@ -194,8 +165,6 @@ export function HealthPage() {
               <Box sx={{ mt: 3 }}>
                 <Typography variant="body2" color="text.secondary">
                   {updateTitle}: {latestVersionDisplay}
-                  {hasSecondaryVersion &&
-                    ` / ${isRHBKInstance ? "Keycloak" : "RHBK"}: ${secondaryVersion}`}
                   {releaseUrl && (
                     <>
                       {" — "}

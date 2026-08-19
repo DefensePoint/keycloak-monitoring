@@ -58,12 +58,8 @@ type RecentEventStats struct {
 type VersionCheckResult struct {
 	CurrentVersion        string    `json:"current_version"`
 	LatestKeycloakVersion string    `json:"latest_keycloak_version"`
-	LatestRHBKVersion     string    `json:"latest_rhbk_version"`
 	KeycloakReleaseURL    string    `json:"keycloak_release_url"`
-	RHBKReleaseURL        string    `json:"rhbk_release_url"`
 	IsKeycloakOutdated    bool      `json:"is_keycloak_outdated"`
-	IsRHBKOutdated        bool      `json:"is_rhbk_outdated"`
-	IsRHBK                bool      `json:"is_rhbk"`
 	HasSecurityUpdates    bool      `json:"has_security_updates"`
 	LastChecked           time.Time `json:"last_checked"`
 }

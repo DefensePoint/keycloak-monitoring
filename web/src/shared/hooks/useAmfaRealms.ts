@@ -7,7 +7,7 @@ interface AmfaRealmsResponse {
 }
 
 /**
- * Names of realms whose Keycloak browser login flow uses the POINT adaptive-auth
+ * Names of realms whose Keycloak browser login flow uses an Adaptive MFA
  * (AMFA) authenticator. Used to show/hide AMFA-only UI sections (KPI cards, geo
  * map, Risk column) per realm. Backed by GET /keycloak/amfa-realms, which the
  * backend caches; a realm's AMFA config changes rarely, so this is polled slowly.

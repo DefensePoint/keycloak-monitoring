@@ -17,7 +17,7 @@ This directory contains end-to-end integration tests for the Keycloak Monitoring
    ```
 
 3. **Config**: Make sure `config.yaml` has:
-   - `prod-point` tenant configured and enabled
+   - `prod-keycloak` tenant configured and enabled
    - Event checker enabled with reasonable poll intervals
    - Slack notifications enabled (or check notification_logs table instead)
 
@@ -104,7 +104,7 @@ PASS
 
 **Fix**:
 1. Check `config.yaml` - ensure event_checker and config_checker are enabled
-2. Verify tenant `prod-point` is enabled
+2. Verify tenant `prod-keycloak` is enabled
 3. Check server logs for errors
 
 ### Notifications not sent
@@ -124,7 +124,7 @@ You can also manually insert data and check the results:
 # 1. Insert test events
 docker compose -f deployments/local/docker-compose.yml exec postgres psql -U monitoring -d monitoring -c "
 INSERT INTO keycloak_events (tenant_id, event_id, time, realm_id, realm_name, event_type, success, ip_address, user_id, username, client_id)
-SELECT 'prod-point', 'manual-test-' || generate_series, NOW() - interval '1 minute', 'master', 'master', 'LOGIN_ERROR', false, '192.168.1.100', 'user-' || generate_series, 'user' || generate_series, 'test-client'
+SELECT 'prod-keycloak', 'manual-test-' || generate_series, NOW() - interval '1 minute', 'master', 'master', 'LOGIN_ERROR', false, '192.168.1.100', 'user-' || generate_series, 'user' || generate_series, 'test-client'
 FROM generate_series(1, 15);
 "
 
@@ -134,7 +134,7 @@ FROM generate_series(1, 15);
 docker compose -f deployments/local/docker-compose.yml exec postgres psql -U monitoring -d monitoring -c "
 SELECT title, severity, check_type, first_detected
 FROM configuration_alerts
-WHERE tenant_id = 'prod-point'
+WHERE tenant_id = 'prod-keycloak'
 ORDER BY first_detected DESC
 LIMIT 5;
 "

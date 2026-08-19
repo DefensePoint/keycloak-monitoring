@@ -601,7 +601,7 @@ func (h *KeycloakHandlers) handleKeycloakRealmInfo(w http.ResponseWriter, r *htt
 	httputil.RespondSuccess(w, h.log, realm)
 }
 
-// handleKeycloakVersionCheck returns latest Keycloak and RHBK versions with comparison.
+// handleKeycloakVersionCheck returns the latest Keycloak version with comparison.
 //
 //	@Summary		Check Keycloak version
 //	@Description	Returns current version info and comparison with latest releases

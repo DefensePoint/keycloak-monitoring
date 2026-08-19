@@ -2,87 +2,6 @@ package keycloak
 
 import "testing"
 
-func TestStripRHBKSuffix(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "RHBK version with suffix",
-			input:    "25.0.1.redhat-00001",
-			expected: "25.0.1",
-		},
-		{
-			name:     "RHBK version with different suffix",
-			input:    "24.0.5.redhat-00002",
-			expected: "24.0.5",
-		},
-		{
-			name:     "Regular Keycloak version (no suffix)",
-			input:    "25.0.1",
-			expected: "25.0.1",
-		},
-		{
-			name:     "Empty version",
-			input:    "",
-			expected: "",
-		},
-		{
-			name:     "Version with redhat but no dash",
-			input:    "25.0.1.redhat",
-			expected: "25.0.1.redhat",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := StripRHBKSuffix(tt.input)
-			if result != tt.expected {
-				t.Errorf("StripRHBKSuffix(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestIsRHBKVersion(t *testing.T) {
-	tests := []struct {
-		name     string
-		version  string
-		expected bool
-	}{
-		{
-			name:     "RHBK version",
-			version:  "25.0.1.redhat-00001",
-			expected: true,
-		},
-		{
-			name:     "Regular Keycloak version",
-			version:  "25.0.1",
-			expected: false,
-		},
-		{
-			name:     "Empty version",
-			version:  "",
-			expected: false,
-		},
-		{
-			name:     "Version with redhat in name but not RHBK",
-			version:  "25.0.1",
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsRHBKVersion(tt.version)
-			if result != tt.expected {
-				t.Errorf("IsRHBKVersion(%q) = %v, want %v", tt.version, result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestCompareVersions(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -164,7 +83,7 @@ func TestIsVersionOutdated(t *testing.T) {
 			expected:       false,
 		},
 		{
-			name:           "RHBK version stripped vs regular",
+			name:           "Patch version behind",
 			currentVersion: "25.0.1",
 			latestVersion:  "25.0.2",
 			expected:       true,

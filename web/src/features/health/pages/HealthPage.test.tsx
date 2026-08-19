@@ -87,14 +87,10 @@ const mockKeycloakDashboard = {
     server_version: "23.0.1",
   },
   version_info: {
-    is_rhbk: false,
     latest_keycloak_version: "24.0.0",
-    latest_rhbk_version: "24.0.0-redhat",
     is_keycloak_outdated: true,
-    is_rhbk_outdated: false,
     has_security_updates: true,
     keycloak_release_url: "https://github.com/keycloak/keycloak/releases",
-    rhbk_release_url: "https://access.redhat.com/",
   },
 };
 
@@ -281,17 +277,17 @@ describe("HealthPage", () => {
     expect(screen.getByText("Connection timeout")).toBeInTheDocument();
   });
 
-  it("should show RHBK update warning for RHBK instances", async () => {
+  it("should show an update warning for an outdated Keycloak", async () => {
     mockUseKeycloakDashboard.mockReturnValue({
       data: {
         health: {
           ...mockKeycloakDashboard.health,
-          server_version: "23.0.1.redhat-00001",
+          server_version: "23.0.1",
         },
         version_info: {
           ...mockKeycloakDashboard.version_info,
-          is_rhbk: true,
-          is_rhbk_outdated: true,
+          is_keycloak_outdated: true,
+          has_security_updates: false,
         },
       },
       isLoading: false,
@@ -301,7 +297,7 @@ describe("HealthPage", () => {
     render(<HealthPage />);
 
     await waitFor(() => {
-      expect(screen.getByText(/RHBK Update Available/)).toBeInTheDocument();
+      expect(screen.getByText(/Update Available/)).toBeInTheDocument();
     });
   });
 });

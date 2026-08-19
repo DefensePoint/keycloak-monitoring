@@ -82,8 +82,7 @@ feat(configcheck): flag realms without brute force protection
 ## Reporting Issues
 
 Open an issue with a clear description, steps to reproduce, and the versions you
-are running, including your Keycloak version and whether it is upstream Keycloak
-or Red Hat build of Keycloak.
+are running, including your Keycloak version.
 
 For security vulnerabilities, follow [SECURITY.md](SECURITY.md) instead of
 opening a public issue.

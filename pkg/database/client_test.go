@@ -22,7 +22,7 @@ import (
 //
 // Example:
 //
-//	KMT_TEST_DATABASE_DSN="host=localhost port=5432 dbname=point_test user=point password=point sslmode=disable" \
+//	KMT_TEST_DATABASE_DSN="host=localhost port=5432 dbname=kmt_test user=kmt password=kmt sslmode=disable" \
 //	    go test ./pkg/database/...
 func newTestClient(t *testing.T) *Client {
 	t.Helper()

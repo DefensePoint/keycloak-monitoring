@@ -1,7 +1,7 @@
 # Local Setup
 
 How this machine is configured to run Keycloak Monitoring Tool against the
-existing `keycloak-deployment` stack (RHBK 26.4 on host `:8080`).
+existing Keycloak deployment (host `:8080`).
 
 ## Prerequisites
 

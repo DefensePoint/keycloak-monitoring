@@ -49,7 +49,7 @@ func TestAlertsIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	tenantID := "prod-point"
+	tenantID := "prod-keycloak"
 
 	// Clean up any existing test data
 	t.Log("Cleaning up existing test data...")

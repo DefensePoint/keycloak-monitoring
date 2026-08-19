@@ -127,8 +127,6 @@ func TestKeycloakInstanceConfig_AllSettings(t *testing.T) {
 			GitHubAPIBaseURL: "https://api.github.com",
 			KeycloakOwner:    "keycloak",
 			KeycloakRepo:     "keycloak",
-			RHBKFallbackURL:  "https://access.redhat.com",
-			RHBKDocsBaseURL:  "https://docs.redhat.com/en/documentation/red_hat_build_of_keycloak",
 		},
 	}
 

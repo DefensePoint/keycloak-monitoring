@@ -335,10 +335,6 @@ keycloak:
       keycloak_owner: "keycloak"
       keycloak_repo: "keycloak"
 
-      # Red Hat Build of Keycloak fallback URL
-      rhbk_fallback_url: "https://access.redhat.com/articles/2342881"
-      # Base documentation URL used to discover version-specific RHBK release notes
-      rhbk_docs_base_url: "https://docs.redhat.com/en/documentation/red_hat_build_of_keycloak"
 
   # ============================================================================
   # TENANTS

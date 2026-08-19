@@ -347,8 +347,6 @@ type VersionCheckerConfig struct {
 	GitHubAPIBaseURL string        `mapstructure:"github_api_base_url"`
 	KeycloakOwner    string        `mapstructure:"keycloak_owner"`
 	KeycloakRepo     string        `mapstructure:"keycloak_repo"`
-	RHBKFallbackURL  string        `mapstructure:"rhbk_fallback_url"`
-	RHBKDocsBaseURL  string        `mapstructure:"rhbk_docs_base_url"`
 }
 
 // EventCheckerConfig represents event-based alert checker settings

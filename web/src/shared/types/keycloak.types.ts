@@ -246,12 +246,8 @@ export interface KeycloakRealmInfo {
 export interface KeycloakVersionInfo {
   current_version: string;
   latest_keycloak_version: string;
-  latest_rhbk_version: string;
   keycloak_release_url: string;
-  rhbk_release_url: string;
   is_keycloak_outdated: boolean;
-  is_rhbk_outdated: boolean;
-  is_rhbk: boolean;
   has_security_updates: boolean;
 }
 

@@ -36,7 +36,7 @@ func main() {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
 
-	tenantID := "prod-point"
+	tenantID := "prod-keycloak"
 	realmName := "master"
 
 	log.Println("Inserting test events to trigger all 5 alert types...")
@@ -171,8 +171,8 @@ func main() {
 	log.Println("  4. CLIENT_LOGIN_ERROR - WARNING (12 events, threshold 10)")
 	log.Println("  5. REGISTER_ERROR - WARNING (55 events, threshold 50)")
 	log.Println("")
-	log.Println("View alerts in UI: http://localhost:7880/prod-point/alerts")
+	log.Println("View alerts in UI: http://localhost:7880/prod-keycloak/alerts")
 	log.Println("")
 	log.Println("To clean up test events:")
-	log.Println("  docker compose -f deployments/local/docker-compose.yml exec postgres psql -U monitoring -d monitoring -c \"DELETE FROM keycloak_events WHERE tenant_id = 'prod-point' AND event_id LIKE 'demo-%';\"")
+	log.Println("  docker compose -f deployments/local/docker-compose.yml exec postgres psql -U monitoring -d monitoring -c \"DELETE FROM keycloak_events WHERE tenant_id = 'prod-keycloak' AND event_id LIKE 'demo-%';\"")
 }
