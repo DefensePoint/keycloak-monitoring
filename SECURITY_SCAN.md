@@ -12,34 +12,43 @@ other scanners (secrets, SAST, Dockerfile lint) stay warn-only.
 
 ## Fixed in this MR
 
-Three unique Critical CVEs surfaced at baseline; all cleared by dependency
-bumps landed alongside this MR.
+Critical findings surfaced at baseline, all cleared by dependency bumps
+landed alongside this MR.
 
-| CVE            | Component               | 5.7.6 -> 5.9.0 / etc              | Where it surfaced       | Fix                                                    |
-|----------------|-------------------------|-----------------------------------|-------------------------|--------------------------------------------------------|
-| CVE-2026-33815 | github.com/jackc/pgx/v5 | 5.7.6 -> 5.9.0                    | Trivy fs, server image  | `go get github.com/jackc/pgx/v5@v5.9.0`.               |
-| CVE-2026-33816 | github.com/jackc/pgx/v5 | 5.7.6 -> 5.9.0                    | Trivy fs, server image  | Same pgx bump.                                         |
-| CVE-2025-68121 | Go stdlib               | 1.25.1 -> 1.25.14                 | Server image, web image | `GO_VERSION` bumped in `.gitlab-ci.yml` and `build/Dockerfile`. |
+| ID                  | Component               | From -> To         | Rated by       | Fix                                                    |
+|---------------------|-------------------------|--------------------|----------------|--------------------------------------------------------|
+| CVE-2026-33815      | github.com/jackc/pgx/v5 | 5.7.6 -> 5.9.0     | Trivy (NVD)    | `go get github.com/jackc/pgx/v5@v5.9.0`.               |
+| CVE-2026-33816      | github.com/jackc/pgx/v5 | 5.7.6 -> 5.9.0     | Trivy (NVD)    | Same pgx bump.                                         |
+| CVE-2025-68121      | Go stdlib               | 1.25.1 -> 1.25.14  | Trivy (NVD)    | `GO_VERSION` bumped in `.gitlab-ci.yml` and `build/Dockerfile`. |
+| 8x GHSA (see below) | golang.org/x/crypto     | 0.46.0 -> 0.55.0   | Grype (GHSA)   | `go get golang.org/x/crypto@latest`; transitively bumps `x/net`, `x/text`, `x/sys`, `x/mod`, `x/tools`. |
 
-Post-bump local scan totals: Trivy fs 0 Critical / 20 High; Trivy image
-(server) 0 Critical / 18 High; Trivy image (web) 0 Critical / 1 High.
-Remaining High findings are informational and continue to be tracked by
-Renovate.
+The eight `x/crypto` GHSA IDs Grype rated Critical (GHSA-5cgq-3rg8-m6cv,
+GHSA-vgwf-h737-ff37, GHSA-f5wc-c3c7-36mc, GHSA-x527-x647-q7gg,
+GHSA-rm3j-f69w-wqmq, GHSA-89gr-r52h-f8rx, GHSA-jppx-rxg9-jmrx,
+GHSA-w879-237q-wc7r) map to the CVE-2026-3982x cluster that Trivy rates
+High under NVD. The CI dependency gate runs Grype, so Grype's severity is
+what enforcement uses.
+
+Post-bump local scans:
+
+- Trivy fs: 0 Critical, 5 High.
+- Grype fs: 0 Critical, 3 High (`--fail-on critical` exits 0).
 
 ## Per-scanner roll-up
 
-| Scanner              | Critical | High | Medium | Info | Status                                          |
-|----------------------|---------:|-----:|-------:|-----:|-------------------------------------------------|
-| Trivy fs             |        0 |   20 |      0 |    0 | High findings are Go/npm dep bumps.             |
-| Trivy image (server) |        0 |   18 |      0 |    0 | go-jose + x/{crypto,mod,net,text}.              |
-| Trivy image (web)    |        0 |    1 |      0 |    0 | Single golang.org/x/text CVE.                   |
-| Semgrep (SAST)       |        0 |    0 |      0 |    0 | 110 rules ran, no ERROR findings.               |
-| Gitleaks             |        0 |    0 |      0 |    0 | 3 false positives allowlisted in `.gitleaksignore`. |
-| Hadolint             |        0 |    3 |      0 |    3 | Best-practice warnings, not blocking.           |
+| Scanner              | Critical | High | Notes                                                       |
+|----------------------|---------:|-----:|-------------------------------------------------------------|
+| Grype (CI gate)      |        0 |    3 | `go-jose`, `form-data`, `x/mod`; all High, all warn-only.   |
+| Trivy fs (local)     |        0 |    5 | Same packages plus one npm entry; NVD severity mapping.     |
+| Trivy image (server) |        0 |    3 | `go-jose` and `x/mod`; distroless base is clean.            |
+| Trivy image (web)    |        0 |    0 | Fully clean.                                                |
+| Semgrep (SAST)       |        0 |    0 | 110 rules ran, no ERROR findings.                           |
+| Gitleaks             |        0 |    0 | 3 false positives allowlisted in `.gitleaksignore`.         |
+| Hadolint             |        0 |    3 | Plus 3 info; best-practice warnings, not blocking.          |
 
-Counts are per-scanner row totals; a CVE that appears in both Trivy fs and
-Trivy image is counted in each. The **Critical: 0** at the top is the
-deduplicated unique-CVE count after the dependency bumps.
+Numbers are per-scanner totals; a package that surfaces in both Grype and
+Trivy fs is counted in each. The **Critical: 0** at the top is what the
+enforcement gate actually reads.
 
 ## Local reproduction
 
@@ -54,34 +63,30 @@ prerequisites are checked by `make sec-preflight`.
 
 ## Dependency scan
 
-CI runs Grype via the `security/dependencies` component; `make sec-trivy-fs`
-runs Trivy filesystem mode locally. Both tools consume the same lockfile
-manifests (`go.mod`, `web/package-lock.json`) and read from equivalent NVD /
-GHSA feeds, so the CVE lists line up. The findings below were captured with
-`trivy fs --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed .`;
-reconcile against the CI `grype-report.json` artifact if numbers diverge.
+CI runs Grype via the `security/dependencies` component and enforces
+`--fail-on critical`. Locally, `make sec-trivy-fs` runs Trivy filesystem
+mode; both tools consume the same lockfile manifests
+(`go.mod`, `web/package-lock.json`) but read different vulnerability
+feeds. When Grype (GHSA) and Trivy (NVD) rate the same CVE at different
+severities, Grype's call is what enforcement uses.
 
 ### Critical
 
-None. The two pgx/v5 CVEs from the initial baseline (CVE-2026-33815 and
-CVE-2026-33816) are fixed in this MR by bumping to 5.9.0.
+None. The three baseline Criticals (two pgx/v5 CVEs and the x/crypto
+GHSA cluster) are fixed in this MR by the pgx and x/crypto bumps.
 
-### High (Go)
+### High (post-bump)
 
-| Package                    | Installed | Fixed  | CVEs                                                                                                                                                                                                                                                             | Fix action                       |
-|----------------------------|-----------|--------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------|
-| github.com/go-jose/go-jose | 4.1.3     | 4.1.4  | CVE-2026-34986                                                                                                                                                                                                                                                   | Patch bump.                      |
-| golang.org/x/crypto        | 0.46.0    | 0.52.0 | CVE-2026-39828, CVE-2026-39829, CVE-2026-39830, CVE-2026-39831, CVE-2026-39832, CVE-2026-39835, CVE-2026-42508, CVE-2026-46595, CVE-2026-46597                                                                                                                   | Bump indirect stdlib toolchain. |
-| golang.org/x/mod           | 0.32.0    | 0.40.0 | CVE-2026-56864, CVE-2026-56865                                                                                                                                                                                                                                   | Follow-on x/mod bump.            |
-| golang.org/x/net           | 0.48.0    | 0.55.0+ | CVE-2026-25681, CVE-2026-27136, CVE-2026-33814, CVE-2026-39821, CVE-2026-46600                                                                                                                                                                                  | Bump x/net.                      |
-| golang.org/x/text          | 0.33.0    | 0.39.0 | CVE-2026-56852                                                                                                                                                                                                                                                   | Bump x/text.                     |
+| Package                    | Installed | Fixed  | Notes                              |
+|----------------------------|-----------|--------|------------------------------------|
+| github.com/go-jose/go-jose | 4.1.3     | 4.1.4  | Patch bump, follow-up.             |
+| golang.org/x/mod           | 0.38.0    | 0.40.0 | Indirect, still shy of latest.     |
+| form-data (npm)            | 4.0.5     | 4.0.6  | Follow-up via Renovate.            |
 
-### High (npm)
-
-| Package    | Installed | Fixed              | Advisory                       | Fix action                            |
-|------------|-----------|--------------------|--------------------------------|---------------------------------------|
-| axios      | 1.16.1    | 1.18.0 (or 0.33.0) | GHSA-gcfj-64vw-6mp9            | Bump axios to 1.18.0 in `web/`.       |
-| form-data  | 4.0.5     | 4.0.6              | CVE-2026-12143                 | Bump form-data via transitive update. |
+x/crypto, x/net, x/sys, x/text were all bumped in this MR alongside the
+x/crypto Critical fix, so their earlier High entries are already resolved.
+The npm side has additional Medium findings on `axios` and `react-router`
+that Renovate is expected to churn.
 
 ### Suggested follow-up
 
@@ -101,23 +106,14 @@ binary layer.
 
 ### server (`debian:12-slim` + chromium)
 
-0 Critical, 18 High after the pgx + Go toolchain bumps. Every remaining
-High is a Go module still shy of the latest patched version:
-
-- `github.com/go-jose/go-jose/v4`
-- `golang.org/x/crypto`
-- `golang.org/x/mod`
-- `golang.org/x/net`
-- `golang.org/x/text`
-
-Renovate is expected to open individual patch MRs for each. None block
-merge or deploy under the current gate.
+0 Critical, 3 High after the pgx, Go toolchain, and x/crypto bumps:
+`github.com/go-jose/go-jose/v4` and `golang.org/x/mod` still shy of the
+latest patched version. None blocks merge or deploy under the current
+Critical-only gate.
 
 ### web (`gcr.io/distroless/static-debian12:nonroot`)
 
-0 Critical, 1 High: `golang.org/x/text v0.33.0` needs 0.39.0
-(CVE-2026-56852, denial of service via invalid UTF-8 input). Cleared by the
-pending Renovate bump.
+0 Critical, 0 High. Fully clean after the toolchain and library bumps.
 
 ## Semgrep SAST
 
