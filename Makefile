@@ -187,6 +187,118 @@ swagger-fmt: ## Format Swagger annotations
 	@swag fmt
 
 # -----------------------------------------------------------------
+# SECURITY SCAN TARGETS
+# -----------------------------------------------------------------
+# Mirrors the CI security stage locally. Every sub-target is callable on its
+# own, and every scan writes a JSON report to reports/security/ so results
+# survive between runs. Findings are informational: none of these targets
+# fails the make invocation on findings, matching the warn-only CI rollout.
+
+SECURITY_REPORTS := reports/security
+
+.PHONY: sec-preflight
+sec-preflight: ## Check that security scan tools are on PATH
+	@missing=""; \
+	for tool in hadolint trivy gitleaks semgrep docker; do \
+		if ! command -v $$tool >/dev/null 2>&1; then \
+			missing="$$missing $$tool"; \
+		fi; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		echo "Missing tools:$$missing"; \
+		echo ""; \
+		echo "Install hints (macOS):"; \
+		echo "  brew install hadolint trivy gitleaks semgrep"; \
+		echo "  Docker Desktop or colima for 'docker'"; \
+		exit 1; \
+	fi; \
+	echo "All security tools present."
+	@mkdir -p $(SECURITY_REPORTS)
+
+.PHONY: sec-hadolint
+sec-hadolint: sec-preflight ## Lint build/Dockerfile with hadolint
+	@echo "Running hadolint on build/Dockerfile..."
+	@hadolint --format json build/Dockerfile | tee $(SECURITY_REPORTS)/hadolint.json || true
+
+.PHONY: sec-trivy-fs
+sec-trivy-fs: sec-preflight ## Trivy filesystem scan for Go and npm CVEs
+	@echo "Running Trivy filesystem scan..."
+	@trivy fs \
+		--scanners vuln \
+		--severity CRITICAL,HIGH \
+		--ignore-unfixed \
+		--format json \
+		--output $(SECURITY_REPORTS)/trivy-fs.json \
+		.
+	@trivy fs \
+		--scanners vuln \
+		--severity CRITICAL,HIGH \
+		--ignore-unfixed \
+		.
+
+.PHONY: sec-gitleaks
+sec-gitleaks: sec-preflight ## Gitleaks scan of full git history
+	@echo "Running gitleaks on full git history..."
+	@gitleaks detect \
+		--source . \
+		--redact \
+		--report-format json \
+		--report-path $(SECURITY_REPORTS)/gitleaks.json \
+		--exit-code 0
+
+.PHONY: sec-semgrep
+sec-semgrep: sec-preflight ## Semgrep SAST scan (auto ruleset)
+	@echo "Running semgrep with the auto ruleset..."
+	@semgrep scan \
+		--config auto \
+		--severity ERROR \
+		--exclude node_modules \
+		--exclude vendor \
+		--exclude .terraform \
+		--exclude .git \
+		--json \
+		--output $(SECURITY_REPORTS)/semgrep.json \
+		--quiet || true
+	@semgrep scan \
+		--config auto \
+		--severity ERROR \
+		--exclude node_modules \
+		--exclude vendor \
+		--exclude .terraform \
+		--exclude .git || true
+
+.PHONY: sec-build-images
+sec-build-images: sec-preflight ## Build both container images with tag :scan
+	@echo "Building kmt-server:scan..."
+	@docker build --build-arg SERVICE=server -t kmt-server:scan -f build/Dockerfile .
+	@echo "Building kmt-web:scan..."
+	@docker build --build-arg SERVICE=web -t kmt-web:scan -f build/Dockerfile .
+
+.PHONY: sec-trivy-images
+sec-trivy-images: sec-preflight ## Trivy image scan for both service images
+	@for svc in server web; do \
+		echo "Scanning kmt-$$svc:scan..."; \
+		trivy image \
+			--severity CRITICAL,HIGH \
+			--ignore-unfixed \
+			--format json \
+			--output $(SECURITY_REPORTS)/trivy-image-$$svc.json \
+			kmt-$$svc:scan; \
+		trivy image \
+			--severity CRITICAL,HIGH \
+			--ignore-unfixed \
+			kmt-$$svc:scan; \
+	done
+
+.PHONY: sec-container
+sec-container: sec-build-images sec-trivy-images ## Build and scan both container images
+
+.PHONY: security-scan
+security-scan: sec-hadolint sec-trivy-fs sec-gitleaks sec-semgrep sec-container ## Run every security scan and write reports to reports/security/
+	@echo ""
+	@echo "Security scan complete. Reports in $(SECURITY_REPORTS)/"
+
+# -----------------------------------------------------------------
 # CLEANUP TARGETS
 # -----------------------------------------------------------------
 
