@@ -1,45 +1,45 @@
 # Security Scan Baseline
 
-> **Critical: 3 | High: 39 | Medium: 0**
+> **Critical: 0 | High: 39 | Medium: 0**
 >
-> Deduplicated across every scanner. Only Critical findings gate the
-> open-source release; High and Medium are informational and tracked as
-> follow-up dependency work.
+> Deduplicated across every scanner. The dependency and container scans
+> block the pipeline on Critical CVEs; High and Medium are informational
+> and tracked as follow-up dependency work.
 
-Baseline for the container and code scans introduced by DFPT-1080. Scans run
-warn-only in CI (`allow_failure: true`, `exit_code: 0`). This document is the
-snapshot of findings the reviewer signs off before the pipeline flips to
-blocking.
+Baseline for the container and code scans introduced by DFPT-1080. The
+dependency scan and the container-image scan gate on Critical only; all
+other scanners (secrets, SAST, Dockerfile lint) stay warn-only.
 
-## Critical findings
+## Fixed in this MR
 
-Three unique CVEs, all resolvable with dependency bumps. No code changes
-needed.
+Three unique Critical CVEs surfaced at baseline; all cleared by dependency
+bumps landed alongside this MR.
 
-| CVE            | Component               | Installed | Fixed                          | Where it surfaced         | Fix action                           |
-|----------------|-------------------------|-----------|--------------------------------|---------------------------|--------------------------------------|
-| CVE-2026-33815 | github.com/jackc/pgx/v5 | 5.7.6     | 5.9.0                          | Trivy fs, server image    | Bump `pgx/v5` to 5.9.0.              |
-| CVE-2026-33816 | github.com/jackc/pgx/v5 | 5.7.6     | 5.9.0                          | Trivy fs, server image    | Same pgx bump.                       |
-| CVE-2025-68121 | Go stdlib               | 1.25.1    | 1.24.13 / 1.25.7 / 1.26.0-rc.3 | Server image, web image   | Bump `GO_VERSION` to 1.25.7 or newer. |
+| CVE            | Component               | 5.7.6 -> 5.9.0 / etc              | Where it surfaced       | Fix                                                    |
+|----------------|-------------------------|-----------------------------------|-------------------------|--------------------------------------------------------|
+| CVE-2026-33815 | github.com/jackc/pgx/v5 | 5.7.6 -> 5.9.0                    | Trivy fs, server image  | `go get github.com/jackc/pgx/v5@v5.9.0`.               |
+| CVE-2026-33816 | github.com/jackc/pgx/v5 | 5.7.6 -> 5.9.0                    | Trivy fs, server image  | Same pgx bump.                                         |
+| CVE-2025-68121 | Go stdlib               | 1.25.1 -> 1.25.14                 | Server image, web image | `GO_VERSION` bumped in `.gitlab-ci.yml` and `build/Dockerfile`. |
 
-Follow-up MR: bump `github.com/jackc/pgx/v5` and `GO_VERSION` together, then
-rebuild both images. Renovate should also propose these once the pipeline
-runs.
+Post-bump local scan totals: Trivy fs 0 Critical / 20 High; Trivy image
+(server) 0 Critical / 18 High; Trivy image (web) 0 Critical / 1 High.
+Remaining High findings are informational and continue to be tracked by
+Renovate.
 
 ## Per-scanner roll-up
 
 | Scanner              | Critical | High | Medium | Info | Status                                          |
 |----------------------|---------:|-----:|-------:|-----:|-------------------------------------------------|
-| Trivy fs             |        2 |   20 |      0 |    0 | pgx + Go/npm dep bumps.                         |
-| Trivy image (server) |        3 |   39 |      0 |    0 | pgx + stdlib + x/* modules.                     |
-| Trivy image (web)    |        1 |   22 |      0 |    0 | Stdlib dominates; distroless base is clean.     |
+| Trivy fs             |        0 |   20 |      0 |    0 | High findings are Go/npm dep bumps.             |
+| Trivy image (server) |        0 |   18 |      0 |    0 | go-jose + x/{crypto,mod,net,text}.              |
+| Trivy image (web)    |        0 |    1 |      0 |    0 | Single golang.org/x/text CVE.                   |
 | Semgrep (SAST)       |        0 |    0 |      0 |    0 | 110 rules ran, no ERROR findings.               |
 | Gitleaks             |        0 |    0 |      0 |    0 | 3 false positives allowlisted in `.gitleaksignore`. |
 | Hadolint             |        0 |    3 |      0 |    3 | Best-practice warnings, not blocking.           |
 
-Counts are per-scanner row totals (a CVE that appears in both Trivy fs and
-Trivy image is counted in each). The **Critical: 3** at the top is the
-deduplicated unique-CVE count.
+Counts are per-scanner row totals; a CVE that appears in both Trivy fs and
+Trivy image is counted in each. The **Critical: 0** at the top is the
+deduplicated unique-CVE count after the dependency bumps.
 
 ## Local reproduction
 
@@ -63,10 +63,8 @@ reconcile against the CI `grype-report.json` artifact if numbers diverge.
 
 ### Critical
 
-| Package                     | Installed | Fixed | CVE               | Fix action                          |
-|-----------------------------|-----------|-------|-------------------|-------------------------------------|
-| github.com/jackc/pgx/v5     | 5.7.6     | 5.9.0 | CVE-2026-33815    | Bump `pgx/v5` to 5.9.0 (follow-up). |
-| github.com/jackc/pgx/v5     | 5.7.6     | 5.9.0 | CVE-2026-33816    | Same bump covers both CVEs.         |
+None. The two pgx/v5 CVEs from the initial baseline (CVE-2026-33815 and
+CVE-2026-33816) are fixed in this MR by bumping to 5.9.0.
 
 ### High (Go)
 
@@ -87,9 +85,9 @@ reconcile against the CI `grype-report.json` artifact if numbers diverge.
 
 ### Suggested follow-up
 
-Open a Renovate-scoped dep-bump MR (or wait for the automated Renovate MRs to
-land). All 20 findings resolve with dependency updates alone; no code changes
-required.
+Let Renovate open the individual patch MRs for the High findings above; each
+resolves with a dependency bump, no code changes required. None gates the
+release under the current Critical-only enforcement.
 
 ## Trivy image scans
 
@@ -103,29 +101,23 @@ binary layer.
 
 ### server (`debian:12-slim` + chromium)
 
-3 Critical, 39 High.
+0 Critical, 18 High after the pgx + Go toolchain bumps. Every remaining
+High is a Go module still shy of the latest patched version:
 
-| Package                  | Installed | Fixed                             | CVE              | Fix action                                |
-|--------------------------|-----------|-----------------------------------|------------------|-------------------------------------------|
-| github.com/jackc/pgx/v5  | 5.7.6     | 5.9.0                             | CVE-2026-33815   | Bump pgx (also fixes fs finding).          |
-| github.com/jackc/pgx/v5  | 5.7.6     | 5.9.0                             | CVE-2026-33816   | Same bump.                                 |
-| stdlib (Go)              | 1.25.1    | 1.24.13 / 1.25.7 / 1.26.0-rc.3    | CVE-2025-68121   | Bump `GO_VERSION` to 1.25.13 minimum.      |
+- `github.com/go-jose/go-jose/v4`
+- `golang.org/x/crypto`
+- `golang.org/x/mod`
+- `golang.org/x/net`
+- `golang.org/x/text`
 
-The 39 High findings are all Go stdlib CVEs plus the same x/crypto, x/mod,
-x/net, x/text, and go-jose entries already listed under Trivy fs. Every one
-resolves with a Go toolchain bump plus the pending Renovate dependency MRs.
+Renovate is expected to open individual patch MRs for each. None block
+merge or deploy under the current gate.
 
 ### web (`gcr.io/distroless/static-debian12:nonroot`)
 
-1 Critical, 22 High. The web binary embeds fewer third-party libraries, so
-its finding set is almost entirely Go stdlib.
-
-| Package     | Installed | Fixed                          | CVE              | Fix action                       |
-|-------------|-----------|--------------------------------|------------------|----------------------------------|
-| stdlib (Go) | 1.25.1    | 1.24.13 / 1.25.7 / 1.26.0-rc.3 | CVE-2025-68121   | Bump `GO_VERSION` to 1.25.13.    |
-
-The 22 High findings are all Go stdlib CVEs plus one x/text entry; all clear
-with the Go toolchain bump.
+0 Critical, 1 High: `golang.org/x/text v0.33.0` needs 0.39.0
+(CVE-2026-56852, denial of service via invalid UTF-8 input). Cleared by the
+pending Renovate bump.
 
 ## Semgrep SAST
 
@@ -171,6 +163,18 @@ Six best-practice findings, none security-critical:
 | DL3066 |  136 | info    | Same as above in the web runtime stage.                           | Accepted risk. `USER nonroot:nonroot` matches the distroless base's baked-in `nonroot` account (UID 65532). |
 | DL3006 |  148 | warning | Always tag the version of an image explicitly (`FROM runtime-${SERVICE}`). | False positive. `runtime-${SERVICE}` is an internal build stage, not a remote image tag. |
 
+## Gate posture
+
+- **Dependency scan (Grype) and container-scan (Trivy):** block the
+  pipeline on Critical only (`--fail-on critical` / `--severity CRITICAL
+  --exit-code 1`). High and Medium are reported for visibility, do not
+  block.
+- **Secrets (Gitleaks), SAST (Semgrep), Dockerfile lint (hadolint):**
+  warn-only. Findings surface as artifacts and non-blocking job failures.
+
+Extending blocking to High severity is a follow-up decision once the
+current baseline of High findings is cleared by Renovate.
+
 ## Out of scope
 
 - `.trivyignore` / `.semgrepignore` tuning beyond the false positives above.
@@ -178,5 +182,5 @@ Six best-practice findings, none security-critical:
 - Third-party downloads at container startup (GeoIP databases, Keycloak
   themes). Not scanned here because they are runtime data, not build-time
   artifacts.
-- Turning the security stage from warn-only to blocking. Follow-up work after
-  one to two weeks of clean pipelines and a triaged baseline.
+- Promoting `security:container-scan` into a reusable `security/container`
+  component. Track after DFPT-1081 also uses the local job.

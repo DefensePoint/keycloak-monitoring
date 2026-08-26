@@ -9,8 +9,9 @@
 # which takes a SERVICE build arg of either `server` or `web`.
 
 include:
-  # DefensePoint reusable security components. Warn-only for the first rollout:
-  # findings surface, MRs do not block. Flip `exit_code` to 1 after triage.
+  # DefensePoint reusable security components. Secrets and SAST are warn-only
+  # (findings surface but do not block). The dependency scan blocks on
+  # Critical CVEs only, per Mihir's 2026-08-26 escalation rule.
   - component: $CI_SERVER_FQDN/cloud/ci-components/security/secrets@~latest
     inputs:
       stage: security
@@ -23,12 +24,12 @@ include:
   - component: $CI_SERVER_FQDN/cloud/ci-components/security/dependencies@~latest
     inputs:
       stage: security
-      exit_code: 0
-      severity: CRITICAL,HIGH
+      exit_code: 1
+      severity: CRITICAL
       ignore_unfixed: true
 
 variables:
-  GO_VERSION: "1.25.1"
+  GO_VERSION: "1.25.14"
   GOLANGCI_LINT_VERSION: "v2.5.0"
   HADOLINT_VERSION: "v2.15.1"
   TRIVY_VERSION: "0.74.0"
@@ -283,7 +284,7 @@ security:container-scan:
       for svc in server web; do
         echo "Building kmt-${svc}:scan..."
         docker build --build-arg SERVICE=${svc} -t kmt-${svc}:scan -f build/Dockerfile .
-        echo "Scanning kmt-${svc}:scan with Trivy..."
+        echo "Scanning kmt-${svc}:scan with Trivy (informational: CRITICAL + HIGH)..."
         trivy image \
           --severity CRITICAL,HIGH \
           --ignore-unfixed \
@@ -296,6 +297,12 @@ security:container-scan:
           --ignore-unfixed \
           --exit-code 0 \
           kmt-${svc}:scan
+        echo "Gating on Critical only for kmt-${svc}:scan..."
+        trivy image \
+          --severity CRITICAL \
+          --ignore-unfixed \
+          --exit-code 1 \
+          kmt-${svc}:scan
       done
   artifacts:
     when: always
@@ -307,4 +314,3 @@ security:container-scan:
     key: ${CI_COMMIT_REF_SLUG}-trivy-db
     paths:
       - .trivy-cache/
-  allow_failure: true

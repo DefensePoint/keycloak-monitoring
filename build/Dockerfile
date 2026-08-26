@@ -30,7 +30,7 @@ else \
 fi
 
 # -------- Backend Builder: pinned Go toolchain, no network after mod download --------
-FROM golang:1.25.1-alpine AS backend-builder
+FROM golang:1.25.14-alpine AS backend-builder
 
 # Re-declare ARG to use it in this stage
 ARG SERVICE
