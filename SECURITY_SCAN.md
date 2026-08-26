@@ -35,7 +35,7 @@ runs.
 | Trivy image (web)    |        1 |   22 |      0 |    0 | Stdlib dominates; distroless base is clean.     |
 | Semgrep (SAST)       |        0 |    0 |      0 |    0 | 110 rules ran, no ERROR findings.               |
 | Gitleaks             |        0 |    0 |      0 |    0 | 3 false positives allowlisted in `.gitleaksignore`. |
-| Hadolint             |        0 |    3 |      0 |    1 | Best-practice warnings, not blocking.           |
+| Hadolint             |        0 |    3 |      0 |    3 | Best-practice warnings, not blocking.           |
 
 Counts are per-scanner row totals (a CVE that appears in both Trivy fs and
 Trivy image is counted in each). The **Critical: 3** at the top is the
@@ -52,11 +52,14 @@ Per-tool sub-targets: `make sec-hadolint`, `make sec-trivy-fs`,
 `make sec-gitleaks`, `make sec-semgrep`, `make sec-container`. Tool
 prerequisites are checked by `make sec-preflight`.
 
-## Trivy filesystem scan
+## Dependency scan
 
-`trivy fs --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed .`
-
-Covers Go modules (`go.mod`) and npm lockfiles (`web/package-lock.json`).
+CI runs Grype via the `security/dependencies` component; `make sec-trivy-fs`
+runs Trivy filesystem mode locally. Both tools consume the same lockfile
+manifests (`go.mod`, `web/package-lock.json`) and read from equivalent NVD /
+GHSA feeds, so the CVE lists line up. The findings below were captured with
+`trivy fs --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed .`;
+reconcile against the CI `grype-report.json` artifact if numbers diverge.
 
 ### Critical
 
@@ -155,15 +158,17 @@ be replaced before any non-local use.
 
 ## Hadolint
 
-`hadolint --format json build/Dockerfile`
+`hadolint --format json build/Dockerfile` (v2.15.1).
 
-Four best-practice findings, none security-critical:
+Six best-practice findings, none security-critical:
 
 | Code   | Line | Level   | Rule                                                              | Decision                                                                       |
 |--------|-----:|---------|-------------------------------------------------------------------|--------------------------------------------------------------------------------|
 | DL3018 |   42 | warning | Pin versions in `apk add`.                                        | Accepted risk. Pinning Alpine `git` and `build-base` gets noisy; upstream repo is trusted. |
 | DL3008 |   83 | warning | Pin versions in `apt-get install`.                                | Accepted risk. Chromium version tracks the Debian slim base; pinning defeats the base image update cadence. |
 | DL3015 |   83 | info    | Use `--no-install-recommends`.                                    | Fix candidate for follow-up. Chromium recommends bring in fonts we need for PDF rendering; verify before applying. |
+| DL3066 |  115 | info    | Non-numeric user-id may not be resolvable by host system (`USER nonroot:nonroot`). | Accepted risk. The `nonroot` user is created explicitly in the server runtime stage with UID/GID 65532; the string form is deliberate for readability. |
+| DL3066 |  136 | info    | Same as above in the web runtime stage.                           | Accepted risk. `USER nonroot:nonroot` matches the distroless base's baked-in `nonroot` account (UID 65532). |
 | DL3006 |  148 | warning | Always tag the version of an image explicitly (`FROM runtime-${SERVICE}`). | False positive. `runtime-${SERVICE}` is an internal build stage, not a remote image tag. |
 
 ## Out of scope

@@ -26,7 +26,6 @@ include:
       exit_code: 0
       severity: CRITICAL,HIGH
       ignore_unfixed: true
-      version: 0.74.0
 
 variables:
   GO_VERSION: "1.25.1"
