@@ -1,24 +1,45 @@
 # Security Scan Baseline
 
+> **Critical: 3 | High: 39 | Medium: 0**
+>
+> Deduplicated across every scanner. Only Critical findings gate the
+> open-source release; High and Medium are informational and tracked as
+> follow-up dependency work.
+
 Baseline for the container and code scans introduced by DFPT-1080. Scans run
 warn-only in CI (`allow_failure: true`, `exit_code: 0`). This document is the
 snapshot of findings the reviewer signs off before the pipeline flips to
 blocking.
 
-**Escalation bar for the initial rollout.** Only Critical findings gate the
-open-source release. High and Medium findings are informational, listed here
-for visibility, tracked in follow-up work, not a blocker.
+## Critical findings
 
-## Summary
+Three unique CVEs, all resolvable with dependency bumps. No code changes
+needed.
 
-| Scanner              | Critical | High | Medium | Info | Status                                   |
-|----------------------|---------:|-----:|-------:|-----:|------------------------------------------|
-| Trivy fs             |        2 |   20 |      0 |    0 | Fix action noted, bump deps in follow-up |
-| Trivy image (server) |        3 |   39 |      0 |    0 | Same pgx + stdlib CVEs; fix via rebuild after bumps |
-| Trivy image (web)    |        1 |   22 |      0 |    0 | Stdlib CVE dominates; rebuild after Go 1.25.13     |
-| Semgrep (SAST)       |        0 |    0 |      0 |    0 | 110 rules ran, no ERROR findings         |
-| Gitleaks             |        0 |    0 |      0 |    0 | Three matches, all allowlisted false positives |
-| Hadolint             |        0 |    3 |      0 |    1 | Best-practice warnings, not blocking     |
+| CVE            | Component               | Installed | Fixed                          | Where it surfaced         | Fix action                           |
+|----------------|-------------------------|-----------|--------------------------------|---------------------------|--------------------------------------|
+| CVE-2026-33815 | github.com/jackc/pgx/v5 | 5.7.6     | 5.9.0                          | Trivy fs, server image    | Bump `pgx/v5` to 5.9.0.              |
+| CVE-2026-33816 | github.com/jackc/pgx/v5 | 5.7.6     | 5.9.0                          | Trivy fs, server image    | Same pgx bump.                       |
+| CVE-2025-68121 | Go stdlib               | 1.25.1    | 1.24.13 / 1.25.7 / 1.26.0-rc.3 | Server image, web image   | Bump `GO_VERSION` to 1.25.7 or newer. |
+
+Follow-up MR: bump `github.com/jackc/pgx/v5` and `GO_VERSION` together, then
+rebuild both images. Renovate should also propose these once the pipeline
+runs.
+
+## Per-scanner roll-up
+
+| Scanner              | Critical | High | Medium | Info | Status                                          |
+|----------------------|---------:|-----:|-------:|-----:|-------------------------------------------------|
+| Trivy fs             |        2 |   20 |      0 |    0 | pgx + Go/npm dep bumps.                         |
+| Trivy image (server) |        3 |   39 |      0 |    0 | pgx + stdlib + x/* modules.                     |
+| Trivy image (web)    |        1 |   22 |      0 |    0 | Stdlib dominates; distroless base is clean.     |
+| Semgrep (SAST)       |        0 |    0 |      0 |    0 | 110 rules ran, no ERROR findings.               |
+| Gitleaks             |        0 |    0 |      0 |    0 | 3 false positives allowlisted in `.gitleaksignore`. |
+| Hadolint             |        0 |    3 |      0 |    1 | Best-practice warnings, not blocking.           |
+
+Counts are per-scanner row totals (a CVE that appears in both Trivy fs and
+Trivy image is counted in each). The **Critical: 3** at the top is the
+deduplicated unique-CVE count.
 
 ## Local reproduction
 

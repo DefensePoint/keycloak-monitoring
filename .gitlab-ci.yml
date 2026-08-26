@@ -26,12 +26,13 @@ include:
       exit_code: 0
       severity: CRITICAL,HIGH
       ignore_unfixed: true
+      version: 0.74.0
 
 variables:
   GO_VERSION: "1.25.1"
   GOLANGCI_LINT_VERSION: "v2.5.0"
-  HADOLINT_VERSION: "v2.14.0"
-  TRIVY_VERSION: "0.69.3"
+  HADOLINT_VERSION: "v2.15.1"
+  TRIVY_VERSION: "0.74.0"
   # Required by `go test -race`.
   CGO_ENABLED: "1"
 
@@ -266,9 +267,9 @@ security:container-scan:
   needs: []
   tags:
     - gitlab-runner1
-  image: docker:28.3.1
+  image: docker:28.5.2
   services:
-    - name: docker:28.3.1-dind
+    - name: docker:28.5.2-dind
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
