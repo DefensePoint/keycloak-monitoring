@@ -1,0 +1,13 @@
+# Suppress known false positives from `gitleaks detect`. Fingerprint format is
+# `commit:path:rule:line`. Each entry must have a comment explaining why it is
+# safe to ignore. Review this list whenever gitleaks output changes.
+
+# Local dev Keycloak container hostnames matched by the generic-api-key rule
+# (`keycloak-db-1:5432` in the JDBC URL). Values are development-only defaults
+# shipped in the sample docker-compose; not a real secret.
+65d5829d44e96d21830747c5dc2434186309777a:deployments/local/docker-compose.yml:generic-api-key:86
+65d5829d44e96d21830747c5dc2434186309777a:deployments/local/docker-compose.yml:generic-api-key:139
+
+# Session-secret documentation placeholder: `must-be-at-least-32-characters-long`
+# in the troubleshooting guide. Explicit example string, not a live secret.
+65d5829d44e96d21830747c5dc2434186309777a:docs/troubleshooting.md:generic-api-key:398

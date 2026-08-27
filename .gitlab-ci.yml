@@ -9,12 +9,30 @@
 # which takes a SERVICE build arg of either `server` or `web`.
 
 include:
-  - template: Jobs/SAST.gitlab-ci.yml
-  - template: Jobs/Secret-Detection.gitlab-ci.yml
+  # DefensePoint reusable security components. Secrets and SAST are warn-only
+  # (findings surface but do not block). The dependency scan blocks on
+  # Critical CVEs only, per Mihir's 2026-08-26 escalation rule.
+  - component: $CI_SERVER_FQDN/cloud/ci-components/security/secrets@~latest
+    inputs:
+      stage: security
+      exit_code: 0
+  - component: $CI_SERVER_FQDN/cloud/ci-components/security/sast@~latest
+    inputs:
+      stage: security
+      exit_code: 0
+      config: auto
+  - component: $CI_SERVER_FQDN/cloud/ci-components/security/dependencies@~latest
+    inputs:
+      stage: security
+      exit_code: 1
+      severity: CRITICAL
+      ignore_unfixed: true
 
 variables:
-  GO_VERSION: "1.25.1"
+  GO_VERSION: "1.25.14"
   GOLANGCI_LINT_VERSION: "v2.5.0"
+  HADOLINT_VERSION: "v2.15.1"
+  TRIVY_VERSION: "0.74.0"
   # Required by `go test -race`.
   CGO_ENABLED: "1"
 
@@ -22,6 +40,7 @@ stages:
   - dependencies
   - quality
   - test
+  - security
 
 # Run for merge requests and for pushes to the default branch.
 .default_rules:
@@ -143,10 +162,25 @@ quality:security:
   script:
     - echo "Running security checks with govulncheck..."
     - go install golang.org/x/vuln/cmd/govulncheck@latest
-    - govulncheck ./...
-    - echo "No known vulnerabilities found"
-  # Advisory: a new upstream CVE should surface loudly without blocking every
-  # unrelated merge request.
+    # govulncheck's SSA analyzer panics on generic-type signatures in some
+    # dependencies (known x/tools bug). Panic exit and "vulns found" exit
+    # share the same code, so detect the panic in the log and swallow only
+    # that. Real advisories still surface for review; the security stage's
+    # Grype + Trivy jobs are the enforcement.
+    - |
+      set +e
+      govulncheck ./... 2>&1 | tee govulncheck.log
+      RC=${PIPESTATUS[0]}
+      set -e
+      if [ "$RC" -eq 0 ]; then
+        echo "No known vulnerabilities found"
+        exit 0
+      fi
+      if grep -q "^panic:" govulncheck.log; then
+        echo "govulncheck panicked internally (x/tools/ssa generics bug); coverage delegated to Grype and Trivy."
+        exit 0
+      fi
+      exit "$RC"
   allow_failure: true
 
 # =================================================================
@@ -218,3 +252,82 @@ test:build:
     - go build -trimpath -buildvcs=false -mod=readonly -o bin/web ./cmd/web
     - echo "All binaries built successfully"
     - ls -lh bin/
+
+# =================================================================
+# SECURITY STAGE
+# =================================================================
+# The `secrets`, `semgrep`, and `trivy-dependency-scan` jobs come from the
+# DefensePoint components included above. The two jobs below are local because
+# no reusable Hadolint or container-scan component exists yet; promote them
+# after this pipeline and the AMFA one both prove them out.
+
+security:dockerfile-lint:
+  extends: .default_rules
+  stage: security
+  needs: []
+  image: hadolint/hadolint:${HADOLINT_VERSION}-alpine
+  script:
+    - echo "Linting build/Dockerfile with hadolint..."
+    # --failure-threshold error keeps the job green while our
+    # SECURITY_SCAN.md documents accepted-risk warnings/info findings.
+    - hadolint --format json --failure-threshold error build/Dockerfile | tee hadolint-report.json
+  artifacts:
+    when: always
+    paths:
+      - hadolint-report.json
+    expire_in: 30 days
+  allow_failure: true
+
+security:container-scan:
+  extends: .default_rules
+  stage: security
+  needs: []
+  tags:
+    - gitlab-runner1
+  image: docker:28.5.2
+  services:
+    - name: docker:28.5.2-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    FF_NETWORK_PER_BUILD: "true"
+    TRIVY_CACHE_DIR: .trivy-cache
+  before_script:
+    - apk add --no-cache curl
+    - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v${TRIVY_VERSION}
+    - trivy --version
+  script:
+    - |
+      for svc in server web; do
+        echo "Building kmt-${svc}:scan..."
+        docker build --build-arg SERVICE=${svc} -t kmt-${svc}:scan -f build/Dockerfile .
+        echo "Scanning kmt-${svc}:scan with Trivy (informational: CRITICAL + HIGH)..."
+        trivy image \
+          --severity CRITICAL,HIGH \
+          --ignore-unfixed \
+          --exit-code 0 \
+          --format json \
+          --output trivy-image-${svc}.json \
+          kmt-${svc}:scan
+        trivy image \
+          --severity CRITICAL,HIGH \
+          --ignore-unfixed \
+          --exit-code 0 \
+          kmt-${svc}:scan
+        echo "Gating on Critical only for kmt-${svc}:scan..."
+        trivy image \
+          --severity CRITICAL \
+          --ignore-unfixed \
+          --exit-code 1 \
+          kmt-${svc}:scan
+      done
+  artifacts:
+    when: always
+    paths:
+      - trivy-image-server.json
+      - trivy-image-web.json
+    expire_in: 30 days
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-trivy-db
+    paths:
+      - .trivy-cache/
