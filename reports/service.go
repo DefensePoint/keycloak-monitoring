@@ -23,6 +23,7 @@ type service struct {
 	eventLister    EventLister
 	alertReader    AlertReader
 	operatorReader OperatorMetricsReader
+	realmLister    RealmLister
 	logger         *logger.Logger
 	pdfGenerator   PDFGenerator
 }
@@ -37,6 +38,7 @@ func NewService(
 	eventLister EventLister,
 	alertReader AlertReader,
 	operatorReader OperatorMetricsReader,
+	realmLister RealmLister,
 	log *logger.Logger,
 	pdfGenerator PDFGenerator,
 ) Service {
@@ -44,9 +46,32 @@ func NewService(
 		eventLister:    eventLister,
 		alertReader:    alertReader,
 		operatorReader: operatorReader,
+		realmLister:    realmLister,
 		logger:         log,
 		pdfGenerator:   pdfGenerator,
 	}
+}
+
+// tenantEventSources returns the exact event sources that belong to a tenant
+// (keycloak:<realm> and amfa:<realm> for each of its realms). An empty result
+// means the report must include no events (deny-by-default) rather than fall
+// back to an unscoped query across every tenant.
+func (s *service) tenantEventSources(ctx context.Context, tenantID string) ([]string, error) {
+	if s.realmLister == nil || tenantID == "" {
+		return nil, nil
+	}
+	realms, err := s.realmLister.ListRealms(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	sources := make([]string, 0, len(realms)*2)
+	for _, realm := range realms {
+		if realm == nil || realm.RealmName == "" {
+			continue
+		}
+		sources = append(sources, "keycloak:"+realm.RealmName, "amfa:"+realm.RealmName)
+	}
+	return sources, nil
 }
 
 // AggregateData collects all data needed for a report.
@@ -121,8 +146,15 @@ func (s *service) AggregateData(ctx context.Context, req *GenerateRequest) (*Dat
 		}
 	}
 
-	// Fetch events
-	if s.eventLister != nil {
+	// Fetch events, scoped to the report tenant's own sources. If the tenant has
+	// no known sources, leave the events section empty rather than run an
+	// unscoped query that would include every tenant's events.
+	sources, srcErr := s.tenantEventSources(ctx, req.TenantID)
+	if srcErr != nil {
+		s.logger.Error("Failed to resolve tenant event sources for report",
+			logger.Str("tenant_id", req.TenantID), logger.Err(srcErr))
+	}
+	if s.eventLister != nil && srcErr == nil && len(sources) > 0 {
 		startStr := req.StartDate.Format(time.RFC3339)
 		endStr := req.EndDate.Format(time.RFC3339)
 
@@ -131,6 +163,7 @@ func (s *service) AggregateData(ctx context.Context, req *GenerateRequest) (*Dat
 			Offset:    0,
 			StartTime: &startStr,
 			EndTime:   &endStr,
+			Sources:   sources,
 		})
 		if err != nil {
 			s.logger.Error("Failed to fetch events", logger.Err(err))
