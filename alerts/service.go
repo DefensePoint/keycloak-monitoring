@@ -6,6 +6,7 @@ import (
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/metrics"
 )
 
 // Service defines the interface for alert operations.
@@ -40,8 +41,25 @@ type Service interface {
 
 // service implements the Service interface.
 type service struct {
-	repo Repository
-	log  *logger.Logger
+	repo    Repository
+	log     *logger.Logger
+	metrics metrics.Recorder
+}
+
+// SetMetrics attaches a metrics recorder. Passing nil installs a no-op recorder.
+func (s *service) SetMetrics(r metrics.Recorder) {
+	if r == nil {
+		r = metrics.NopRecorder{}
+	}
+	s.metrics = r
+}
+
+// recorder returns the configured recorder, falling back to a no-op.
+func (s *service) recorder() metrics.Recorder {
+	if s.metrics == nil {
+		return metrics.NopRecorder{}
+	}
+	return s.metrics
 }
 
 // NewService creates a new alerts service.
@@ -141,7 +159,11 @@ func (s *service) DeleteAlert(ctx context.Context, tenantID, alertID string) err
 
 // SaveAlert creates or updates an alert.
 func (s *service) SaveAlert(ctx context.Context, alert *domain.Alert) error {
-	return s.repo.Save(ctx, alert)
+	if err := s.repo.Save(ctx, alert); err != nil {
+		return err
+	}
+	s.recorder().IncAlert(alert.Severity.String(), alert.CheckType)
+	return nil
 }
 
 // isValidStatus checks if a status is valid.

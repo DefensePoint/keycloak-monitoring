@@ -39,6 +39,24 @@ type Repository interface {
 	// incrementally pull new AMFA events for copying into the platform events
 	// table.
 	ListEventsSince(ctx context.Context, realm string, since time.Time, limit int) ([]EventRow, error)
+
+	// CountByEventTypeAndClientInWindow returns, per OAuth client in the realm,
+	// the count of events of the given type in [start, end], keeping only
+	// clients whose count >= threshold. Used by the per-client login-error
+	// rule (amfa-login-error-by-client).
+	CountByEventTypeAndClientInWindow(ctx context.Context, realm, eventType string, start, end time.Time, threshold int) ([]ClientEventCount, error)
+
+	// CountDistinctRejectedUsersSince returns the number of distinct users with
+	// at least one pre_auth_risk_decision=4 (rejected) event in the realm with
+	// event_time >= since. Used by the realm-wide reject-burst rule
+	// (amfa-realm-reject-burst).
+	CountDistinctRejectedUsersSince(ctx context.Context, realm string, since time.Time) (int64, error)
+
+	// CountByEventTypeByUser returns, per user in the realm, the count of
+	// events of the given type in [since, now), keeping only users whose count
+	// >= threshold. Used by the per-account login-error rule
+	// (amfa-login-error-by-account).
+	CountByEventTypeByUser(ctx context.Context, realm, eventType string, since time.Time, threshold int) ([]UserRiskyCount, error)
 }
 
 // Service is the orchestration layer used by HTTP handlers.

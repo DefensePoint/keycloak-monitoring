@@ -95,9 +95,23 @@ func (c *Client) AutoMigrate() error {
 	c.logger.Info("Running GORM auto-migration")
 
 	// Migrate regular tables first (without OperatorAction to avoid FK issues)
-	err := c.db.AutoMigrate(&Event{}, &User{}, &KeycloakTenant{}, &KeycloakRealmInfo{}, &Alert{}, &AlertRule{}, &NotificationLog{}, &PendingTenantPurge{})
+	err := c.db.AutoMigrate(&Event{}, &User{}, &KeycloakTenant{}, &KeycloakRealmInfo{}, &Alert{}, &AlertRule{}, &NotificationLog{}, &PendingTenantPurge{}, &AmfaMirrorWatermark{})
 	if err != nil {
 		return fmt.Errorf("failed to auto-migrate regular tables: %w", err)
+	}
+
+	// keycloak_tenants.amfa_enabled and .origin used to carry an `index` gorm
+	// tag. AutoMigrate only adds schema, never removes it, so a database
+	// migrated under the old tags keeps both indexes even after the tag is
+	// gone from the struct. Drop them explicitly: both columns are 2-valued
+	// and only ever compared in Go after the row is loaded, never filtered on
+	// in SQL, so the index cost nothing but write overhead on every insert.
+	for _, idx := range []string{"idx_keycloak_tenants_amfa_enabled", "idx_keycloak_tenants_origin"} {
+		if c.db.Migrator().HasIndex(&KeycloakTenant{}, idx) {
+			if err := c.db.Migrator().DropIndex(&KeycloakTenant{}, idx); err != nil {
+				c.logger.Warn("Could not drop unused tenant index", logger.Str("index", idx), logger.Err(err))
+			}
+		}
 	}
 
 	// Add new columns to existing configuration_alerts table if they don't exist

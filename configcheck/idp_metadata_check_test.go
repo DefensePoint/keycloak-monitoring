@@ -23,6 +23,7 @@ func TestNewIdentityProviderMetadataCheck(t *testing.T) {
 
 	if check == nil {
 		t.Fatal("NewIdentityProviderMetadataCheck returned nil")
+		return
 	}
 	if check.keycloakClient != client {
 		t.Error("keycloakClient not set correctly")

@@ -1,3 +1,12 @@
+// TenantAmfa holds a tenant's AMFA integration settings. Only the API endpoint
+// is carried: reading AMFA over HTTP needs no database credentials.
+export interface TenantAmfa {
+  enabled: boolean;
+  api_base_url: string;
+  events_lookback_days?: number;
+  api_timeout_seconds?: number;
+}
+
 // Tenant represents a Keycloak instance being monitored
 export interface Tenant {
   id: number;
@@ -17,9 +26,12 @@ export interface Tenant {
   last_error?: string;
   last_error_at?: string;
   is_default: boolean;
+  // Managed via config.yaml + restart; treat as read-only in the UI.
+  is_config_defined: boolean;
   tags?: string[];
   owner?: string;
   infinispan_enabled?: boolean;
+  amfa?: TenantAmfa;
   created_at: string;
   updated_at: string;
 }
@@ -39,6 +51,7 @@ export interface TenantCreate {
   is_default?: boolean;
   tags?: string[];
   owner?: string;
+  amfa?: TenantAmfa;
 }
 
 // TenantUpdate represents the payload for updating a tenant
@@ -56,6 +69,7 @@ export interface TenantUpdate {
   is_default?: boolean;
   tags?: string[];
   owner?: string;
+  amfa?: TenantAmfa;
 }
 
 // TenantsResponse represents the API response for listing tenants

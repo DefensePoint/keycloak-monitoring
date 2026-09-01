@@ -38,6 +38,15 @@ func (fakeRepo) CountByEventTypeInWindow(_ context.Context, _, _ string, _, _ ti
 func (fakeRepo) ListEventsSince(_ context.Context, _ string, _ time.Time, _ int) ([]EventRow, error) {
 	return nil, nil
 }
+func (fakeRepo) CountByEventTypeAndClientInWindow(_ context.Context, _, _ string, _, _ time.Time, _ int) ([]ClientEventCount, error) {
+	return nil, nil
+}
+func (fakeRepo) CountDistinctRejectedUsersSince(_ context.Context, _ string, _ time.Time) (int64, error) {
+	return 0, nil
+}
+func (fakeRepo) CountByEventTypeByUser(_ context.Context, _, _ string, _ time.Time, _ int) ([]UserRiskyCount, error) {
+	return nil, nil
+}
 
 func TestRegistry_ReturnsRepoForRegisteredTenant(t *testing.T) {
 	r := NewRegistry()

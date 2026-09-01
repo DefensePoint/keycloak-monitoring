@@ -4,13 +4,17 @@
 package chi
 
 import (
+	"crypto/subtle"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	httpSwagger "github.com/swaggo/http-swagger"
 
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/metrics"
 
 	// Import generated swagger docs
 	_ "repos.defensepoint.com/iam/oss-pmt/kmt/docs/swagger"
@@ -34,6 +38,20 @@ type Router struct {
 	authMiddleware func(http.Handler) http.Handler
 	rbacMiddleware *RBACMiddleware
 	handlers       []RouteRegistrar
+	metrics        *metrics.Registry
+	metricsConfig  config.MetricsConfig
+}
+
+// SetMetrics enables the /metrics endpoint and request instrumentation. It must
+// be called before RegisterAllRoutes: Chi requires every middleware to be
+// installed before the first route is defined.
+func (r *Router) SetMetrics(m *metrics.Registry, cfg config.MetricsConfig) {
+	r.metrics = m
+	r.metricsConfig = cfg
+
+	if m != nil && cfg.Enabled {
+		r.chi.Use(MetricsMiddleware(m))
+	}
 }
 
 // NewRouter creates a new Chi Router with the given handlers.
@@ -63,6 +81,10 @@ func (r *Router) RegisterAllRoutes() {
 	// Register health check endpoints (no auth required)
 	r.chi.Get("/health", r.handleHealth)
 	r.chi.Get("/ready", r.handleReady)
+
+	if r.metrics != nil && r.metricsConfig.Enabled {
+		r.chi.Get("/metrics", r.handleMetrics())
+	}
 
 	// Swagger UI endpoint
 	r.chi.Get("/swagger/*", httpSwagger.Handler(
@@ -107,6 +129,23 @@ func (r *Router) handleReady(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ready"}`))
+}
+
+// handleMetrics serves the Prometheus exposition endpoint, optionally behind a
+// bearer token.
+func (r *Router) handleMetrics() http.HandlerFunc {
+	handler := promhttp.HandlerFor(r.metrics.Gatherer(), promhttp.HandlerOpts{})
+
+	return func(w http.ResponseWriter, req *http.Request) {
+		if token := r.metricsConfig.AuthToken; token != "" {
+			provided := req.Header.Get("Authorization")
+			if subtle.ConstantTimeCompare([]byte(provided), []byte("Bearer "+token)) != 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+		}
+		handler.ServeHTTP(w, req)
+	}
 }
 
 // AddHandler adds a handler to be registered.

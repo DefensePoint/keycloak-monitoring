@@ -3,6 +3,7 @@ package configcheck
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,11 +13,14 @@ import (
 
 // mockConfigurationCheck implements Check for testing
 type mockConfigurationCheck struct {
-	checkType    string
-	description  string
-	alerts       []*domain.Alert
-	err          error
-	executeCalls int
+	checkType   string
+	description string
+	alerts      []*domain.Alert
+	err         error
+	// executeCalls is atomic because the service increments it from its own
+	// goroutines (Start launches an immediate runChecks plus a poller) while
+	// tests read it, which the race detector flags intermittently.
+	executeCalls atomic.Int64
 }
 
 func (m *mockConfigurationCheck) GetCheckType() string {
@@ -28,7 +32,7 @@ func (m *mockConfigurationCheck) GetDescription() string {
 }
 
 func (m *mockConfigurationCheck) Execute(ctx context.Context) ([]*domain.Alert, error) {
-	m.executeCalls++
+	m.executeCalls.Add(1)
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -285,11 +289,11 @@ func TestService_RunChecks(t *testing.T) {
 	s.runChecks(ctx)
 
 	// Both checks should have been executed
-	if check1.executeCalls != 1 {
-		t.Errorf("check1 executed %d times, expected 1", check1.executeCalls)
+	if check1.executeCalls.Load() != 1 {
+		t.Errorf("check1 executed %d times, expected 1", check1.executeCalls.Load())
 	}
-	if check2.executeCalls != 1 {
-		t.Errorf("check2 executed %d times, expected 1", check2.executeCalls)
+	if check2.executeCalls.Load() != 1 {
+		t.Errorf("check2 executed %d times, expected 1", check2.executeCalls.Load())
 	}
 
 	// Both alerts should be saved
@@ -332,10 +336,10 @@ func TestService_RunChecks_ErrorDoesNotStopOtherChecks(t *testing.T) {
 	s.runChecks(ctx)
 
 	// Both checks should have been attempted
-	if failingCheck.executeCalls != 1 {
+	if failingCheck.executeCalls.Load() != 1 {
 		t.Error("failing check was not executed")
 	}
-	if successCheck.executeCalls != 1 {
+	if successCheck.executeCalls.Load() != 1 {
 		t.Error("success check was not executed")
 	}
 
@@ -373,17 +377,17 @@ func TestService_Start_Stop(t *testing.T) {
 	}
 
 	// Check should have been executed at least once
-	if check.executeCalls == 0 {
+	if check.executeCalls.Load() == 0 {
 		t.Error("check was never executed")
 	}
 
-	executedTimes := check.executeCalls
+	executedTimes := check.executeCalls.Load()
 
 	// Wait a bit more to ensure polling has stopped
 	time.Sleep(50 * time.Millisecond)
 
 	// Execution count should not increase after stop
-	if check.executeCalls != executedTimes {
+	if check.executeCalls.Load() != executedTimes {
 		t.Error("check continued executing after Stop()")
 	}
 }
@@ -406,8 +410,8 @@ func TestService_RunCheckNow(t *testing.T) {
 	}
 
 	// Check should have been executed once
-	if check.executeCalls != 1 {
-		t.Errorf("expected check to execute 1 time, executed %d times", check.executeCalls)
+	if check.executeCalls.Load() != 1 {
+		t.Errorf("expected check to execute 1 time, executed %d times", check.executeCalls.Load())
 	}
 
 	// Run again
@@ -417,7 +421,7 @@ func TestService_RunCheckNow(t *testing.T) {
 	}
 
 	// Should have executed twice total
-	if check.executeCalls != 2 {
-		t.Errorf("expected check to execute 2 times, executed %d times", check.executeCalls)
+	if check.executeCalls.Load() != 2 {
+		t.Errorf("expected check to execute 2 times, executed %d times", check.executeCalls.Load())
 	}
 }

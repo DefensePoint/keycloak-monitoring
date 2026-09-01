@@ -12,14 +12,20 @@ import (
 // methods a given check uses return data; the rest are no-ops. It is shared by
 // the rule test files in this package.
 type checkRepoStub struct {
-	rejected     []amfa.EventRow
-	rejectedErr  error
-	vpnRisky     []amfa.EventRow
-	vpnRiskyErr  error
-	userCounts   []amfa.UserRiskyCount
-	userErr      error
-	typeCount    int64
-	typeCountErr error
+	rejected         []amfa.EventRow
+	rejectedErr      error
+	vpnRisky         []amfa.EventRow
+	vpnRiskyErr      error
+	userCounts       []amfa.UserRiskyCount
+	userErr          error
+	typeCount        int64
+	typeCountErr     error
+	clientCounts     []amfa.ClientEventCount
+	clientCountsErr  error
+	distinctUsers    int64
+	distinctUsersErr error
+	byUserCounts     []amfa.UserRiskyCount
+	byUserCountsErr  error
 }
 
 func (s *checkRepoStub) ListEvents(_ context.Context, _ amfa.ListEventsOptions) (*amfa.ListEventsResult, error) {
@@ -46,6 +52,15 @@ func (s *checkRepoStub) CountByEventTypeInWindow(_ context.Context, _, _ string,
 
 func (s *checkRepoStub) ListEventsSince(_ context.Context, _ string, _ time.Time, _ int) ([]amfa.EventRow, error) {
 	return nil, nil
+}
+func (s *checkRepoStub) CountByEventTypeAndClientInWindow(_ context.Context, _, _ string, _, _ time.Time, _ int) ([]amfa.ClientEventCount, error) {
+	return s.clientCounts, s.clientCountsErr
+}
+func (s *checkRepoStub) CountDistinctRejectedUsersSince(_ context.Context, _ string, _ time.Time) (int64, error) {
+	return s.distinctUsers, s.distinctUsersErr
+}
+func (s *checkRepoStub) CountByEventTypeByUser(_ context.Context, _, _ string, _ time.Time, _ int) ([]amfa.UserRiskyCount, error) {
+	return s.byUserCounts, s.byUserCountsErr
 }
 
 func singleRealm(realms ...string) RealmsFunc {

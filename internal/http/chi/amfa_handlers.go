@@ -150,6 +150,11 @@ func (h *AmfaHandlers) handleAmfaEvents(w http.ResponseWriter, r *http.Request) 
 	}
 
 	events, total, err := h.service.ListEvents(ctx, tenantID, opts)
+	if errors.Is(err, amfa.ErrOffsetTooLarge) {
+		httputil.RespondBadRequest(w, h.log,
+			"offset is too large for this tenant's AMFA transport; use a tighter time range to access older events")
+		return
+	}
 	if errors.Is(err, amfa.ErrAmfaNotConfigured) {
 		httputil.RespondJSON(w, h.log, http.StatusNotFound, map[string]interface{}{
 			"error":   "amfa_not_configured",
@@ -206,6 +211,13 @@ func (h *AmfaHandlers) handleAmfaStats(w http.ResponseWriter, r *http.Request) {
 		StartTime: start,
 		EndTime:   end,
 	})
+	if errors.Is(err, amfa.ErrAllRealmsUnsupported) {
+		httputil.RespondJSON(w, h.log, http.StatusNotImplemented, map[string]interface{}{
+			"error":   "amfa_all_realms_unsupported",
+			"message": "This tenant's AMFA integration doesn't support aggregating stats across all realms; select a single realm instead",
+		})
+		return
+	}
 	if errors.Is(err, amfa.ErrAmfaNotConfigured) {
 		httputil.RespondJSON(w, h.log, http.StatusNotFound, map[string]interface{}{
 			"error":   "amfa_not_configured",

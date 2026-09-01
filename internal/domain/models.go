@@ -110,12 +110,28 @@ type KeycloakTenant struct {
 	LastError         string     `json:"last_error,omitempty"`
 	LastErrorAt       *time.Time `json:"last_error_at,omitempty"`
 	IsDefault         bool       `json:"is_default"`
+	IsConfigDefined   bool       `json:"is_config_defined"`
 	Tags              []string   `json:"tags,omitempty"`
 	Owner             string     `json:"owner,omitempty"`
 	InfinispanEnabled bool       `json:"infinispan_enabled"`
 	InfinispanPort    int        `json:"infinispan_port,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+
+	Amfa *TenantAmfa `json:"amfa,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// TenantAmfa is a tenant's AMFA integration settings.
+//
+// Only the API endpoint is carried. Reading AMFA over its HTTP API needs no
+// database credentials, which is what makes these settings safe to expose in a
+// tenant form at all.
+type TenantAmfa struct {
+	Enabled            bool   `json:"enabled"`
+	APIBaseURL         string `json:"api_base_url"`
+	EventsLookbackDays int    `json:"events_lookback_days,omitempty"`
+	APITimeoutSeconds  int    `json:"api_timeout_seconds,omitempty"`
 }
 
 // KeycloakEvent represents a Keycloak event.

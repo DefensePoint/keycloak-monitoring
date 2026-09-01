@@ -192,6 +192,18 @@ func buildAmfaChecks(
 		out = append(out, amfacheck.NewClientLoginErrorCheck(tenantID, realmsFn, repo,
 			c.ClientLoginError.Threshold, c.ClientLoginError.Window, log))
 	}
+	if c.LoginErrorByClient.Enabled {
+		out = append(out, amfacheck.NewLoginErrorByClientCheck(tenantID, realmsFn, repo,
+			c.LoginErrorByClient.Threshold, c.LoginErrorByClient.Window, log))
+	}
+	if c.RealmRejectBurst.Enabled {
+		out = append(out, amfacheck.NewRealmRejectBurstCheck(tenantID, realmsFn, repo,
+			c.RealmRejectBurst.Threshold, c.RealmRejectBurst.Window, log))
+	}
+	if c.LoginErrorByAccount.Enabled {
+		out = append(out, amfacheck.NewLoginErrorByAccountCheck(tenantID, realmsFn, repo,
+			c.LoginErrorByAccount.Threshold, c.LoginErrorByAccount.Window, log))
+	}
 	return out
 }
 

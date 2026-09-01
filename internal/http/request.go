@@ -98,6 +98,8 @@ func formatFieldError(e validator.FieldError) string {
 		return "Must contain only alphanumeric characters"
 	case "keycloak_realm":
 		return "Must contain only letters, digits, underscore, or hyphen"
+	case "required_if":
+		return "This field is required"
 	case "gte":
 		return "Must be greater than or equal to " + e.Param()
 	case "lte":

@@ -56,6 +56,18 @@ func (m *mockService) DeleteTenant(ctx context.Context, tenantID string) error {
 	return nil
 }
 
+func (m *mockService) SyncFromConfig(ctx context.Context, tenantID string, createReq *CreateRequest, updateReq *UpdateRequest) (*domain.KeycloakTenant, error) {
+	return nil, nil
+}
+
+func (m *mockService) ListConfigDefinedTenants(ctx context.Context) ([]*domain.KeycloakTenant, error) {
+	return nil, nil
+}
+
+func (m *mockService) UnmarkConfigDefined(ctx context.Context, tenantID string) error {
+	return nil
+}
+
 func (m *mockService) UpdateHealth(ctx context.Context, tenantID, status, message string) error {
 	return nil
 }

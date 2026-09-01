@@ -220,18 +220,20 @@ func provideReportHandlers(p ReportHandlersParams) *chihttp.ReportHandlers {
 type SystemHandlersParams struct {
 	fx.In
 
-	EventRepo      events.Repository
-	TenantService  tenant.Service
-	RBACService    rbac.Service
-	Logger         *logger.Logger
-	AuthMiddleware *chihttp.AuthMiddleware
-	RBACMiddleware *chihttp.RBACMiddleware
+	EventRepo       events.Repository
+	TenantService   tenant.Service
+	KeycloakService keycloak.Service
+	RBACService     rbac.Service
+	Logger          *logger.Logger
+	AuthMiddleware  *chihttp.AuthMiddleware
+	RBACMiddleware  *chihttp.RBACMiddleware
 }
 
 func provideSystemHandlers(p SystemHandlersParams) *chihttp.SystemHandlers {
 	return chihttp.NewSystemHandlers(
 		&eventRepoAdapter{p.EventRepo},
 		p.TenantService,
+		p.KeycloakService,
 		&rbacCheckerAdapter{p.RBACService},
 		p.Logger,
 		p.AuthMiddleware.Authenticate,

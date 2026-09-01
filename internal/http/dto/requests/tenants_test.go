@@ -134,6 +134,46 @@ func TestCreateTenant_Validation(t *testing.T) {
 			wantErr:  true,
 			errField: "Description",
 		},
+		{
+			// Without this, a tenant can be saved as "AMFA enabled" with no
+			// endpoint to read from, register with the AMFA sync as a silent
+			// no-op, and never expose AMFA data with no error anywhere.
+			name: "amfa enabled with no api_base_url",
+			input: CreateTenant{
+				TenantID:     "my-keycloak",
+				Name:         "My Keycloak Instance",
+				ServerURL:    "https://keycloak.example.com",
+				ClientID:     "monitoring-service",
+				ClientSecret: "client-secret",
+				Amfa:         &TenantAmfa{Enabled: true},
+			},
+			wantErr:  true,
+			errField: "APIBaseURL",
+		},
+		{
+			name: "amfa disabled with no api_base_url is fine",
+			input: CreateTenant{
+				TenantID:     "my-keycloak",
+				Name:         "My Keycloak Instance",
+				ServerURL:    "https://keycloak.example.com",
+				ClientID:     "monitoring-service",
+				ClientSecret: "client-secret",
+				Amfa:         &TenantAmfa{Enabled: false},
+			},
+			wantErr: false,
+		},
+		{
+			name: "amfa enabled with a valid api_base_url",
+			input: CreateTenant{
+				TenantID:     "my-keycloak",
+				Name:         "My Keycloak Instance",
+				ServerURL:    "https://keycloak.example.com",
+				ClientID:     "monitoring-service",
+				ClientSecret: "client-secret",
+				Amfa:         &TenantAmfa{Enabled: true, APIBaseURL: "https://amfa.internal:8000"},
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {

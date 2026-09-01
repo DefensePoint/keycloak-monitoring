@@ -15,6 +15,19 @@ var ErrAmfaNotConfigured = errors.New("amfa: not configured for this tenant")
 // cannot be established or used.
 var ErrAmfaUnavailable = errors.New("amfa: data source unavailable")
 
+// ErrAllRealmsUnsupported is returned by GetStats when RealmID is empty
+// ("all realms") but the repository's transport can't serve that shape.
+// The HTTP transport is realm-scoped end to end (the token itself is bound to
+// one realm), so this is distinct from ErrAmfaNotConfigured: AMFA is
+// configured and working, this one aggregate just isn't available over it.
+var ErrAllRealmsUnsupported = errors.New("amfa: all-realms stats are not available over this transport")
+
+// ErrOffsetTooLarge is returned by ListEvents when satisfying Offset would
+// require walking more pages than the transport considers safe. The database
+// transport has no such limit (Offset maps directly to SQL OFFSET); the HTTP
+// transport does, since each page costs a round trip.
+var ErrOffsetTooLarge = errors.New("amfa: offset too large for this transport")
+
 // EventRow is one AMFA event as joined from auth_event + auth_process +
 // auth_context. It is the repository's row-level type; the service layer
 // enriches it into Event.
@@ -47,6 +60,14 @@ type UserRiskyCount struct {
 	Count  int64
 }
 
+// ClientEventCount is the row shape returned by
+// Repository.CountByEventTypeAndClientInWindow: one OAuth client and the
+// number of events of a given type it accumulated in the query window.
+type ClientEventCount struct {
+	Client string
+	Count  int64
+}
+
 // Event is what the service layer returns to the HTTP handler — EventRow plus
 // Keycloak-enriched username/email.
 type Event struct {
@@ -64,6 +85,13 @@ type Event struct {
 	IsVPN       bool      `json:"is_vpn"`
 	RiskLevel   *int      `json:"risk_level"`
 	FinalStatus *string   `json:"final_status"`
+
+	City             *string `json:"city"`
+	OperatingSystem  *string `json:"operating_system"`
+	Browser          *string `json:"browser"`
+	Device           *string `json:"device"`
+	SystemLanguage   *string `json:"system_language"`
+	ScreenResolution *string `json:"screen_resolution"`
 }
 
 // Stats are the four KPI numbers for the AMFA Events page.

@@ -1,6 +1,7 @@
 package chi
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -223,7 +224,7 @@ func (h *RBACHandlers) createRole(w http.ResponseWriter, r *http.Request) {
 //	@Tags			rbac
 //	@Produce		json
 //	@Param			roleID	path		int	true	"Role ID"
-//	@Success		200		{object}	domain.Role
+//	@Success		200		{object}	domain.RoleWithPermissions
 //	@Failure		400		{object}	dto.ErrorResponse	"Invalid role ID"
 //	@Failure		401		{object}	dto.ErrorResponse
 //	@Failure		403		{object}	dto.ErrorResponse
@@ -265,7 +266,7 @@ func (h *RBACHandlers) getRole(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Param			roleID	path		int					true	"Role ID"
 //	@Param			request	body		requests.UpdateRole	true	"Role update request"
-//	@Success		200		{object}	domain.Role
+//	@Success		200		{object}	domain.RoleWithPermissions
 //	@Failure		400		{object}	dto.ErrorResponse	"Invalid role ID or request"
 //	@Failure		401		{object}	dto.ErrorResponse
 //	@Failure		403		{object}	dto.ErrorResponse	"Cannot modify system roles"
@@ -498,6 +499,10 @@ func (h *RBACHandlers) assignRoleToUser(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := h.service.AssignRoleToUser(ctx, uint(userID), req.RoleID, req.TenantID, assignedBy, expiresAt); err != nil {
+		if errors.Is(err, rbac.ErrAdminRoleTenantScoped) {
+			httputil.RespondBadRequest(w, h.log, err.Error())
+			return
+		}
 		h.log.Error("Failed to assign role to user", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Failed to assign role")
 		return

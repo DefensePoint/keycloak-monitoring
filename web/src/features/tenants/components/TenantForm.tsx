@@ -2,6 +2,7 @@ import React, { useEffect } from "react";
 import {
   Box,
   Typography,
+  Divider,
   Button,
   MenuItem,
   Alert,
@@ -12,7 +13,7 @@ import {
   IconButton,
 } from "@mui/material";
 import { Close as CloseIcon } from "@mui/icons-material";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { FormTextField, FormCheckbox, FormSelect } from "@/shared/components";
 import {
@@ -21,7 +22,12 @@ import {
   type CreateTenantFormData,
   type UpdateTenantFormData,
 } from "../schemas";
-import type { Tenant, RealmListItem } from "@/shared/types";
+import type {
+  Tenant,
+  RealmListItem,
+  TenantCreate,
+  TenantUpdate,
+} from "@/shared/types";
 
 interface TenantFormProps {
   open: boolean;
@@ -30,7 +36,7 @@ interface TenantFormProps {
   realms: RealmListItem[];
   error: string | null;
   isSubmitting: boolean;
-  onSubmit: (data: CreateTenantFormData | UpdateTenantFormData) => void;
+  onSubmit: (data: TenantCreate | TenantUpdate) => void;
   onCancel: () => void;
 }
 
@@ -45,6 +51,9 @@ export const TenantForm: React.FC<TenantFormProps> = ({
   onCancel,
 }) => {
   const schema = isCreating ? createTenantSchema : updateTenantSchema;
+  // TenantCard already blocks Edit for a config-defined tenant. Check again
+  // here in case this form opens some other way.
+  const isReadOnly = !isCreating && !!editingTenant?.is_config_defined;
 
   const { control, handleSubmit, reset } = useForm<
     CreateTenantFormData | UpdateTenantFormData
@@ -63,6 +72,10 @@ export const TenantForm: React.FC<TenantFormProps> = ({
           enabled: true,
           is_default: false,
           default_realm: "",
+          amfa_enabled: false,
+          amfa_api_base_url: "",
+          amfa_events_lookback_days: undefined,
+          amfa_api_timeout_seconds: undefined,
         }
       : {
           name: editingTenant?.name || "",
@@ -74,8 +87,14 @@ export const TenantForm: React.FC<TenantFormProps> = ({
           enabled: editingTenant?.enabled ?? true,
           is_default: editingTenant?.is_default ?? false,
           default_realm: editingTenant?.default_realm || "",
+          amfa_enabled: editingTenant?.amfa?.enabled ?? false,
+          amfa_api_base_url: editingTenant?.amfa?.api_base_url || "",
+          amfa_events_lookback_days: editingTenant?.amfa?.events_lookback_days,
+          amfa_api_timeout_seconds: editingTenant?.amfa?.api_timeout_seconds,
         },
   });
+
+  const amfaEnabled = useWatch({ control, name: "amfa_enabled" });
 
   useEffect(() => {
     if (!isCreating && editingTenant) {
@@ -89,6 +108,10 @@ export const TenantForm: React.FC<TenantFormProps> = ({
         enabled: editingTenant.enabled,
         is_default: editingTenant.is_default,
         default_realm: editingTenant.default_realm || "",
+        amfa_enabled: editingTenant.amfa?.enabled ?? false,
+        amfa_api_base_url: editingTenant.amfa?.api_base_url || "",
+        amfa_events_lookback_days: editingTenant.amfa?.events_lookback_days,
+        amfa_api_timeout_seconds: editingTenant.amfa?.api_timeout_seconds,
       });
     }
   }, [editingTenant, isCreating, reset]);
@@ -96,16 +119,36 @@ export const TenantForm: React.FC<TenantFormProps> = ({
   const handleFormSubmit = (
     data: CreateTenantFormData | UpdateTenantFormData,
   ) => {
+    // The form keeps AMFA fields flat for react-hook-form; the API takes them
+    // nested.
+    const {
+      amfa_enabled,
+      amfa_api_base_url,
+      amfa_events_lookback_days,
+      amfa_api_timeout_seconds,
+      ...rest
+    } = data;
+
+    const payload = {
+      ...rest,
+      amfa: {
+        enabled: amfa_enabled,
+        api_base_url: amfa_api_base_url?.trim() ?? "",
+        events_lookback_days: amfa_events_lookback_days,
+        api_timeout_seconds: amfa_api_timeout_seconds,
+      },
+    };
+
     // On edit, the secret field is write-only and starts blank (the stored
     // secret is never shown). An empty value means "untouched", not "clear
     // the secret" — drop it so the update leaves the stored secret as-is.
     if (!isCreating && !data.client_secret) {
       // JSON.stringify omits undefined values, so the field is left out of the
       // request body entirely and the server keeps the stored secret.
-      onSubmit({ ...data, client_secret: undefined });
+      onSubmit({ ...payload, client_secret: undefined });
       return;
     }
-    onSubmit(data);
+    onSubmit(payload);
   };
 
   return (
@@ -137,6 +180,13 @@ export const TenantForm: React.FC<TenantFormProps> = ({
             </Alert>
           )}
 
+          {isReadOnly && (
+            <Alert severity="info" sx={{ mb: 1 }}>
+              This tenant is managed via config.yaml and is read-only. Edit
+              the config file and restart the app to change it.
+            </Alert>
+          )}
+
           {isCreating && (
             <FormTextField
               name="tenant_id"
@@ -156,6 +206,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
             placeholder="e.g., Production Keycloak"
             required
             fullWidth
+            disabled={isReadOnly}
           />
 
           <FormTextField
@@ -164,6 +215,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
             label="Description"
             placeholder="Optional description"
             fullWidth
+            disabled={isReadOnly}
           />
 
           <FormTextField
@@ -174,6 +226,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
             placeholder="https://keycloak.example.com"
             required
             fullWidth
+            disabled={isReadOnly}
           />
 
           <FormTextField
@@ -183,6 +236,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
             placeholder="master"
             required
             fullWidth
+            disabled={isReadOnly}
           />
 
           <Box
@@ -199,6 +253,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
               placeholder="monitoring-service"
               required={isCreating}
               fullWidth
+              disabled={isReadOnly}
             />
 
             <FormTextField
@@ -211,6 +266,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
               }
               required={isCreating}
               fullWidth
+              disabled={isReadOnly}
             />
           </Box>
 
@@ -218,13 +274,69 @@ export const TenantForm: React.FC<TenantFormProps> = ({
             name="enabled"
             control={control}
             label="Enable monitoring for this tenant"
+            disabled={isReadOnly}
           />
 
           <FormCheckbox
             name="is_default"
             control={control}
             label="Set as default tenant"
+            disabled={isReadOnly}
           />
+
+          <Divider sx={{ my: 1 }} />
+
+          <Typography variant="subtitle2" color="text.secondary">
+            Adaptive MFA
+          </Typography>
+
+          <FormCheckbox
+            name="amfa_enabled"
+            control={control}
+            label="Read Adaptive MFA events for this tenant"
+          />
+
+          {amfaEnabled && (
+            <>
+              <FormTextField
+                name="amfa_api_base_url"
+                control={control}
+                label="AMFA endpoint"
+                placeholder="https://amfa.internal:8000"
+                helperText="Keycloak Monitoring Tool reads events from this address. It authenticates with the client above, so no database details are needed."
+                required
+                fullWidth
+              />
+
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(2, 1fr)",
+                  gap: 2,
+                }}
+              >
+                <FormTextField
+                  name="amfa_events_lookback_days"
+                  control={control}
+                  label="Events lookback (days)"
+                  type="number"
+                  placeholder="30"
+                  helperText="Default 30, max 90"
+                  fullWidth
+                />
+
+                <FormTextField
+                  name="amfa_api_timeout_seconds"
+                  control={control}
+                  label="API timeout (seconds)"
+                  type="number"
+                  placeholder="30"
+                  helperText="Default 30, max 300"
+                  fullWidth
+                />
+              </Box>
+            </>
+          )}
 
           {!isCreating && realms.length > 0 && (
             <FormSelect
@@ -232,6 +344,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
               control={control}
               label="Default Realm"
               fullWidth
+              disabled={isReadOnly}
             >
               <MenuItem value="">None (Show all realms)</MenuItem>
               {realms.map((realm) => (
@@ -245,15 +358,17 @@ export const TenantForm: React.FC<TenantFormProps> = ({
 
         <DialogActions sx={{ px: 3, pb: 3, gap: 1 }}>
           <Button variant="outlined" onClick={onCancel} disabled={isSubmitting}>
-            Cancel
+            {isReadOnly ? "Close" : "Cancel"}
           </Button>
-          <Button type="submit" variant="contained" disabled={isSubmitting}>
-            {isSubmitting
-              ? "Saving..."
-              : isCreating
-                ? "Create Tenant"
-                : "Save Changes"}
-          </Button>
+          {!isReadOnly && (
+            <Button type="submit" variant="contained" disabled={isSubmitting}>
+              {isSubmitting
+                ? "Saving..."
+                : isCreating
+                  ? "Create Tenant"
+                  : "Save Changes"}
+            </Button>
+          )}
         </DialogActions>
       </form>
     </Dialog>

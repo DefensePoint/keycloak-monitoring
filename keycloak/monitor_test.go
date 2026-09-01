@@ -591,6 +591,7 @@ func TestNewMonitor(t *testing.T) {
 
 	if monitor == nil {
 		t.Fatal("NewMonitor returned nil")
+		return
 	}
 
 	if monitor.tenantID != "tenant-1" {

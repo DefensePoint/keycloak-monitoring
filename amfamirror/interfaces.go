@@ -22,7 +22,12 @@ type EventStore interface {
 	// MergeAmfaEvent stores an AMFA event (its own row); ReconcileAMFAMerges
 	// folds it into the Keycloak twin once both are present.
 	MergeAmfaEvent(ctx context.Context, event *domain.Event) error
-	LatestTimestampBySource(ctx context.Context, source string) (time.Time, error)
+	// AmfaMirrorWatermark / SaveAmfaMirrorWatermark persist how far this
+	// tenant has read for a realm, so a restart resumes in the right place.
+	// Keyed by (tenant, realm): realm names are unique per-tenant, not
+	// globally, so a realm-only key lets two tenants share one position.
+	AmfaMirrorWatermark(ctx context.Context, tenantID, realm string) (time.Time, error)
+	SaveAmfaMirrorWatermark(ctx context.Context, tenantID, realm string, eventTime time.Time) error
 	// ReconcileAMFAMerges converges AMFA rows onto their Keycloak twin.
 	ReconcileAMFAMerges(ctx context.Context) (int64, error)
 }

@@ -3,6 +3,7 @@ package chi
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -21,10 +22,18 @@ type EventRepository interface {
 	CountWithFilter(ctx context.Context, opts *events.ListOptions) (int64, error)
 }
 
+// RealmLister lists the realms configured for a tenant. It is used to scope
+// event queries to the sources (keycloak:<realm>, amfa:<realm>) that belong to
+// the tenant in the request.
+type RealmLister interface {
+	ListRealms(ctx context.Context, tenantID string) ([]*domain.KeycloakRealmInfo, error)
+}
+
 // SystemHandlers handles HTTP requests for system-level operations (events, stats, version).
 type SystemHandlers struct {
 	eventRepo      EventRepository
 	tenantService  tenant.Service
+	realmLister    RealmLister
 	rbacService    RBACService
 	log            *logger.Logger
 	authMiddleware func(http.Handler) http.Handler
@@ -35,6 +44,7 @@ type SystemHandlers struct {
 func NewSystemHandlers(
 	eventRepo EventRepository,
 	tenantService tenant.Service,
+	realmLister RealmLister,
 	rbacService RBACService,
 	log *logger.Logger,
 	authMiddleware func(http.Handler) http.Handler,
@@ -43,11 +53,49 @@ func NewSystemHandlers(
 	return &SystemHandlers{
 		eventRepo:      eventRepo,
 		tenantService:  tenantService,
+		realmLister:    realmLister,
 		rbacService:    rbacService,
 		log:            log,
 		authMiddleware: authMiddleware,
 		rbacMiddleware: rbacMiddleware,
 	}
+}
+
+// tenantEventSources returns the exact event sources that belong to a tenant:
+// keycloak:<realm> and amfa:<realm> for each of the tenant's realms. When
+// requestedSource is non-empty the set is narrowed to matching sources, so a
+// caller may filter within their own tenant but can never broaden beyond it. An
+// empty result means the query must return nothing (deny-by-default): the caller
+// asked for a source outside their tenant, or the tenant has no known realms.
+func (h *SystemHandlers) tenantEventSources(ctx context.Context, tenantID, requestedSource string) ([]string, error) {
+	if h.realmLister == nil {
+		return nil, nil
+	}
+
+	realms, err := h.realmLister.ListRealms(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	allowed := make([]string, 0, len(realms)*2)
+	for _, realm := range realms {
+		if realm == nil || realm.RealmName == "" {
+			continue
+		}
+		allowed = append(allowed, "keycloak:"+realm.RealmName, "amfa:"+realm.RealmName)
+	}
+
+	if requestedSource == "" {
+		return allowed, nil
+	}
+
+	filtered := make([]string, 0, len(allowed))
+	for _, s := range allowed {
+		if strings.Contains(s, requestedSource) {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered, nil
 }
 
 // RegisterRoutes registers global routes on the given Chi router.
@@ -158,10 +206,31 @@ func (h *SystemHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 	startTime := r.URL.Query().Get("start_time")
 	endTime := r.URL.Query().Get("end_time")
 
+	sources, err := h.tenantEventSources(ctx, tenantID, source)
+	if err != nil {
+		h.log.Error("Failed to resolve tenant event sources",
+			logger.Str("tenant_id", tenantID),
+			logger.Err(err))
+		httputil.RespondInternalError(w, h.log, "Failed to query events")
+		return
+	}
+	if len(sources) == 0 {
+		// No source belongs to this tenant (or none matches the requested
+		// source): return an empty result rather than an unscoped query.
+		httputil.RespondJSON(w, h.log, http.StatusOK, map[string]interface{}{
+			"events": []*domain.Event{},
+			"count":  0,
+			"total":  int64(0),
+			"limit":  limit,
+			"offset": offset,
+		})
+		return
+	}
+
 	opts := &events.ListOptions{
-		Limit:  limit,
-		Offset: offset,
-		Source: source,
+		Limit:   limit,
+		Offset:  offset,
+		Sources: sources,
 	}
 
 	if startTime != "" {
@@ -172,7 +241,7 @@ func (h *SystemHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get events
-	events, err := h.eventRepo.List(ctx, opts)
+	eventList, err := h.eventRepo.List(ctx, opts)
 	if err != nil {
 		h.log.Error("Failed to query events",
 			logger.Str("tenant_id", tenantID),
@@ -192,8 +261,8 @@ func (h *SystemHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.RespondJSON(w, h.log, http.StatusOK, map[string]interface{}{
-		"events": events,
-		"count":  len(events),
+		"events": eventList,
+		"count":  len(eventList),
 		"total":  total,
 		"limit":  limit,
 		"offset": offset,
@@ -225,8 +294,23 @@ func (h *SystemHandlers) handleStats(w http.ResponseWriter, r *http.Request) {
 	startTime := r.URL.Query().Get("start_time")
 	endTime := r.URL.Query().Get("end_time")
 
+	sources, err := h.tenantEventSources(ctx, tenantID, source)
+	if err != nil {
+		h.log.Error("Failed to resolve tenant event sources",
+			logger.Str("tenant_id", tenantID),
+			logger.Err(err))
+		httputil.RespondInternalError(w, h.log, "Failed to retrieve statistics")
+		return
+	}
+	if len(sources) == 0 {
+		httputil.RespondJSON(w, h.log, http.StatusOK, map[string]interface{}{
+			"total_events": int64(0),
+		})
+		return
+	}
+
 	opts := &events.ListOptions{
-		Source: source,
+		Sources: sources,
 	}
 
 	if startTime != "" {

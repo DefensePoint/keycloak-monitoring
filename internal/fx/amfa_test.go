@@ -47,7 +47,7 @@ func TestMonitorPoolKeycloakAdminLookup_NilPoolReturnsNil(t *testing.T) {
 func TestBuildAmfaRegistry_EmptyWhenNoTenants(t *testing.T) {
 	t.Parallel()
 
-	reg := buildAmfaRegistry(nil, nil /* nil logger tolerated */)
+	reg := buildAmfaRegistry(&config.AppConfig{}, nil, nil /* nil logger tolerated */)
 	if reg == nil {
 		t.Fatal("buildAmfaRegistry returned nil; want empty *amfa.Registry")
 	}
@@ -67,7 +67,7 @@ func TestBuildAmfaRegistry_EmptyWhenNoTenantsHaveAmfa(t *testing.T) {
 		},
 	}
 
-	reg := buildAmfaRegistry(tenants, nil)
+	reg := buildAmfaRegistry(&config.AppConfig{}, tenants, nil)
 	if reg == nil {
 		t.Fatal("buildAmfaRegistry returned nil; want empty *amfa.Registry")
 	}
@@ -95,7 +95,7 @@ func TestBuildAmfaRegistry_SkipsTenantWithDisabledAmfa(t *testing.T) {
 		},
 	}
 
-	reg := buildAmfaRegistry(tenants, nil)
+	reg := buildAmfaRegistry(&config.AppConfig{}, tenants, nil)
 	if ids := reg.TenantIDs(); len(ids) != 0 {
 		t.Errorf("want zero tenants for disabled AMFA, got %v", ids)
 	}
@@ -127,7 +127,7 @@ func TestBuildAmfaRegistry_SkipsTenantWithInvalidAmfaConfig(t *testing.T) {
 			t.Fatalf("buildAmfaRegistry panicked on invalid AMFA config: %v", r)
 		}
 	}()
-	reg := buildAmfaRegistry(tenants, nil)
+	reg := buildAmfaRegistry(&config.AppConfig{}, tenants, nil)
 	if reg == nil {
 		t.Fatal("buildAmfaRegistry returned nil; want empty *amfa.Registry")
 	}
@@ -161,8 +161,116 @@ func TestBuildAmfaRegistry_MultipleTenantsMixed(t *testing.T) {
 		},
 	}
 
-	reg := buildAmfaRegistry(tenants, nil)
+	reg := buildAmfaRegistry(&config.AppConfig{}, tenants, nil)
 	if ids := reg.TenantIDs(); len(ids) != 0 {
 		t.Errorf("expected no tenants registered, got %v", ids)
+	}
+}
+
+// --- transport selection --------------------------------------------------
+//
+// These exercise newAmfaRepository rather than buildAmfaRegistry so the chosen
+// transport is observable. The API path is the interesting one: unlike the
+// database path it constructs without any network access, so it can be asserted
+// on without a live AMFA.
+
+func amfaAPITenant(baseURL string) config.TenantConfig {
+	return config.TenantConfig{
+		Name:         "API tenant",
+		ServerURL:    "https://keycloak.example.com",
+		AdminRealm:   "master",
+		ClientID:     "monitoring-service",
+		ClientSecret: "secret",
+		Enabled:      true,
+		Amfa: &config.AmfaTenantConfig{
+			Enabled: true,
+			API:     config.AmfaAPIConfig{BaseURL: baseURL},
+		},
+	}
+}
+
+func TestNewAmfaRepository_PrefersAPIWhenConfigured(t *testing.T) {
+	// Both transports present: the API must win. It needs no database
+	// credentials and does not couple this platform to AMFA's schema.
+	tcfg := amfaAPITenant("https://amfa.internal")
+	tcfg.Amfa.Database = config.AmfaDatabaseConfig{
+		Host: "amfa-db", Database: "adaptive_mfa", User: "point_ro",
+	}
+	if err := tcfg.Amfa.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	repo, transport, err := newAmfaRepository("t1", tcfg, &config.AppConfig{}, nil)
+	if err != nil {
+		t.Fatalf("newAmfaRepository: %v", err)
+	}
+	if transport != "api" {
+		t.Errorf("transport = %q, want api to take precedence", transport)
+	}
+	if repo == nil {
+		t.Error("repository is nil")
+	}
+}
+
+func TestNewAmfaRepository_APIPathNeedsNoNetworkAtStartup(t *testing.T) {
+	// Construction must not probe AMFA. Failing startup on a momentarily
+	// unreachable AMFA would take the tenant's endpoints down for the whole
+	// outage; request-time failures surface as 503 instead.
+	tcfg := amfaAPITenant("https://amfa-that-does-not-resolve.invalid")
+	if err := tcfg.Amfa.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	repo, transport, err := newAmfaRepository("t1", tcfg, &config.AppConfig{}, nil)
+	if err != nil {
+		t.Fatalf("construction should not require reachability: %v", err)
+	}
+	if transport != "api" || repo == nil {
+		t.Errorf("transport = %q, repo nil = %v", transport, repo == nil)
+	}
+}
+
+func TestNewAmfaRepository_RegistersTenantOverAPI(t *testing.T) {
+	// The end-to-end path through buildAmfaRegistry: an API-only tenant reaches
+	// the registry, which is what makes its endpoints answer.
+	tenants := map[string]config.TenantConfig{
+		"api-tenant": amfaAPITenant("https://amfa.internal"),
+	}
+
+	reg := buildAmfaRegistry(&config.AppConfig{}, tenants, nil)
+	if got := reg.TenantIDs(); len(got) != 1 || got[0] != "api-tenant" {
+		t.Errorf("registered tenants = %v, want [api-tenant]", got)
+	}
+	if _, err := reg.RepositoryFor("api-tenant"); err != nil {
+		t.Errorf("RepositoryFor: %v", err)
+	}
+}
+
+func TestBuildAmfaRegistry_SkipsTenantWithNeitherTransport(t *testing.T) {
+	// Enabled but unconfigured is a config error, and it must skip the tenant
+	// rather than abort startup for every other tenant.
+	tenants := map[string]config.TenantConfig{
+		"broken": {
+			Name:    "Broken",
+			Enabled: true,
+			Amfa:    &config.AmfaTenantConfig{Enabled: true},
+		},
+	}
+
+	reg := buildAmfaRegistry(&config.AppConfig{}, tenants, nil)
+	if got := reg.TenantIDs(); len(got) != 0 {
+		t.Errorf("registered %v, want none", got)
+	}
+}
+
+func TestAmfaAuthRealm_DefaultsToMaster(t *testing.T) {
+	// The token comes from the realm holding the confidential client. An empty
+	// admin_realm would otherwise build a token URL with an empty path segment
+	// and fail at every request.
+	if got := amfaAuthRealm(config.TenantConfig{}); got != "master" {
+		t.Errorf("amfaAuthRealm = %q, want master", got)
+	}
+	if got := amfaAuthRealm(config.TenantConfig{AdminRealm: "ops"}); got != "ops" {
+		t.Errorf("amfaAuthRealm = %q, want ops", got)
 	}
 }

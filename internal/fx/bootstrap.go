@@ -61,6 +61,11 @@ func runBootstrap(ctx context.Context, p BootstrapParams) error {
 		return fmt.Errorf("failed to seed RBAC: %w", err)
 	}
 
+	// 1b. Drop any tenant-scoped admin assignments left by earlier versions.
+	//     The administrator role is global-only; a tenant-scoped admin grant
+	//     would otherwise be read as a platform administrator.
+	removeTenantScopedAdminRoles(ctx, p)
+
 	// 2. Create default admin user if simple auth is enabled
 	if p.Config.Auth.Simple.Enabled && p.SimpleAuthService != nil {
 		if err := ensureDefaultAdminUser(ctx, p); err != nil {
@@ -119,6 +124,32 @@ func drainPurgeQueue(ctx context.Context, p BootstrapParams) {
 	}
 	if err != nil {
 		p.Logger.Warn("Failed to drain tenant purge queue, will retry next startup", logger.Err(err))
+	}
+}
+
+// removeTenantScopedAdminRoles deletes any admin role assignment that carries a
+// tenant scope, enforcing the global-only administrator invariant on every boot.
+// A failure here is never fatal: the rows are already neutralized by the
+// global-only IsAdmin check, and the next startup retries the cleanup.
+func removeTenantScopedAdminRoles(ctx context.Context, p BootstrapParams) {
+	if p.DB == nil {
+		return
+	}
+
+	res := p.DB.DB().WithContext(ctx).Exec(
+		`DELETE FROM user_roles
+		 WHERE tenant_id IS NOT NULL
+		   AND role_id IN (SELECT id FROM roles WHERE name = ?)`,
+		rbac.RoleAdmin,
+	)
+	if res.Error != nil {
+		p.Logger.Warn("Failed to remove tenant-scoped admin assignments, will retry next startup",
+			logger.Err(res.Error))
+		return
+	}
+	if res.RowsAffected > 0 {
+		p.Logger.Warn("Removed tenant-scoped admin role assignments (administrator role is global-only)",
+			logger.Int64("rows", res.RowsAffected))
 	}
 }
 
@@ -217,24 +248,52 @@ func ensureAdminRole(ctx context.Context, p BootstrapParams) error {
 func syncTenantsFromConfig(ctx context.Context, p BootstrapParams) error {
 	if len(p.Config.Keycloak.Tenants) == 0 {
 		p.Logger.Info("No tenants defined in configuration - use API or UI to add tenants")
-		return nil
-	}
+	} else {
+		p.Logger.Info("Syncing tenants from configuration",
+			logger.Int("count", len(p.Config.Keycloak.Tenants)))
 
-	p.Logger.Info("Syncing tenants from configuration",
-		logger.Int("count", len(p.Config.Keycloak.Tenants)))
-
-	for tenantID, cfgTenant := range p.Config.Keycloak.Tenants {
-		if err := syncTenant(ctx, p, tenantID, cfgTenant); err != nil {
-			p.Logger.Error("Failed to sync tenant from config",
-				logger.Str("tenant_id", tenantID),
-				logger.Err(err))
-			// Continue with other tenants
-			continue
+		for tenantID, cfgTenant := range p.Config.Keycloak.Tenants {
+			if err := syncTenant(ctx, p, tenantID, cfgTenant); err != nil {
+				p.Logger.Error("Failed to sync tenant from config",
+					logger.Str("tenant_id", tenantID),
+					logger.Err(err))
+				// Continue with other tenants
+				continue
+			}
 		}
 	}
 
+	// Unlock any tenant that was config-defined before but no longer has a
+	// config.yaml entry this run — otherwise removing a tenant from config
+	// leaves it permanently read-only with no UI or API path to recover it.
+	unlockOrphanedConfigDefinedTenants(ctx, p)
+
 	p.Logger.Info("Tenant configuration sync completed")
 	return nil
+}
+
+// unlockOrphanedConfigDefinedTenants clears IsConfigDefined on any tenant
+// still flagged from a previous sync but absent from config.yaml this run.
+// Its data is left untouched — it just becomes editable/deletable again.
+func unlockOrphanedConfigDefinedTenants(ctx context.Context, p BootstrapParams) {
+	configDefined, err := p.TenantService.ListConfigDefinedTenants(ctx)
+	if err != nil {
+		p.Logger.Error("Failed to list config-defined tenants for reconciliation", logger.Err(err))
+		return
+	}
+
+	for _, t := range configDefined {
+		if _, stillInConfig := p.Config.Keycloak.Tenants[t.TenantID]; stillInConfig {
+			continue
+		}
+		if err := p.TenantService.UnmarkConfigDefined(ctx, t.TenantID); err != nil {
+			p.Logger.Error("Failed to unlock tenant no longer in config.yaml",
+				logger.Str("tenant_id", t.TenantID), logger.Err(err))
+			continue
+		}
+		p.Logger.Info("Tenant no longer in config.yaml, restoring normal edit/delete access",
+			logger.Str("tenant_id", t.TenantID))
+	}
 }
 
 // syncTenant creates or updates a single tenant from configuration.
@@ -258,43 +317,16 @@ func syncTenant(ctx context.Context, p BootstrapParams, tenantID string, cfgTena
 		cfgTenant.Name = tenantID
 	}
 
-	// Check if tenant already exists
-	existingTenant, err := p.TenantService.GetTenant(ctx, tenantID)
-	if err == nil && existingTenant != nil {
-		// Tenant exists - update it
-		p.Logger.Debug("Updating tenant from configuration", logger.Str("tenant_id", tenantID))
-
-		name := cfgTenant.Name
-		description := cfgTenant.Description
-		serverURL := cfgTenant.ServerURL
-		adminRealm := cfgTenant.AdminRealm
-		clientID := cfgTenant.ClientID
-		clientSecret := cfgTenant.ClientSecret
-		enabled := cfgTenant.Enabled
-		isDefault := cfgTenant.IsDefault
-		owner := cfgTenant.Owner
-		defaultRealm := cfgTenant.Config.DefaultRealm
-
-		updateReq := &tenant.UpdateRequest{
-			Name:         &name,
-			Description:  &description,
-			ServerURL:    &serverURL,
-			AdminRealm:   &adminRealm,
-			ClientID:     &clientID,
-			ClientSecret: &clientSecret,
-			Enabled:      &enabled,
-			IsDefault:    &isDefault,
-			Tags:         cfgTenant.Tags,
-			Owner:        &owner,
-			DefaultRealm: &defaultRealm,
-		}
-
-		_, err := p.TenantService.UpdateTenant(ctx, tenantID, updateReq)
-		return err
-	}
-
-	// Tenant doesn't exist - create it
-	p.Logger.Info("Creating tenant from configuration", logger.Str("tenant_id", tenantID))
+	name := cfgTenant.Name
+	description := cfgTenant.Description
+	serverURL := cfgTenant.ServerURL
+	adminRealm := cfgTenant.AdminRealm
+	clientID := cfgTenant.ClientID
+	clientSecret := cfgTenant.ClientSecret
+	enabled := cfgTenant.Enabled
+	isDefault := cfgTenant.IsDefault
+	owner := cfgTenant.Owner
+	defaultRealm := cfgTenant.Config.DefaultRealm
 
 	createReq := &tenant.CreateRequest{
 		TenantID:     tenantID,
@@ -311,6 +343,21 @@ func syncTenant(ctx context.Context, p BootstrapParams, tenantID string, cfgTena
 		DefaultRealm: cfgTenant.Config.DefaultRealm,
 	}
 
-	_, err = p.TenantService.CreateTenant(ctx, createReq)
+	updateReq := &tenant.UpdateRequest{
+		Name:         &name,
+		Description:  &description,
+		ServerURL:    &serverURL,
+		AdminRealm:   &adminRealm,
+		ClientID:     &clientID,
+		ClientSecret: &clientSecret,
+		Enabled:      &enabled,
+		IsDefault:    &isDefault,
+		Tags:         cfgTenant.Tags,
+		Owner:        &owner,
+		DefaultRealm: &defaultRealm,
+	}
+
+	p.Logger.Debug("Syncing tenant from configuration", logger.Str("tenant_id", tenantID))
+	_, err := p.TenantService.SyncFromConfig(ctx, tenantID, createReq, updateReq)
 	return err
 }

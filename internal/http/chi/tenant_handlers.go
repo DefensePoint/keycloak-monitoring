@@ -2,6 +2,7 @@ package chi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -254,6 +255,7 @@ func (h *TenantHandlers) createTenant(w http.ResponseWriter, r *http.Request) {
 		IsDefault:     dto.IsDefault,
 		Tags:          dto.Tags,
 		Owner:         dto.Owner,
+		Amfa:          toTenantAmfa(dto.Amfa),
 	}
 
 	if req.IsDefault {
@@ -377,6 +379,7 @@ func (h *TenantHandlers) updateTenant(w http.ResponseWriter, r *http.Request) {
 		IsDefault:     dto.IsDefault,
 		Tags:          dto.Tags,
 		Owner:         dto.Owner,
+		Amfa:          toTenantAmfa(dto.Amfa),
 	}
 
 	if req.IsDefault != nil && *req.IsDefault {
@@ -396,6 +399,14 @@ func (h *TenantHandlers) updateTenant(w http.ResponseWriter, r *http.Request) {
 
 	updated, err := h.service.UpdateTenant(ctx, tenantID, &req)
 	if err != nil {
+		if errors.Is(err, tenant.ErrConfigDefinedTenantReadOnly) {
+			h.log.Warn("Rejected update of config-defined tenant",
+				logger.Str("tenant_id", tenantID))
+			httputil.RespondJSON(w, h.log, http.StatusForbidden, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
 		h.log.Error("Failed to update tenant",
 			logger.Str("tenant_id", tenantID),
 			logger.Err(err))
@@ -430,6 +441,14 @@ func (h *TenantHandlers) deleteTenant(w http.ResponseWriter, r *http.Request) {
 	tenantID := chi.URLParam(r, "tenantID")
 
 	if err := h.service.DeleteTenant(ctx, tenantID); err != nil {
+		if errors.Is(err, tenant.ErrConfigDefinedTenantReadOnly) {
+			h.log.Warn("Rejected delete of config-defined tenant",
+				logger.Str("tenant_id", tenantID))
+			httputil.RespondJSON(w, h.log, http.StatusForbidden, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
 		h.log.Error("Failed to delete tenant",
 			logger.Str("tenant_id", tenantID),
 			logger.Err(err))
@@ -452,7 +471,7 @@ func (h *TenantHandlers) deleteTenant(w http.ResponseWriter, r *http.Request) {
 //	@Tags			tenants
 //	@Produce		json
 //	@Param			tenantID	path		string	true	"Tenant ID"
-//	@Success		200			{object}	tenant.HealthStatus
+//	@Success		200			{object}	tenant.Health
 //	@Failure		401			{object}	dto.ErrorResponse
 //	@Failure		403			{object}	dto.ErrorResponse
 //	@Failure		404			{object}	dto.ErrorResponse	"Tenant not found"
@@ -559,3 +578,18 @@ func (h *TenantHandlers) testConnection(w http.ResponseWriter, r *http.Request) 
 
 // Ensure TenantHandlers implements RouteRegistrar
 var _ RouteRegistrar = (*TenantHandlers)(nil)
+
+// toTenantAmfa converts the request block to the service shape. A nil block
+// stays nil so an absent block leaves a tenant's AMFA settings untouched rather
+// than clearing them.
+func toTenantAmfa(a *requests.TenantAmfa) *tenant.AmfaRequest {
+	if a == nil {
+		return nil
+	}
+	return &tenant.AmfaRequest{
+		Enabled:            a.Enabled,
+		APIBaseURL:         a.APIBaseURL,
+		EventsLookbackDays: a.EventsLookbackDays,
+		APITimeoutSeconds:  a.APITimeoutSeconds,
+	}
+}

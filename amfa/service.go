@@ -62,6 +62,13 @@ func (s *service) ListEvents(ctx context.Context, tenantID string, opts ListEven
 			IsVPN:       row.IsVPN,
 			RiskLevel:   row.RiskLevel,
 			FinalStatus: row.FinalStatus,
+
+			City:             row.City,
+			OperatingSystem:  row.OperatingSystem,
+			Browser:          row.Browser,
+			Device:           row.Device,
+			SystemLanguage:   row.SystemLanguage,
+			ScreenResolution: row.ScreenResolution,
 		}
 		if row.UserID != nil {
 			if u, ok := enriched[*row.UserID]; ok {

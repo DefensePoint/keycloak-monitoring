@@ -69,6 +69,7 @@ func TestAlertsIntegration(t *testing.T) {
 
 		if alert == nil {
 			t.Fatal("Expected LOGIN_ERROR alert to be created, but none found")
+			return
 		}
 
 		t.Logf("✓ Alert created: %s (severity: %s)", alert.Title, alert.Severity)
@@ -92,6 +93,7 @@ func TestAlertsIntegration(t *testing.T) {
 
 		if alert == nil {
 			t.Fatal("Expected CODE_TO_TOKEN_ERROR alert to be created, but none found")
+			return
 		}
 
 		t.Logf("✓ Alert created: %s (severity: %s)", alert.Title, alert.Severity)
@@ -112,6 +114,7 @@ func TestAlertsIntegration(t *testing.T) {
 
 		if alert == nil {
 			t.Fatal("Expected high memory alert to be created, but none found")
+			return
 		}
 
 		t.Logf("✓ Alert created: %s (severity: %s)", alert.Title, alert.Severity)

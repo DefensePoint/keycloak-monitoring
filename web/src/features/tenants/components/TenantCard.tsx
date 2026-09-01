@@ -21,6 +21,7 @@ export const TenantCard: React.FC<TenantCardProps> = ({
   const theme = useTheme();
 
   const isHealthy = tenant.health_status?.toLowerCase() === "healthy";
+  const isConfigDefined = tenant.is_config_defined;
 
   return (
     <Paper
@@ -29,13 +30,13 @@ export const TenantCard: React.FC<TenantCardProps> = ({
         p: 3,
         border: "1px solid",
         borderColor: "divider",
-        cursor: "pointer",
+        cursor: isConfigDefined ? "default" : "pointer",
         transition: "border-color 0.2s",
         "&:hover": {
-          borderColor: theme.palette.error.main,
+          borderColor: isConfigDefined ? "divider" : theme.palette.error.main,
         },
       }}
-      onClick={() => onEdit(tenant)}
+      onClick={isConfigDefined ? undefined : () => onEdit(tenant)}
     >
       {/* Header */}
       <Box
@@ -62,6 +63,21 @@ export const TenantCard: React.FC<TenantCardProps> = ({
                 fontSize: "0.75rem",
               }}
             />
+          )}
+          {isConfigDefined && (
+            <Tooltip title="Managed via config.yaml — edit the config file and restart to change this tenant">
+              <Chip
+                label="Read-only"
+                size="small"
+                sx={{
+                  bgcolor: alpha(theme.palette.info.main, 0.2),
+                  color: theme.palette.info.main,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  fontSize: "0.75rem",
+                }}
+              />
+            </Tooltip>
           )}
         </Box>
 
@@ -190,45 +206,77 @@ export const TenantCard: React.FC<TenantCardProps> = ({
             gap: 0.5,
           }}
         >
-          <Tooltip title={tenant.enabled ? "Disable" : "Enable"}>
-            <IconButton
-              size="small"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleEnabled(tenant);
-              }}
-              sx={{
-                color: tenant.enabled
-                  ? theme.palette.warning.main
-                  : theme.palette.success.main,
-              }}
-            >
-              <PowerSettingsNew fontSize="small" />
-            </IconButton>
+          <Tooltip
+            title={
+              isConfigDefined
+                ? "Managed via config.yaml — edit the config file and restart to change this tenant"
+                : tenant.enabled
+                  ? "Disable"
+                  : "Enable"
+            }
+          >
+            <span>
+              <IconButton
+                size="small"
+                disabled={isConfigDefined}
+                aria-label={tenant.enabled ? "Disable" : "Enable"}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleEnabled(tenant);
+                }}
+                sx={{
+                  color: tenant.enabled
+                    ? theme.palette.warning.main
+                    : theme.palette.success.main,
+                }}
+              >
+                <PowerSettingsNew fontSize="small" />
+              </IconButton>
+            </span>
           </Tooltip>
-          <Tooltip title="Edit">
-            <IconButton
-              size="small"
-              onClick={(e) => {
-                e.stopPropagation();
-                onEdit(tenant);
-              }}
-              sx={{ color: theme.palette.primary.main }}
-            >
-              <Edit fontSize="small" />
-            </IconButton>
+          <Tooltip
+            title={
+              isConfigDefined
+                ? "Managed via config.yaml — edit the config file and restart to change this tenant"
+                : "Edit"
+            }
+          >
+            <span>
+              <IconButton
+                size="small"
+                disabled={isConfigDefined}
+                aria-label="Edit"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit(tenant);
+                }}
+                sx={{ color: theme.palette.primary.main }}
+              >
+                <Edit fontSize="small" />
+              </IconButton>
+            </span>
           </Tooltip>
-          <Tooltip title="Delete">
-            <IconButton
-              size="small"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(tenant.tenant_id);
-              }}
-              sx={{ color: theme.palette.error.main }}
-            >
-              <Delete fontSize="small" />
-            </IconButton>
+          <Tooltip
+            title={
+              isConfigDefined
+                ? "Managed via config.yaml — edit the config file and restart to change this tenant"
+                : "Delete"
+            }
+          >
+            <span>
+              <IconButton
+                size="small"
+                disabled={isConfigDefined}
+                aria-label="Delete"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(tenant.tenant_id);
+                }}
+                sx={{ color: theme.palette.error.main }}
+              >
+                <Delete fontSize="small" />
+              </IconButton>
+            </span>
           </Tooltip>
         </Box>
       </Box>

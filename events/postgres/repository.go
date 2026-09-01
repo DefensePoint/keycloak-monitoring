@@ -3,7 +3,7 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -37,12 +37,13 @@ func (r *Repository) Save(ctx context.Context, event *domain.Event) error {
 	// Use GORM's Clauses for upsert (ON CONFLICT DO UPDATE)
 	result := r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "event_id"}},
-		// NOTE: the AMFA columns (amfa_event_id, risk_level, final_status, is_vpn,
-		// country, lat, long) are deliberately NOT in this update set. They are
-		// owned by the AMFA side and written onto a Keycloak row by
-		// ReconcileAMFAMerges; including them here lets the Keycloak monitor's
-		// periodic re-upsert of the same event clobber that enrichment back to
-		// NULL on the next poll.
+		// NOTE: the AMFA value columns (final_status, is_vpn, country, lat, long,
+		// raw_data) are deliberately NOT in this update set. They are owned by
+		// the AMFA side and written onto a Keycloak row by ReconcileAMFAMerges;
+		// including them here would let the Keycloak monitor's periodic
+		// re-upsert of the same event clobber that enrichment back to NULL
+		// (the Keycloak mirror always saves an empty raw_data — see
+		// keycloak/monitor.go).
 		//
 		// This applies to amfa_event_id and risk_level too. They used to be
 		// updatable on the assumption that the Keycloak event always carries
@@ -55,7 +56,7 @@ func (r *Repository) Save(ctx context.Context, event *domain.Event) error {
 			"type", "category", "severity", "description",
 			"source", "source_ip", "source_system",
 			"user_id", "username", "email", "client_id",
-			"location", "raw_data", "status",
+			"location", "status",
 			"updated_at",
 		}),
 	}).Create(dbEvent)
@@ -179,15 +180,13 @@ func (r *Repository) CountWithFilter(ctx context.Context, opts *events.ListOptio
 }
 
 // applySourceFilter adds the source predicate from opts to the query.
-// Sources (OR of LIKEs) takes precedence over the single Source substring.
+// Sources (exact IN match) takes precedence over the single Source substring.
+// Exact matching is required for tenant scoping: a substring match on a realm
+// name would leak one tenant's events into another whose realm name is a prefix
+// (for example "prod" matching "prod-staging").
 func applySourceFilter(query *gorm.DB, opts *events.ListOptions) *gorm.DB {
 	if len(opts.Sources) > 0 {
-		or := query.Session(&gorm.Session{NewDB: true}).
-			Where("source LIKE ?", "%"+opts.Sources[0]+"%")
-		for _, s := range opts.Sources[1:] {
-			or = or.Or("source LIKE ?", "%"+s+"%")
-		}
-		return query.Where(or)
+		return query.Where("source IN ?", opts.Sources)
 	}
 	if opts.Source != "" {
 		return query.Where("source LIKE ?", "%"+opts.Source+"%")
@@ -195,22 +194,47 @@ func applySourceFilter(query *gorm.DB, opts *events.ListOptions) *gorm.DB {
 	return query
 }
 
-// LatestTimestampBySource returns the newest event timestamp among rows whose
-// source matches exactly; zero time when none exist.
-func (r *Repository) LatestTimestampBySource(ctx context.Context, source string) (time.Time, error) {
-	var latest sql.NullTime
+// AmfaMirrorWatermark returns the AMFA events mirror's recorded read position
+// for one (tenant, realm), or the zero time when none has been recorded yet.
+//
+// This replaced a MAX(timestamp) over the events table filtered by
+// source = 'amfa:<realm>'. That query could not distinguish tenants, because
+// events rows carry no tenant and realm names are unique per-tenant rather
+// than globally, so two tenants monitoring a realm of the same name shared one
+// position and the one that polled second silently skipped its own older
+// events. It also read from rows ReconcileAMFAMerges deletes on merge, so the
+// value could regress. The position is now stored explicitly per tenant.
+func (r *Repository) AmfaMirrorWatermark(ctx context.Context, tenantID, realm string) (time.Time, error) {
+	var row database.AmfaMirrorWatermark
 	result := r.db.WithContext(ctx).
-		Model(&database.Event{}).
-		Select("MAX(timestamp)").
-		Where("source = ?", source).
-		Scan(&latest)
-	if result.Error != nil {
-		return time.Time{}, fmt.Errorf("failed to query latest timestamp for source %s: %w", source, result.Error)
-	}
-	if !latest.Valid {
+		Where("tenant_id = ? AND realm = ?", tenantID, realm).
+		Take(&row)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return time.Time{}, nil
 	}
-	return latest.Time, nil
+	if result.Error != nil {
+		return time.Time{}, fmt.Errorf("failed to read amfa mirror watermark for tenant %s realm %s: %w",
+			tenantID, realm, result.Error)
+	}
+	return row.EventTime, nil
+}
+
+// SaveAmfaMirrorWatermark records the mirror's read position for one
+// (tenant, realm). The update is monotonic: an older position never overwrites
+// a newer one, so a stale writer can at worst cause a re-read (harmless, since
+// saves upsert on event_id) rather than skipping events.
+func (r *Repository) SaveAmfaMirrorWatermark(ctx context.Context, tenantID, realm string, eventTime time.Time) error {
+	const upsert = `
+		INSERT INTO amfa_mirror_watermarks (tenant_id, realm, event_time, updated_at)
+		VALUES (?, ?, ?, now())
+		ON CONFLICT (tenant_id, realm) DO UPDATE
+		SET event_time = EXCLUDED.event_time, updated_at = now()
+		WHERE amfa_mirror_watermarks.event_time < EXCLUDED.event_time`
+	if err := r.db.WithContext(ctx).Exec(upsert, tenantID, realm, eventTime).Error; err != nil {
+		return fmt.Errorf("failed to save amfa mirror watermark for tenant %s realm %s: %w",
+			tenantID, realm, err)
+	}
+	return nil
 }
 
 // MergeKeycloakEvent stores a Keycloak event. Convergence with its AMFA twin
@@ -228,27 +252,18 @@ func (r *Repository) MergeAmfaEvent(ctx context.Context, event *domain.Event) er
 }
 
 // ReconcileAMFAMerges converges each login onto one row: it copies the AMFA
-// fields from every standalone AMFA row onto its Keycloak twin, then
-// soft-deletes the now-absorbed AMFA rows. Idempotent and order-independent —
-// safe to run every poll cycle. Returns the number of AMFA rows absorbed.
-// AMFA-only events (no Keycloak twin) are left untouched.
-//
-// Twins are matched on COALESCE(k.amfa_event_id, k.event_id), which covers both
-// ways the two rows can be related:
-//
-//   - Some Keycloak extensions stamp the AMFA id onto the login event as an
-//     "amfa_event_id" detail, which lands in k.amfa_event_id.
-//   - The open-source Adaptive MFA SPI does not stamp anything; it forwards
-//     Keycloak's own event id and stores it as auth_event.id, so the AMFA row's
-//     amfa_event_id already equals the Keycloak row's event_id.
-//
-// Falling back to k.event_id therefore merges open-source AMFA deployments
-// without changing behaviour where the detail is present. A false match would
-// need an AMFA auth_event.id to collide with an unrelated Keycloak event id;
-// both come from Keycloak's own event stream, so that cannot happen in practice.
+// fields from every standalone AMFA row onto its Keycloak twin (matched by
+// amfa_event_id), then soft-deletes the now-absorbed AMFA rows. Idempotent and
+// order-independent — safe to run every poll cycle. Returns the number of AMFA
+// rows absorbed. AMFA-only events (no Keycloak twin) are left untouched.
 func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 	// 1. Enrich Keycloak rows from their AMFA twin. Keycloak keeps its own
-	//    risk_level (from the event details) when present.
+	//    risk_level (from the event details) when present. raw_data is
+	//    similarly COALESCEd rather than overwritten unconditionally: today
+	//    the Keycloak mirror always saves an empty raw_data (see
+	//    keycloak/monitor.go), so this always falls through to the AMFA
+	//    payload, but the merge shouldn't silently clobber a populated
+	//    Keycloak raw_data if that ever changes.
 	enrich := `
 		UPDATE events AS k
 		SET is_vpn = a.is_vpn,
@@ -263,16 +278,12 @@ func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 		    system_language = a.system_language,
 		    screen_resolution = a.screen_resolution,
 		    risk_level = COALESCE(k.risk_level, a.risk_level),
-		    -- Stamp the merge key onto the twin. Where the Keycloak event carried
-		    -- it this is a no-op; where it did not (open-source AMFA) it records
-		    -- that this row now holds AMFA data, which is what the details view
-		    -- keys its AMFA section off.
-		    amfa_event_id = a.amfa_event_id,
+		    raw_data = COALESCE(k.raw_data, a.raw_data),
 		    updated_at = now()
 		FROM events AS a
 		WHERE a.source_system = 'amfa' AND a.deleted_at IS NULL
 		  AND k.source_system = 'keycloak' AND k.deleted_at IS NULL
-		  AND a.amfa_event_id = COALESCE(k.amfa_event_id, k.event_id)`
+		  AND k.amfa_event_id = a.amfa_event_id`
 	if err := r.db.WithContext(ctx).Exec(enrich).Error; err != nil {
 		return 0, fmt.Errorf("amfa reconcile enrich: %w", err)
 	}
@@ -281,13 +292,19 @@ func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 	//    Keycloak twin, so keeping a tombstone would just be a confusing second
 	//    row. Safe to remove — if the mirror ever re-reads that AMFA event it
 	//    re-inserts the row and the next sweep re-merges it.
+	//
+	//    The predicates here must match step 1's exactly, `a.deleted_at IS NULL`
+	//    included. Step 1 skips soft-deleted AMFA rows, so without the same
+	//    filter here a soft-deleted row would be hard-deleted having never been
+	//    folded onto its twin: its AMFA fields would be destroyed rather than
+	//    merged. Delete only what was actually absorbed.
 	del := `
 		DELETE FROM events AS a
 		USING events AS k
-		WHERE a.source_system = 'amfa'
+		WHERE a.source_system = 'amfa' AND a.deleted_at IS NULL
 		  AND k.source_system = 'keycloak'
 		  AND k.deleted_at IS NULL
-		  AND a.amfa_event_id = COALESCE(k.amfa_event_id, k.event_id)`
+		  AND k.amfa_event_id = a.amfa_event_id`
 	res := r.db.WithContext(ctx).Exec(del)
 	if res.Error != nil {
 		return 0, fmt.Errorf("amfa reconcile delete: %w", res.Error)
