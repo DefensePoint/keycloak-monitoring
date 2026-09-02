@@ -177,4 +177,57 @@ describe("TenantCard", () => {
     // When health_status is not "healthy", the chip shows "Unhealthy" for enabled tenants
     expect(screen.getByText(/unhealthy/i)).toBeInTheDocument();
   });
+
+  describe("config-defined tenant", () => {
+    const configDefinedTenant = { ...mockTenant, is_config_defined: true };
+
+    it("should display a read-only badge", () => {
+      renderWithTheme(
+        <TenantCard {...defaultProps} tenant={configDefinedTenant} />,
+      );
+
+      expect(screen.getByText("Read-only")).toBeInTheDocument();
+    });
+
+    it("should not display a read-only badge for a UI-created tenant", () => {
+      renderWithTheme(<TenantCard {...defaultProps} />);
+
+      expect(screen.queryByText("Read-only")).not.toBeInTheDocument();
+    });
+
+    it("should disable the edit, delete, and toggle buttons", () => {
+      renderWithTheme(
+        <TenantCard {...defaultProps} tenant={configDefinedTenant} />,
+      );
+
+      expect(screen.getByRole("button", { name: /edit/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /delete/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /disable/i })).toBeDisabled();
+    });
+
+    it("should not call onEdit when the card body is clicked", async () => {
+      const user = userEvent.setup();
+      renderWithTheme(
+        <TenantCard {...defaultProps} tenant={configDefinedTenant} />,
+      );
+
+      await user.click(screen.getByText("Test Tenant"));
+
+      expect(mockOnEdit).not.toHaveBeenCalled();
+    });
+
+    it("should reject pointer interaction on the disabled action buttons", async () => {
+      const user = userEvent.setup();
+      renderWithTheme(
+        <TenantCard {...defaultProps} tenant={configDefinedTenant} />,
+      );
+
+      // A disabled MUI IconButton sets pointer-events: none, so the click
+      // itself must fail here, not just leave the handler unfired.
+      await expect(
+        user.click(screen.getByRole("button", { name: /edit/i })),
+      ).rejects.toThrow(/pointer-events: none/);
+      expect(mockOnEdit).not.toHaveBeenCalled();
+    });
+  });
 });

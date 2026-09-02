@@ -214,6 +214,171 @@ func TestRepository_ListEvents_SourcesContextFromJSON(t *testing.T) {
 	}
 }
 
+// TestRepository_ListEvents_PrefersAuthContextTableForDeviceFields covers the
+// opposite case from TestRepository_ListEvents_SourcesContextFromJSON: a login
+// whose auth_context_hash DOES match a real auth_context row. The five
+// device/agent fields (OS, browser, device, system language, screen
+// resolution) must read from that row, not the auth_context_json snapshot -
+// exercising exactly the gap the parity_integration_test.go suite (run
+// against the AMFA HTTP API) caught: this repository used to read those five
+// fields from the JSON unconditionally, diverging from the API's own
+// AuthContext-table-first behavior whenever a real row existed.
+func TestRepository_ListEvents_PrefersAuthContextTableForDeviceFields(t *testing.T) {
+	db := openAmfaTestDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	var deviceHash, netHash, configID string
+	row := db.Raw(`SELECT device_info_hash, network_location_hash, parameters_config_id::text
+	               FROM auth_process LIMIT 1`).Row()
+	if err := row.Scan(&deviceHash, &netHash, &configID); err != nil {
+		t.Skipf("no existing auth_process to borrow FK values from: %v", err)
+	}
+
+	const (
+		realm   = "tdd-authctx-table-realm"
+		procID  = "bbbbbbbb-0000-0000-0000-000000000001"
+		eventID = "bbbbbbbb-0000-0000-0000-000000000002"
+		userID  = "bbbbbbbb-0000-0000-0000-000000000003"
+		ctxHash = "tdd-authctx-table-hash"
+	)
+	// The JSON snapshot carries deliberately different, stale-looking values, so
+	// a test that reads them instead of the table fails loudly rather than by
+	// coincidence.
+	const ctxJSON = `{"realm_id":"tdd-authctx-table-realm",` +
+		`"operating_system":"JSON-STALE-OS","browser":"JSON-STALE-BROWSER",` +
+		`"device":"JSON-STALE-DEVICE","system_language":"JSON-STALE-LANG",` +
+		`"screen_resolution":"JSON-STALE-RES"}`
+	now := time.Now().UTC()
+
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM auth_event WHERE id = ?`, eventID)
+		db.Exec(`DELETE FROM auth_process WHERE id = ?`, procID)
+		db.Exec(`DELETE FROM auth_context WHERE hash = ?`, ctxHash)
+	})
+
+	if err := db.Exec(`
+		INSERT INTO auth_context
+		  (hash, client, ip_address, system_language, screen_resolution,
+		   operating_system, browser, device)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		ctxHash, "table-client", "203.0.113.9", "fr-FR", "2560x1440",
+		"macOS", "Safari", "table-device",
+	).Error; err != nil {
+		t.Fatalf("seed auth_context: %v", err)
+	}
+	if err := db.Exec(`
+		INSERT INTO auth_process
+		  (id, user_id, auth_context_hash, device_info_hash, network_location_hash,
+		   auth_context_json, pre_auth_risk_decision, parameters_config_id,
+		   final_status, started_at)
+		VALUES (?, ?, ?, ?, ?, ?::json, ?, ?, ?, ?)`,
+		procID, userID, ctxHash, deviceHash, netHash, ctxJSON, 2, configID, "LOGIN", now,
+	).Error; err != nil {
+		t.Fatalf("seed auth_process: %v", err)
+	}
+	if err := db.Exec(`
+		INSERT INTO auth_event
+		  (id, auth_process, user_id, event_type, event_time,
+		   auth_context_hash, device_info_hash, network_location_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		eventID, procID, userID, "LOGIN", now, ctxHash, deviceHash, netHash,
+	).Error; err != nil {
+		t.Fatalf("seed auth_event: %v", err)
+	}
+
+	res, err := repo.ListEvents(ctx, amfa.ListEventsOptions{RealmID: realm, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	var got *amfa.EventRow
+	for i := range res.Items {
+		if res.Items[i].EventID == eventID {
+			got = &res.Items[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("seeded event %s not returned (total=%d)", eventID, res.Total)
+	}
+
+	checks := []struct {
+		name string
+		got  *string
+		want string
+	}{
+		{"OperatingSystem", got.OperatingSystem, "macOS"},
+		{"Browser", got.Browser, "Safari"},
+		{"Device", got.Device, "table-device"},
+		{"SystemLanguage", got.SystemLanguage, "fr-FR"},
+		{"ScreenResolution", got.ScreenResolution, "2560x1440"},
+	}
+	for _, c := range checks {
+		if c.got == nil || *c.got != c.want {
+			t.Errorf("%s = %v, want %q (from auth_context, not the JSON snapshot)", c.name, c.got, c.want)
+		}
+	}
+}
+
+// TestRepository_ListEvents_FindsOrphanEventByRealmIDColumn covers the gap
+// found by actually running a real login through Keycloak's SPI + this
+// engine end to end: a LOGIN_ERROR fired before the user ever reached the
+// password prompt (e.g. an invalid_redirect_uri) has no auth_process at all,
+// so it has no auth_context_json snapshot to read a realm from either. AMFA's
+// login-event webhook still stamps auth_event.realm_id directly for exactly
+// this reason. Before realmFilterExpr existed, every query here filtered
+// only on auth_process's JSON snapshot and silently could not see this row -
+// confirmed live: AMFA's own HTTP API returned it, this repository did not.
+func TestRepository_ListEvents_FindsOrphanEventByRealmIDColumn(t *testing.T) {
+	db := openAmfaTestDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	const (
+		realm   = "tdd-orphan-realm"
+		eventID = "cccccccc-0000-0000-0000-000000000001"
+	)
+	eventTime := time.Now().UTC()
+
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM auth_event WHERE id = ?`, eventID)
+	})
+
+	// No auth_process, no auth_context_hash: exactly what a pre-password
+	// LOGIN_ERROR looks like. Only auth_event.realm_id carries the realm.
+	if err := db.Exec(`
+		INSERT INTO auth_event (id, event_type, event_time, realm_id)
+		VALUES (?, ?, ?, ?)`,
+		eventID, "LOGIN_ERROR", eventTime, realm,
+	).Error; err != nil {
+		t.Fatalf("seed orphan auth_event: %v", err)
+	}
+
+	res, err := repo.ListEvents(ctx, amfa.ListEventsOptions{RealmID: realm, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	found := false
+	for _, item := range res.Items {
+		if item.EventID == eventID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("orphan event %s (realm attributed only via auth_event.realm_id) not returned; total=%d", eventID, res.Total)
+	}
+
+	count, err := repo.CountByEventTypeInWindow(ctx, realm, "LOGIN_ERROR",
+		eventTime.Add(-time.Minute), eventTime.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("CountByEventTypeInWindow: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("CountByEventTypeInWindow = %d, want 1", count)
+	}
+}
+
 // seedJSONOnlyLogin inserts one auth_process + auth_event pair whose
 // auth_context_hash deliberately matches no auth_context row, so every context
 // field can only be resolved from auth_context_json. It returns the realm and
@@ -258,6 +423,53 @@ func seedJSONOnlyLogin(t *testing.T, db *gorm.DB, idPrefix, realm, ctxJSON strin
 		   auth_context_hash, device_info_hash, network_location_hash)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		eventID, procID, userID, "LOGIN", now, ctxHash, deviceHash, netHash,
+	).Error; err != nil {
+		t.Fatalf("seed auth_event: %v", err)
+	}
+	return realm, eventID
+}
+
+// seedJSONOnlyEvent is seedJSONOnlyLogin generalized to a caller-chosen
+// event_type and user_id (seedJSONOnlyLogin hardcodes both to "LOGIN" and an
+// id derived from idPrefix). Used by tests that need LOGIN_ERROR rows or need
+// to control which user/realm an event belongs to (e.g. grouping by client or
+// by user, or seeding several distinct users for the reject-burst rule).
+func seedJSONOnlyEvent(t *testing.T, db *gorm.DB, idPrefix, realm, userID, eventType, ctxJSON string, risk int) (outRealm, eventID string) {
+	t.Helper()
+
+	var deviceHash, netHash, configID string
+	row := db.Raw(`SELECT device_info_hash, network_location_hash, parameters_config_id::text
+	               FROM auth_process LIMIT 1`).Row()
+	if err := row.Scan(&deviceHash, &netHash, &configID); err != nil {
+		t.Skipf("no existing auth_process to borrow FK values from: %v", err)
+	}
+
+	procID := idPrefix + "-0000-0000-0000-000000000001"
+	eventID = idPrefix + "-0000-0000-0000-000000000002"
+	ctxHash := idPrefix + "-context-hash-matches-no-auth_context-row"
+	now := time.Now().UTC()
+
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM auth_event WHERE id = ?`, eventID)
+		db.Exec(`DELETE FROM auth_process WHERE id = ?`, procID)
+	})
+
+	if err := db.Exec(`
+		INSERT INTO auth_process
+		  (id, user_id, auth_context_hash, device_info_hash, network_location_hash,
+		   auth_context_json, pre_auth_risk_decision, parameters_config_id,
+		   final_status, started_at)
+		VALUES (?, ?, ?, ?, ?, ?::json, ?, ?, ?, ?)`,
+		procID, userID, ctxHash, deviceHash, netHash, ctxJSON, risk, configID, eventType, now,
+	).Error; err != nil {
+		t.Fatalf("seed auth_process: %v", err)
+	}
+	if err := db.Exec(`
+		INSERT INTO auth_event
+		  (id, auth_process, user_id, event_type, event_time,
+		   auth_context_hash, device_info_hash, network_location_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		eventID, procID, userID, eventType, now, ctxHash, deviceHash, netHash,
 	).Error; err != nil {
 		t.Fatalf("seed auth_event: %v", err)
 	}
@@ -424,6 +636,103 @@ func TestRepository_CountByEventTypeInWindow_RequiresRealm(t *testing.T) {
 	}
 }
 
+func TestRepository_CountByEventTypeAndClientInWindow_RequiresRealm(t *testing.T) {
+	db := openAmfaTestDB(t)
+	repo := NewRepository(db)
+	_, err := repo.CountByEventTypeAndClientInWindow(context.Background(), "", "LOGIN_ERROR", time.Unix(0, 0), time.Now(), 1)
+	if err == nil {
+		t.Error("expected error when realm is empty")
+	}
+}
+
+func TestRepository_CountByEventTypeAndClientInWindow_GroupsByClient(t *testing.T) {
+	db := openAmfaTestDB(t)
+	repo := NewRepository(db)
+
+	const realm = "tdd-client-error-realm"
+	ctxJSON := `{"realm_id":"` + realm + `","client":"tdd-attacked-client"}`
+	seedJSONOnlyEvent(t, db, "ffffffff", realm, "ffffffff-0000-0000-0000-00000000000a", "LOGIN_ERROR", ctxJSON, 1)
+	seedJSONOnlyEvent(t, db, "11111111", realm, "11111111-0000-0000-0000-00000000000b", "LOGIN_ERROR", ctxJSON, 1)
+
+	rows, err := repo.CountByEventTypeAndClientInWindow(
+		context.Background(), realm, "LOGIN_ERROR", time.Now().Add(-time.Hour), time.Now(), 2)
+	if err != nil {
+		t.Fatalf("CountByEventTypeAndClientInWindow: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 client row, got %d (%+v)", len(rows), rows)
+	}
+	if rows[0].Client != "tdd-attacked-client" {
+		t.Errorf("Client = %q, want tdd-attacked-client", rows[0].Client)
+	}
+	if rows[0].Count != 2 {
+		t.Errorf("Count = %d, want 2", rows[0].Count)
+	}
+}
+
+func TestRepository_CountDistinctRejectedUsersSince_RequiresRealm(t *testing.T) {
+	db := openAmfaTestDB(t)
+	repo := NewRepository(db)
+	_, err := repo.CountDistinctRejectedUsersSince(context.Background(), "", time.Unix(0, 0))
+	if err == nil {
+		t.Error("expected error when realm is empty")
+	}
+}
+
+func TestRepository_CountDistinctRejectedUsersSince_CountsDistinctUsersOnly(t *testing.T) {
+	db := openAmfaTestDB(t)
+	repo := NewRepository(db)
+
+	const realm = "tdd-reject-burst-realm"
+	ctxJSON := `{"realm_id":"` + realm + `"}`
+	// Two rejections for the same user must count once; a second user adds one more.
+	seedJSONOnlyEvent(t, db, "22222222", realm, "22222222-0000-0000-0000-00000000000a", "LOGIN_ERROR", ctxJSON, 4)
+	seedJSONOnlyEvent(t, db, "33333333", realm, "22222222-0000-0000-0000-00000000000a", "LOGIN_ERROR", ctxJSON, 4)
+	seedJSONOnlyEvent(t, db, "44444444", realm, "44444444-0000-0000-0000-00000000000b", "LOGIN_ERROR", ctxJSON, 4)
+
+	count, err := repo.CountDistinctRejectedUsersSince(context.Background(), realm, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("CountDistinctRejectedUsersSince: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("count = %d, want 2 distinct users", count)
+	}
+}
+
+func TestRepository_CountByEventTypeByUser_RequiresRealm(t *testing.T) {
+	db := openAmfaTestDB(t)
+	repo := NewRepository(db)
+	_, err := repo.CountByEventTypeByUser(context.Background(), "", "LOGIN_ERROR", time.Unix(0, 0), 1)
+	if err == nil {
+		t.Error("expected error when realm is empty")
+	}
+}
+
+func TestRepository_CountByEventTypeByUser_GroupsByUserAboveThreshold(t *testing.T) {
+	db := openAmfaTestDB(t)
+	repo := NewRepository(db)
+
+	const realm = "tdd-account-error-realm"
+	ctxJSON := `{"realm_id":"` + realm + `"}`
+	seedJSONOnlyEvent(t, db, "55555555", realm, "55555555-0000-0000-0000-00000000000a", "LOGIN_ERROR", ctxJSON, 1)
+	seedJSONOnlyEvent(t, db, "66666666", realm, "55555555-0000-0000-0000-00000000000a", "LOGIN_ERROR", ctxJSON, 1)
+	seedJSONOnlyEvent(t, db, "77777777", realm, "77777777-0000-0000-0000-00000000000b", "LOGIN_ERROR", ctxJSON, 1)
+
+	rows, err := repo.CountByEventTypeByUser(context.Background(), realm, "LOGIN_ERROR", time.Now().Add(-time.Hour), 2)
+	if err != nil {
+		t.Fatalf("CountByEventTypeByUser: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 user row above threshold, got %d (%+v)", len(rows), rows)
+	}
+	if rows[0].UserID != "55555555-0000-0000-0000-00000000000a" {
+		t.Errorf("UserID = %q, want 55555555-0000-0000-0000-00000000000a", rows[0].UserID)
+	}
+	if rows[0].Count != 2 {
+		t.Errorf("Count = %d, want 2", rows[0].Count)
+	}
+}
+
 // TestRepository_NewQueries_SmokeAgainstRealDB exercises each query against the
 // seeded AMFA test DB. It asserts only that the queries execute without error
 // and return sane (non-negative) shapes - the row contents depend on seed data.
@@ -449,5 +758,14 @@ func TestRepository_NewQueries_SmokeAgainstRealDB(t *testing.T) {
 	}
 	if n < 0 {
 		t.Errorf("CountByEventTypeInWindow returned negative count %d", n)
+	}
+	if _, err := repo.CountByEventTypeAndClientInWindow(ctx, realm, "LOGIN_ERROR", since, time.Now(), 1); err != nil {
+		t.Errorf("CountByEventTypeAndClientInWindow: %v", err)
+	}
+	if _, err := repo.CountDistinctRejectedUsersSince(ctx, realm, since); err != nil {
+		t.Errorf("CountDistinctRejectedUsersSince: %v", err)
+	}
+	if _, err := repo.CountByEventTypeByUser(ctx, realm, "LOGIN_ERROR", since, 1); err != nil {
+		t.Errorf("CountByEventTypeByUser: %v", err)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
 	chihttp "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/chi"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/metrics"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/tenant"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/users"
 )
@@ -97,6 +98,7 @@ type HTTPServerParams struct {
 	Router         *chihttp.Router
 	AuthMiddleware *chihttp.AuthMiddleware
 	Logger         *logger.Logger
+	Metrics        *metrics.Registry
 }
 
 func provideHTTPServer(p HTTPServerParams) *http.Server {
@@ -110,6 +112,7 @@ func provideHTTPServer(p HTTPServerParams) *http.Server {
 			ReferrerPolicy:        p.Config.HTTP.SecurityHeaders.ReferrerPolicy,
 		}))
 	}
+	p.Router.SetMetrics(p.Metrics, p.Config.HTTP.Metrics)
 	p.Router.Use(chihttp.CORSMiddleware)
 	p.Router.Use(chihttp.RecoveryMiddleware(p.Logger))
 	p.Router.Use(chihttp.LoggingMiddleware(p.Logger))

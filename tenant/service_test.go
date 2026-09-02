@@ -3,7 +3,9 @@ package tenant
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
 )
@@ -359,6 +361,195 @@ func TestCreateTenant_AlreadyExists(t *testing.T) {
 	}
 }
 
+func TestSyncFromConfig_CreatesAndMarksConfigDefined(t *testing.T) {
+	repo := &mockRepository{
+		getByTenantIDFn: func(ctx context.Context, tenantID string) (*domain.KeycloakTenant, error) {
+			return nil, errors.New("not found")
+		},
+	}
+	svc := NewService(repo)
+
+	createReq := &CreateRequest{
+		TenantID: "cfg-tenant", Name: "Cfg Tenant", ServerURL: "https://keycloak.example.com",
+		AdminRealm: "master", ClientID: "monitoring-service", ClientSecret: "secret",
+	}
+
+	got, err := svc.SyncFromConfig(context.Background(), "cfg-tenant", createReq, &UpdateRequest{})
+	if err != nil {
+		t.Fatalf("SyncFromConfig() unexpected error = %v", err)
+	}
+	if !got.IsConfigDefined {
+		t.Error("SyncFromConfig() must mark a newly created tenant as IsConfigDefined")
+	}
+}
+
+func TestSyncFromConfig_UpdatesAndBypassesReadOnlyGuard(t *testing.T) {
+	repo := &mockRepository{
+		updateFn: func(ctx context.Context, tenant *domain.KeycloakTenant) error { return nil },
+		getByTenantIDFn: func(ctx context.Context, tenantID string) (*domain.KeycloakTenant, error) {
+			return nil, errors.New("not found")
+		},
+	}
+	svc := NewService(repo)
+	s := svc.(*service)
+	s.cache.Store("cfg-tenant", &domain.KeycloakTenant{
+		TenantID: "cfg-tenant", Name: "Old Name", ClientID: "monitoring-service",
+		ClientSecret: "secret", IsConfigDefined: true,
+	})
+
+	updateReq := &UpdateRequest{Name: strPtr("New Name From Config")}
+	got, err := svc.SyncFromConfig(context.Background(), "cfg-tenant", &CreateRequest{}, updateReq)
+	if err != nil {
+		t.Fatalf("SyncFromConfig() unexpected error = %v, want config-sync to bypass the read-only guard", err)
+	}
+	if got.Name != "New Name From Config" {
+		t.Errorf("SyncFromConfig() Name = %q, want %q", got.Name, "New Name From Config")
+	}
+	if !got.IsConfigDefined {
+		t.Error("SyncFromConfig() must keep the tenant marked IsConfigDefined")
+	}
+}
+
+// TestSyncFromConfig_RefusesToTakeOverUIManagedTenant covers a tenant_id
+// collision: a UI-created tenant already exists under the ID a config.yaml
+// entry now wants to use. SyncFromConfig must not silently overwrite and
+// permanently lock it — that would surprise whoever created it in the UI.
+func TestSyncFromConfig_RefusesToTakeOverUIManagedTenant(t *testing.T) {
+	updateCalled := false
+	repo := &mockRepository{
+		updateFn: func(ctx context.Context, tenant *domain.KeycloakTenant) error {
+			updateCalled = true
+			return nil
+		},
+		getByTenantIDFn: func(ctx context.Context, tenantID string) (*domain.KeycloakTenant, error) {
+			return nil, errors.New("not found")
+		},
+	}
+	svc := NewService(repo)
+	s := svc.(*service)
+	s.cache.Store("shared-id", &domain.KeycloakTenant{
+		TenantID: "shared-id", Name: "UI Tenant", ClientID: "monitoring-service",
+		ClientSecret: "secret", IsConfigDefined: false,
+	})
+
+	createReq := &CreateRequest{TenantID: "shared-id", Name: "Cfg Tenant"}
+	updateReq := &UpdateRequest{Name: strPtr("Cfg Tenant")}
+	_, err := svc.SyncFromConfig(context.Background(), "shared-id", createReq, updateReq)
+	if err == nil {
+		t.Fatal("SyncFromConfig() expected an error for a UI-managed tenant_id collision, got nil")
+	}
+	if updateCalled {
+		t.Error("SyncFromConfig() must not modify a UI-managed tenant on ID collision")
+	}
+
+	unchanged, _ := s.cache.Load("shared-id")
+	ut := unchanged.(*domain.KeycloakTenant)
+	if ut.Name != "UI Tenant" || ut.IsConfigDefined {
+		t.Errorf("SyncFromConfig() must leave the UI-managed tenant untouched, got Name=%q IsConfigDefined=%v", ut.Name, ut.IsConfigDefined)
+	}
+}
+
+// TestSyncFromConfig_DoesNotReadoptPreviouslyUnlockedTenant documents an
+// intentional consequence of the collision guard: a tenant that WAS
+// config-defined, got unlocked by unlockOrphanedConfigDefinedTenants because
+// it left config.yaml, is indistinguishable from a genuine UI-created tenant
+// once IsConfigDefined is false. Re-adding the same tenant_id to config.yaml
+// does not silently re-lock it — recovering config-management requires
+// deleting the row first. This is the same guard as the fresh-collision
+// case; the test exists to make the behavior explicit and regression-proof.
+func TestSyncFromConfig_DoesNotReadoptPreviouslyUnlockedTenant(t *testing.T) {
+	repo := &mockRepository{
+		getByTenantIDFn: func(ctx context.Context, tenantID string) (*domain.KeycloakTenant, error) {
+			return nil, errors.New("not found")
+		},
+	}
+	svc := NewService(repo)
+	s := svc.(*service)
+	// Simulates a tenant that was config-defined, then unlocked (e.g. by
+	// unlockOrphanedConfigDefinedTenants) and possibly edited afterward.
+	s.cache.Store("was-config", &domain.KeycloakTenant{
+		TenantID: "was-config", Name: "Edited After Unlock", ClientID: "monitoring-service",
+		ClientSecret: "secret", IsConfigDefined: false,
+	})
+
+	createReq := &CreateRequest{TenantID: "was-config", Name: "Cfg Tenant"}
+	updateReq := &UpdateRequest{Name: strPtr("Cfg Tenant")}
+	_, err := svc.SyncFromConfig(context.Background(), "was-config", createReq, updateReq)
+	if err == nil {
+		t.Fatal("SyncFromConfig() expected an error when re-adding a previously-unlocked tenant_id to config.yaml, got nil")
+	}
+}
+
+func TestListConfigDefinedTenants(t *testing.T) {
+	repo := &mockRepository{
+		listFn: func(ctx context.Context) ([]*domain.KeycloakTenant, error) {
+			return []*domain.KeycloakTenant{
+				{TenantID: "cfg-1", IsConfigDefined: true},
+				{TenantID: "ui-1", IsConfigDefined: false},
+				{TenantID: "cfg-2", IsConfigDefined: true},
+			}, nil
+		},
+	}
+	svc := NewService(repo)
+
+	got, err := svc.ListConfigDefinedTenants(context.Background())
+	if err != nil {
+		t.Fatalf("ListConfigDefinedTenants() unexpected error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("ListConfigDefinedTenants() returned %d tenants, want 2", len(got))
+	}
+	for _, ct := range got {
+		if !ct.IsConfigDefined {
+			t.Errorf("ListConfigDefinedTenants() returned non-config-defined tenant %q", ct.TenantID)
+		}
+	}
+}
+
+func TestUnmarkConfigDefined(t *testing.T) {
+	repo := &mockRepository{
+		updateFn: func(ctx context.Context, tenant *domain.KeycloakTenant) error { return nil },
+		getByTenantIDFn: func(ctx context.Context, tenantID string) (*domain.KeycloakTenant, error) {
+			return nil, errors.New("not found")
+		},
+	}
+	svc := NewService(repo)
+	s := svc.(*service)
+	s.cache.Store("cfg-tenant", &domain.KeycloakTenant{TenantID: "cfg-tenant", IsConfigDefined: true})
+
+	if err := svc.UnmarkConfigDefined(context.Background(), "cfg-tenant"); err != nil {
+		t.Fatalf("UnmarkConfigDefined() unexpected error = %v", err)
+	}
+
+	updated, _ := s.cache.Load("cfg-tenant")
+	if updated.(*domain.KeycloakTenant).IsConfigDefined {
+		t.Error("UnmarkConfigDefined() must clear IsConfigDefined")
+	}
+}
+
+func TestUnmarkConfigDefined_NoopWhenAlreadyUnmarked(t *testing.T) {
+	updateCalled := false
+	repo := &mockRepository{
+		updateFn: func(ctx context.Context, tenant *domain.KeycloakTenant) error {
+			updateCalled = true
+			return nil
+		},
+		getByTenantIDFn: func(ctx context.Context, tenantID string) (*domain.KeycloakTenant, error) {
+			return nil, errors.New("not found")
+		},
+	}
+	svc := NewService(repo)
+	s := svc.(*service)
+	s.cache.Store("ui-tenant", &domain.KeycloakTenant{TenantID: "ui-tenant", IsConfigDefined: false})
+
+	if err := svc.UnmarkConfigDefined(context.Background(), "ui-tenant"); err != nil {
+		t.Fatalf("UnmarkConfigDefined() unexpected error = %v", err)
+	}
+	if updateCalled {
+		t.Error("UnmarkConfigDefined() must not write when the tenant is already not config-defined")
+	}
+}
+
 func TestUpdateTenant(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -436,6 +627,30 @@ func TestUpdateTenant(t *testing.T) {
 	}
 }
 
+func TestUpdateTenant_RejectsConfigDefined(t *testing.T) {
+	repo := &mockRepository{
+		getByTenantIDFn: func(ctx context.Context, tenantID string) (*domain.KeycloakTenant, error) {
+			return nil, errors.New("not found")
+		},
+	}
+	svc := NewService(repo)
+	s := svc.(*service)
+	s.cache.Store("tenant-1", &domain.KeycloakTenant{
+		TenantID: "tenant-1", Name: "Config Tenant", Enabled: true,
+		ClientID: "monitoring-service", ClientSecret: "secret", IsConfigDefined: true,
+	})
+
+	_, err := svc.UpdateTenant(context.Background(), "tenant-1", &UpdateRequest{Name: strPtr("New Name")})
+	if !errors.Is(err, ErrConfigDefinedTenantReadOnly) {
+		t.Fatalf("UpdateTenant() error = %v, want %v", err, ErrConfigDefinedTenantReadOnly)
+	}
+
+	unchanged, _ := s.cache.Load("tenant-1")
+	if unchanged.(*domain.KeycloakTenant).Name != "Config Tenant" {
+		t.Error("UpdateTenant() must not modify a config-defined tenant, but Name changed")
+	}
+}
+
 // TestUpdateTenant_ClientSecret covers the write-only secret field: the edit
 // form never renders the stored secret, so it submits an empty value when the
 // user leaves it untouched. That must be treated as "no change" rather than
@@ -501,6 +716,123 @@ func TestUpdateTenant_ClientSecret(t *testing.T) {
 	}
 }
 
+func TestUpdateTenant_AmfaLookbackAndTimeoutSurviveAnUnrelatedEdit(t *testing.T) {
+	// The edit form only ever renders amfa.enabled/api_base_url, so a plain
+	// rename-and-save submits events_lookback_days/api_timeout_seconds as the
+	// zero value. Since both are validated as >= 1 elsewhere, 0 can never be a
+	// legitimate explicit value, so it doubles as "not provided" the same way
+	// an empty ClientSecret does.
+	tests := []struct {
+		name             string
+		req              *UpdateRequest
+		wantLookbackDays int
+		wantTimeout      int
+	}{
+		{
+			name: "zero lookback/timeout in the request keeps the stored values",
+			req: &UpdateRequest{
+				Name: strPtr("Updated Name"),
+				Amfa: &AmfaRequest{Enabled: true, APIBaseURL: "https://amfa.internal"},
+			},
+			wantLookbackDays: 14,
+			wantTimeout:      45,
+		},
+		{
+			name: "a non-zero value in the request still rotates it",
+			req: &UpdateRequest{
+				Amfa: &AmfaRequest{
+					Enabled: true, APIBaseURL: "https://amfa.internal",
+					EventsLookbackDays: 7, APITimeoutSeconds: 20,
+				},
+			},
+			wantLookbackDays: 7,
+			wantTimeout:      20,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var persisted *domain.TenantAmfa
+			repo := &mockRepository{
+				updateFn: func(ctx context.Context, tenant *domain.KeycloakTenant) error {
+					persisted = tenant.Amfa
+					return nil
+				},
+				getByTenantIDFn: func(ctx context.Context, tenantID string) (*domain.KeycloakTenant, error) {
+					return nil, errors.New("not found")
+				},
+			}
+			svc := NewService(repo)
+			svc.(*service).cache.Store("tenant-1", &domain.KeycloakTenant{
+				TenantID:     "tenant-1",
+				Name:         "Original Name",
+				Enabled:      true,
+				ClientID:     "monitoring-service",
+				ClientSecret: "stored-secret",
+				Amfa: &domain.TenantAmfa{
+					Enabled: true, APIBaseURL: "https://amfa.internal",
+					EventsLookbackDays: 14, APITimeoutSeconds: 45,
+				},
+			})
+
+			if _, err := svc.UpdateTenant(context.Background(), "tenant-1", tt.req); err != nil {
+				t.Fatalf("UpdateTenant() unexpected error = %v", err)
+			}
+
+			if persisted == nil {
+				t.Fatal("expected Amfa to be persisted")
+			}
+			if persisted.EventsLookbackDays != tt.wantLookbackDays {
+				t.Errorf("EventsLookbackDays = %d, want %d", persisted.EventsLookbackDays, tt.wantLookbackDays)
+			}
+			if persisted.APITimeoutSeconds != tt.wantTimeout {
+				t.Errorf("APITimeoutSeconds = %d, want %d", persisted.APITimeoutSeconds, tt.wantTimeout)
+			}
+		})
+	}
+}
+
+func TestNotifyCallbacksDeliversEventsInOrderPerCallback(t *testing.T) {
+	// A callback that's slow to process one event must not let a later event,
+	// dispatched while the first is still in flight, be applied first. Firing
+	// `go callback(...)` per event independently (the old implementation) gave
+	// no such guarantee between two goroutines.
+	svc := NewService(&mockRepository{})
+
+	var mu sync.Mutex
+	var received []Event
+	done := make(chan struct{})
+
+	svc.RegisterCallback(func(event Event, _ *domain.KeycloakTenant) {
+		if event == EventEnabled {
+			time.Sleep(50 * time.Millisecond)
+		}
+		mu.Lock()
+		received = append(received, event)
+		n := len(received)
+		mu.Unlock()
+		if n == 2 {
+			close(done)
+		}
+	})
+
+	s := svc.(*service)
+	s.notifyCallbacks(EventEnabled, &domain.KeycloakTenant{TenantID: "t1"})
+	s.notifyCallbacks(EventDisabled, &domain.KeycloakTenant{TenantID: "t1"})
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for both events to be delivered")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) != 2 || received[0] != EventEnabled || received[1] != EventDisabled {
+		t.Errorf("received = %v, want [%v %v]", received, EventEnabled, EventDisabled)
+	}
+}
+
 func TestDeleteTenant(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -549,6 +881,33 @@ func TestDeleteTenant(t *testing.T) {
 				t.Errorf("DeleteTenant() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestDeleteTenant_RejectsConfigDefined(t *testing.T) {
+	deleteCalled := false
+	repo := &mockRepository{
+		deleteFn: func(ctx context.Context, tenantID string) error {
+			deleteCalled = true
+			return nil
+		},
+		getByTenantIDFn: func(ctx context.Context, tenantID string) (*domain.KeycloakTenant, error) {
+			return nil, errors.New("not found")
+		},
+	}
+	svc := NewService(repo)
+	s := svc.(*service)
+	s.cache.Store("tenant-1", &domain.KeycloakTenant{TenantID: "tenant-1", IsConfigDefined: true})
+
+	err := svc.DeleteTenant(context.Background(), "tenant-1")
+	if !errors.Is(err, ErrConfigDefinedTenantReadOnly) {
+		t.Fatalf("DeleteTenant() error = %v, want %v", err, ErrConfigDefinedTenantReadOnly)
+	}
+	if deleteCalled {
+		t.Error("DeleteTenant() must not call repo.Delete for a config-defined tenant")
+	}
+	if _, ok := s.cache.Load("tenant-1"); !ok {
+		t.Error("DeleteTenant() must not remove a config-defined tenant from cache")
 	}
 }
 

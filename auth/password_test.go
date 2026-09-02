@@ -34,6 +34,7 @@ func TestNewBcryptPasswordHasher(t *testing.T) {
 			hasher := NewBcryptPasswordHasher(tt.cost)
 			if hasher == nil {
 				t.Fatal("NewBcryptPasswordHasher returned nil")
+				return
 			}
 			if hasher.cost != tt.expectedCost {
 				t.Errorf("expected cost %d, got %d", tt.expectedCost, hasher.cost)

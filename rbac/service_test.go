@@ -564,6 +564,35 @@ func TestAssignRoleToUser(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name:       "tenant-scoped admin assignment rejected",
+			userID:     1,
+			roleID:     1,
+			tenantID:   func() *string { s := "tenant-a"; return &s }(),
+			assignedBy: "admin@example.com",
+			getRoleFn: func(ctx context.Context, roleID uint) (*domain.Role, error) {
+				return &domain.Role{ID: 1, Name: RoleAdmin}, nil
+			},
+			assignFn: func(ctx context.Context, userRole *domain.UserRole) error {
+				t.Fatalf("assignRole must not be called for a rejected admin assignment")
+				return nil
+			},
+			wantErr: true,
+		},
+		{
+			name:       "global admin assignment allowed",
+			userID:     1,
+			roleID:     1,
+			tenantID:   nil,
+			assignedBy: "admin@example.com",
+			getRoleFn: func(ctx context.Context, roleID uint) (*domain.Role, error) {
+				return &domain.Role{ID: 1, Name: RoleAdmin}, nil
+			},
+			assignFn: func(ctx context.Context, userRole *domain.UserRole) error {
+				return nil
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -577,6 +606,22 @@ func TestAssignRoleToUser(t *testing.T) {
 				t.Errorf("AssignRoleToUser() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestAssignRoleToUser_AdminTenantScopedReturnsSentinel(t *testing.T) {
+	roleRepo := &mockRoleRepository{
+		getRoleByIDFn: func(ctx context.Context, roleID uint) (*domain.Role, error) {
+			return &domain.Role{ID: 1, Name: RoleAdmin}, nil
+		},
+	}
+	userRoleRepo := &mockUserRoleRepository{}
+	svc := newTestService(roleRepo, nil, userRoleRepo, nil)
+
+	tenant := "tenant-a"
+	err := svc.AssignRoleToUser(context.Background(), 1, 1, &tenant, "admin@example.com", nil)
+	if !errors.Is(err, ErrAdminRoleTenantScoped) {
+		t.Errorf("AssignRoleToUser() error = %v, want ErrAdminRoleTenantScoped", err)
 	}
 }
 
@@ -712,6 +757,43 @@ func TestIsAdmin(t *testing.T) {
 				return []*domain.UserRole{}, nil
 			},
 			want:    false,
+			wantErr: false,
+		},
+		{
+			name:   "tenant-scoped admin is not a platform admin",
+			userID: 4,
+			mockFn: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
+				tenant := "tenant-a"
+				return []*domain.UserRole{
+					{UserID: 4, Role: &domain.Role{Name: RoleAdmin}, TenantID: &tenant},
+				}, nil
+			},
+			want:    false,
+			wantErr: false,
+		},
+		{
+			name:   "expired global admin is not a platform admin",
+			userID: 5,
+			mockFn: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
+				past := time.Now().Add(-time.Hour)
+				return []*domain.UserRole{
+					{UserID: 5, Role: &domain.Role{Name: RoleAdmin}, ExpiresAt: &past},
+				}, nil
+			},
+			want:    false,
+			wantErr: false,
+		},
+		{
+			name:   "tenant-scoped admin plus global admin is a platform admin",
+			userID: 6,
+			mockFn: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
+				tenant := "tenant-a"
+				return []*domain.UserRole{
+					{UserID: 6, Role: &domain.Role{Name: RoleAdmin}, TenantID: &tenant},
+					{UserID: 6, Role: &domain.Role{Name: RoleAdmin}},
+				}, nil
+			},
+			want:    true,
 			wantErr: false,
 		},
 	}

@@ -17,6 +17,7 @@ import (
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/metrics"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/keycloak"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/notifications"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
@@ -592,10 +593,11 @@ type keycloakMonitorFactory struct {
 	log           *logger.Logger
 	cfg           *config.AppConfig
 	healthUpdater keycloak.TenantHealthUpdater
+	metrics       metrics.Recorder
 }
 
-func provideKeycloakMonitorFactory(cfg *config.AppConfig, log *logger.Logger, svc tenant.Service) tenant.KeycloakMonitorFactory {
-	return &keycloakMonitorFactory{log: log, cfg: cfg, healthUpdater: svc}
+func provideKeycloakMonitorFactory(cfg *config.AppConfig, log *logger.Logger, svc tenant.Service, m *metrics.Registry) tenant.KeycloakMonitorFactory {
+	return &keycloakMonitorFactory{log: log, cfg: cfg, healthUpdater: svc, metrics: m}
 }
 
 // CreateClient creates a new Keycloak client for a tenant
@@ -687,23 +689,24 @@ func (f *keycloakMonitorFactory) CreateMonitor(
 	kcClient := client.(*keycloakClientAdapter).client
 
 	// Create monitor - interfaces are now compatible (both use domain types)
-	return &keycloakMonitorAdapter{
-		monitor: keycloak.NewMonitor(
-			tenantID,
-			tenantName,
-			kcClient,
-			kcConfig,
-			f.log,
-			eventRepo,        // tenant.EventRepository is compatible with keycloak.MonitorEventRepository
-			generalEventRepo, // tenant.GeneralEventRepository is compatible with keycloak.EventSaver
-			metricsRepo,      // tenant.MetricsRepository is compatible with keycloak.MonitorMetricsRepository
-			healthRepo,       // tenant.HealthRepository is compatible with keycloak.MonitorHealthRepository
-			realmRepo,        // tenant.RealmRepository is compatible with keycloak.MonitorRealmRepository
-			eventAlertConverter,
-			healthAlertManager,
-			keycloak.WithTenantHealthUpdater(f.healthUpdater),
-		),
-	}
+	mon := keycloak.NewMonitor(
+		tenantID,
+		tenantName,
+		kcClient,
+		kcConfig,
+		f.log,
+		eventRepo,        // tenant.EventRepository is compatible with keycloak.MonitorEventRepository
+		generalEventRepo, // tenant.GeneralEventRepository is compatible with keycloak.EventSaver
+		metricsRepo,      // tenant.MetricsRepository is compatible with keycloak.MonitorMetricsRepository
+		healthRepo,       // tenant.HealthRepository is compatible with keycloak.MonitorHealthRepository
+		realmRepo,        // tenant.RealmRepository is compatible with keycloak.MonitorRealmRepository
+		eventAlertConverter,
+		healthAlertManager,
+		keycloak.WithTenantHealthUpdater(f.healthUpdater),
+	)
+	mon.SetMetrics(f.metrics)
+
+	return &keycloakMonitorAdapter{monitor: mon}
 }
 
 // ============================================================================

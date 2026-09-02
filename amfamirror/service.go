@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
@@ -24,7 +25,9 @@ type Service interface {
 	Start(ctx context.Context) error
 	// Stop gracefully stops polling (10s drain).
 	Stop() error
-	// RunOnce executes a single mirror cycle synchronously.
+	// RunOnce executes a single mirror cycle synchronously, unless a cycle is
+	// already in flight, in which case it returns nil without doing anything:
+	// cycles must not overlap. A caller wanting a guaranteed run has to retry.
 	RunOnce(ctx context.Context) error
 }
 
@@ -37,6 +40,11 @@ type service struct {
 	logger       Logger
 	pollInterval time.Duration
 	backfill     time.Duration
+
+	// cycleMu serialises mirror cycles. It is held for the whole of a cycle,
+	// which is also what makes the watermarks map below safe without a lock of
+	// its own: every read and write of it happens inside runCycleLocked.
+	cycleMu sync.Mutex
 
 	// watermarks holds the newest mirrored event_time per realm. Lost on
 	// restart by design: it is re-derived from the events table.
@@ -120,10 +128,37 @@ func (s *service) poll(ctx context.Context) {
 	}
 }
 
-// runCycle mirrors new events for every realm. Per-realm failures are logged
-// and do not block other realms; AMFA unavailability skips the cycle for that
-// realm without advancing its watermark (same posture as amfacheck).
+// runCycle mirrors new events for every realm, one cycle at a time.
+//
+// Cycles must not overlap. Start launches an immediate cycle in its own
+// goroutine while poll tickers further ones, so a first backfill that outlives
+// one poll interval used to put two cycles in flight together. That raced on
+// the watermarks map, and a concurrent map write in Go is a fatal panic that
+// takes the process down, not a recoverable error. Overlapping cycles also
+// duplicated every AMFA read and let the slower goroutine write back a staler
+// position.
+//
+// TryLock rather than Lock so a tick that arrives mid-cycle is skipped instead
+// of queued: the poll goroutine returns straight to its select and stays
+// responsive to stopChan, which a blocking wait would delay past the drain
+// timeout in Stop.
 func (s *service) runCycle(ctx context.Context) error {
+	if !s.cycleMu.TryLock() {
+		// Warn, not Debug: a cycle that regularly outlives its poll interval
+		// means this tenant is mirroring less often than configured, and a
+		// silent skip leaves an operator no way to see that.
+		s.logger.Warn("amfamirror: previous cycle still running; skipped this poll",
+			"tenant_id", s.tenantID, "poll_interval", s.pollInterval.String())
+		return nil
+	}
+	defer s.cycleMu.Unlock()
+	return s.runCycleLocked(ctx)
+}
+
+// runCycleLocked is runCycle's body. Callers must hold cycleMu, which is what
+// makes the unsynchronised watermarks map safe: every access to it happens
+// inside this call tree.
+func (s *service) runCycleLocked(ctx context.Context) error {
 	realms, err := s.realmsFn(ctx)
 	if err != nil {
 		s.logger.Warn("amfamirror: failed to list realms; skipping cycle",
@@ -148,8 +183,15 @@ func (s *service) runCycle(ctx context.Context) error {
 			"tenant_id", s.tenantID, "error", err.Error())
 		errs = append(errs, fmt.Errorf("reconcile: %w", err))
 	} else if absorbed > 0 {
-		s.logger.Info("amfamirror: merged amfa rows into keycloak twins",
-			"tenant_id", s.tenantID, "count", absorbed)
+		// The sweep is table-wide, not tenant-scoped: the events table has no
+		// tenant column to scope by, so each tenant's mirror reconciles every
+		// tenant's rows. The count therefore spans all tenants, and tenant_id
+		// names the mirror that ran the sweep rather than the owner of the rows
+		// it absorbed. Logging it as a bare "count" alongside tenant_id read as
+		// this tenant's merge total, which over-reports each tenant and lets N
+		// mirrors each claim the same merges.
+		s.logger.Info("amfamirror: reconcile sweep absorbed amfa rows into keycloak twins (table-wide, spans all tenants)",
+			"tenant_id", s.tenantID, "rows_absorbed_all_tenants", absorbed)
 	}
 	return errors.Join(errs...)
 }
@@ -202,6 +244,13 @@ func (s *service) mirrorRealm(ctx context.Context, realm string) error {
 		since = watermark
 	}
 
+	// Persist only a genuine advance. Every cycle re-reads the overlap window,
+	// so writing unconditionally would mean a pointless write per realm per
+	// poll on an idle deployment.
+	if watermark.After(startWatermark) {
+		s.recordWatermark(ctx, realm, watermark)
+	}
+
 	if newlySaved > 0 {
 		s.logger.Info("amfamirror: mirrored events",
 			"tenant_id", s.tenantID, "realm", realm, "count", newlySaved,
@@ -213,24 +262,38 @@ func (s *service) mirrorRealm(ctx context.Context, realm string) error {
 	return nil
 }
 
-// watermarkFor returns the in-memory watermark for the realm, deriving it from
-// the events table (or the backfill window) on first use after startup.
+// watermarkFor returns the in-memory watermark for the realm, loading this
+// tenant's persisted position (or the backfill window) on first use after
+// startup.
 func (s *service) watermarkFor(ctx context.Context, realm string) (time.Time, error) {
 	if wm, ok := s.watermarks[realm]; ok {
 		return wm, nil
 	}
-	latest, err := s.store.LatestTimestampBySource(ctx, SourceForRealm(realm))
+	latest, err := s.store.AmfaMirrorWatermark(ctx, s.tenantID, realm)
 	if err != nil {
 		return time.Time{}, err
 	}
 	if latest.IsZero() {
 		latest = time.Now().Add(-s.backfill)
-		s.logger.Info("amfamirror: no mirrored events yet; backfilling",
+		s.logger.Info("amfamirror: no recorded position for this tenant and realm; backfilling",
 			"tenant_id", s.tenantID, "realm", realm,
 			"from", latest.Format(time.RFC3339))
 	}
 	s.watermarks[realm] = latest
 	return latest, nil
+}
+
+// recordWatermark persists how far this tenant has read for the realm.
+//
+// Best-effort on purpose: the in-memory watermark already governs this
+// process, so a failed write costs at most a bounded re-read after the next
+// restart, and every save upserts on event_id. Failing the cycle here would
+// turn a cosmetic problem into a stalled mirror.
+func (s *service) recordWatermark(ctx context.Context, realm string, watermark time.Time) {
+	if err := s.store.SaveAmfaMirrorWatermark(ctx, s.tenantID, realm, watermark); err != nil {
+		s.logger.Warn("amfamirror: failed to persist read position; a restart may re-read this realm",
+			"tenant_id", s.tenantID, "realm", realm, "error", err.Error())
+	}
 }
 
 // enrichUsers resolves usernames/emails for the batch, best-effort.

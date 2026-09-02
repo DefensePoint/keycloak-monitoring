@@ -47,9 +47,10 @@ func NewRepositoryWithLookback(db *gorm.DB, lookbackDays int) *Repository {
 var _ amfa.Repository = (*Repository)(nil)
 
 // ListEvents returns a page of AMFA events for a tenant's realm, joined across
-// auth_event, auth_process, and auth_context. The realm filter uses the JSONB
-// text-extraction operator on auth_process.auth_context_json->>'realm_id',
-// which stores the realm NAME (not a UUID).
+// auth_event, auth_process, and auth_context. The realm filter checks
+// auth_event.realm_id first, falling back to the JSONB text-extraction
+// operator on auth_process.auth_context_json->>'realm_id' (see
+// realmFilterExpr, context_expr.go); both store the realm NAME, not a UUID.
 //
 // Client/IP/country/geo/VPN are read with a COALESCE fallback: the auth_context
 // table first (its intended source, which adaptive-auth never populates), then
@@ -66,42 +67,18 @@ func (r *Repository) ListEvents(ctx context.Context, opts amfa.ListEventsOptions
 	}
 	start, end := normalizeTimeWindow(opts.StartTime, opts.EndTime, r.lookbackDays)
 
-	type rowScan struct {
-		EventID     string    `gorm:"column:event_id"`
-		EventTime   time.Time `gorm:"column:event_time"`
-		EventType   string    `gorm:"column:event_type"`
-		UserID      *string   `gorm:"column:user_id"`
-		Client      string    `gorm:"column:client"`
-		IPAddress   string    `gorm:"column:ip_address"`
-		Country     *string   `gorm:"column:country"`
-		Lat         *float64  `gorm:"column:lat"`
-		Long        *float64  `gorm:"column:long"`
-		IsVPN       bool      `gorm:"column:is_vpn"`
-		RiskLevel   *int      `gorm:"column:risk_level"`
-		FinalStatus *string   `gorm:"column:final_status"`
-	}
-
-	baseSelect := `
-        SELECT
-            e.id              AS event_id,
-            e.event_time      AS event_time,
-            e.event_type      AS event_type,
-            e.user_id         AS user_id,
-            ` + exprClient + `  AS client,
-            ` + exprIP + `  AS ip_address,
-            ` + exprCountry + `  AS country,
-            ` + exprLat + `  AS lat,
-            ` + exprLong + `  AS long,
-            ` + exprIsVPN + `  AS is_vpn,
-            p.pre_auth_risk_decision   AS risk_level,
-            p.final_status    AS final_status
-        FROM auth_event e
-        LEFT JOIN auth_process p   ON p.id   = e.auth_process
-        LEFT JOIN auth_context ac  ON ac.hash = e.auth_context_hash
-        WHERE p.auth_context_json->>'realm_id' = ?
+	// Shares eventRowSelect and eventRowScan with the incremental queries in
+	// event_queries.go rather than carrying its own projection. Keeping a second
+	// copy here is what let this query drift: it omitted city, operating_system,
+	// browser, device, system_language and screen_resolution, which are declared
+	// on amfa.EventRow and populated everywhere else. An unprojected column
+	// scans as NULL, indistinguishable from absent data, so the Events page
+	// showed those six as empty while the alert rules and events mirror read
+	// them from the same rows without trouble.
+	baseSelect := eventRowSelect + `
           AND e.event_time BETWEEN ? AND ?`
 
-	args := []interface{}{opts.RealmID, start, end}
+	args := []interface{}{opts.RealmID, opts.RealmID, start, end}
 	if opts.RiskLevel != nil {
 		baseSelect += " AND p.pre_auth_risk_decision >= ?"
 		args = append(args, *opts.RiskLevel)
@@ -113,7 +90,7 @@ func (r *Repository) ListEvents(ctx context.Context, opts amfa.ListEventsOptions
 	baseSelect += " ORDER BY e.event_time DESC LIMIT ? OFFSET ?"
 	args = append(args, opts.Limit, opts.Offset)
 
-	var rows []rowScan
+	var rows []eventRowScan
 	if err := r.db.WithContext(ctx).Raw(baseSelect, args...).Scan(&rows).Error; err != nil {
 		return nil, classifyDBError(err, "amfa list events")
 	}
@@ -123,9 +100,9 @@ func (r *Repository) ListEvents(ctx context.Context, opts amfa.ListEventsOptions
         SELECT COUNT(*)
         FROM auth_event e
         LEFT JOIN auth_process p ON p.id = e.auth_process
-        WHERE p.auth_context_json->>'realm_id' = ?
+        WHERE ` + realmFilterExpr + `
           AND e.event_time BETWEEN ? AND ?`
-	countArgs := []interface{}{opts.RealmID, start, end}
+	countArgs := []interface{}{opts.RealmID, opts.RealmID, start, end}
 	if opts.RiskLevel != nil {
 		countSQL += " AND p.pre_auth_risk_decision >= ?"
 		countArgs = append(countArgs, *opts.RiskLevel)
@@ -141,20 +118,7 @@ func (r *Repository) ListEvents(ctx context.Context, opts amfa.ListEventsOptions
 
 	items := make([]amfa.EventRow, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, amfa.EventRow{
-			EventID:     row.EventID,
-			EventTime:   row.EventTime,
-			EventType:   row.EventType,
-			UserID:      row.UserID,
-			Client:      row.Client,
-			IPAddress:   row.IPAddress,
-			Country:     row.Country,
-			Lat:         row.Lat,
-			Long:        row.Long,
-			IsVPN:       row.IsVPN,
-			RiskLevel:   row.RiskLevel,
-			FinalStatus: row.FinalStatus,
-		})
+		items = append(items, row.toEventRow())
 	}
 	return &amfa.ListEventsResult{Items: items, Total: total}, nil
 }
@@ -176,16 +140,16 @@ func (r *Repository) GetStats(ctx context.Context, opts amfa.StatsOptions) (amfa
 	// An empty RealmID means "all realms": the AMFA DB is per-tenant and holds
 	// every realm's auth_event rows, so we aggregate the DISTINCT counts across
 	// realms in one pass (summing per-realm results would double-count users/IPs
-	// seen in more than one realm). We still require a non-null realm_id: the
-	// AMFA DB also holds orphan auth_event rows whose auth_process never linked
-	// (no realm attribution). Those never get mirrored into the platform events
-	// table (the mirror polls one known realm at a time), so counting them here
-	// would inflate the KPIs above what the "All Realms" Events table shows.
-	realmClause := "AND NULLIF(p.auth_context_json->>'realm_id', '') IS NOT NULL"
+	// seen in more than one realm). We still require some realm attribution: the
+	// AMFA DB also holds auth_event rows with no realm known from EITHER source
+	// (realmAttributedExpr, context_expr.go). Counting those here would inflate
+	// the KPIs above what summing the per-realm queries (which apply the same
+	// e.realm_id-first fallback via realmFilterExpr) would show.
+	realmClause := "AND " + realmAttributedExpr
 	args := []interface{}{start, end}
 	if opts.RealmID != "" {
-		realmClause = "AND p.auth_context_json->>'realm_id' = ?"
-		args = append(args, opts.RealmID)
+		realmClause = "AND " + realmFilterExpr
+		args = append(args, opts.RealmID, opts.RealmID)
 	}
 
 	sql := `
@@ -240,7 +204,7 @@ func (r *Repository) GetGeoBuckets(ctx context.Context, opts amfa.GeoOptions) ([
         FROM auth_event e
         LEFT JOIN auth_process p   ON p.id   = e.auth_process
         LEFT JOIN auth_context ac  ON ac.hash = e.auth_context_hash
-        WHERE p.auth_context_json->>'realm_id' = ?
+        WHERE ` + realmFilterExpr + `
           AND e.event_time BETWEEN ? AND ?
           AND ` + exprHasGeo + `
         GROUP BY ` + exprCountry + `,
@@ -249,7 +213,7 @@ func (r *Repository) GetGeoBuckets(ctx context.Context, opts amfa.GeoOptions) ([
         ORDER BY count DESC`
 
 	var buckets []amfa.GeoBucket
-	if err := r.db.WithContext(ctx).Raw(sql, opts.RealmID, start, end).Scan(&buckets).Error; err != nil {
+	if err := r.db.WithContext(ctx).Raw(sql, opts.RealmID, opts.RealmID, start, end).Scan(&buckets).Error; err != nil {
 		return nil, classifyDBError(err, "amfa geo query")
 	}
 	return buckets, nil

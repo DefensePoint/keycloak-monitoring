@@ -238,6 +238,12 @@ func (s *RoleSyncService) SyncUser(ctx context.Context, realmName string, kcUser
 	var err error
 
 	// Try to find by subject (Keycloak ID)
+	//
+	// This is a user-identity subject, NOT an events-table source, despite
+	// sharing the "keycloak:" prefix: it pairs the prefix with a user UUID
+	// rather than a realm name, and it is matched against users.subject.
+	// Do not route it through events.SourceForKeycloakRealm; doing so would
+	// change stored subjects and break user lookup.
 	subject := fmt.Sprintf("keycloak:%s", kcUser.ID)
 	platformUser, err = s.userRepo.GetBySubject(ctx, subject)
 

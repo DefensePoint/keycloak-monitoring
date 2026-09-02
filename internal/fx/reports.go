@@ -10,6 +10,7 @@ import (
 	"repos.defensepoint.com/iam/oss-pmt/kmt/events"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/keycloak"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/operator"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/reports"
 )
@@ -40,6 +41,7 @@ func (a *eventListerAdapter) List(ctx context.Context, opts *reports.EventListOp
 		Offset:    opts.Offset,
 		StartTime: opts.StartTime,
 		EndTime:   opts.EndTime,
+		Sources:   opts.Sources,
 	}
 
 	// events.Repository already returns []*domain.Event
@@ -88,8 +90,9 @@ func provideReportsService(
 	eventLister reports.EventLister,
 	alertReader reports.AlertReader,
 	operatorReader reports.OperatorMetricsReader,
+	realmLister keycloak.Service,
 	log *logger.Logger,
 	pdfGenerator reports.PDFGenerator,
 ) reports.Service {
-	return reports.NewService(eventLister, alertReader, operatorReader, log, pdfGenerator)
+	return reports.NewService(eventLister, alertReader, operatorReader, realmLister, log, pdfGenerator)
 }

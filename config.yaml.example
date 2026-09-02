@@ -60,6 +60,22 @@ http:
   # ===========================================================================
   # RESPONSE SECURITY HEADERS
   # ===========================================================================
+  # Prometheus metrics endpoint (/metrics).
+  #
+  # The endpoint exposes tenant names and infrastructure topology, so it must
+  # not be routed through a public reverse proxy. Scrape it from the host (for
+  # example, a Grafana Alloy agent running alongside the application) rather
+  # than exposing it externally.
+  metrics:
+    # Master switch. When disabled, no /metrics route is registered and no
+    # request instrumentation middleware is installed.
+    enabled: true
+
+    # Optional bearer token. When set, callers must send
+    # "Authorization: Bearer <token>" or the endpoint returns 401.
+    # Supply via MONITORING_HTTP_METRICS_AUTH_TOKEN rather than committing it.
+    auth_token: ""
+
   # Browser-enforced protections applied to every HTTP response.
   # Empty values disable the corresponding header.
   security_headers:
@@ -595,9 +611,24 @@ keycloak:
       #   # How many days of AMFA history to query by default. Hard-capped at
       #   # 90 by Validate(); values <= 0 default to 30.
       #   events_lookback_days: 30
+      #
+      #   # PREFERRED: read AMFA over its read-only monitoring API.
+      #   # When api.base_url is set it takes precedence over the database block
+      #   # below, and none of those database settings are required or read.
+      #   # No credentials belong here: requests carry a service-account token
+      #   # obtained from this tenant's own Keycloak using the client_id /
+      #   # client_secret already configured above for the Admin API. AMFA
+      #   # verifies it against that realm and rejects any token whose realm
+      #   # does not match the one being queried.
+      #   api:
+      #     base_url: "https://amfa.internal:8000"
+      #     # Per-request timeout. Defaults to 30s when omitted.
+      #     timeout: 30s
       #   # alembic_version this KMT monitoring build was tested against. Leave empty
       #   # to skip the schema check; mismatches log a WARN and continue.
       #   expected_schema_version: ""
+      #   # LEGACY: direct database connection, for deployments whose AMFA
+      #   # predates the monitoring API. Ignored when api.base_url is set.
       #   database:
       #     host: "amfa.internal"
       #     port: 5432

@@ -40,6 +40,9 @@ func NewApp(configPath string, opts ...fx.Option) *fx.App {
 		// Handler modules (provides all HTTP handlers)
 		HandlersModule,
 
+		// Metrics module (Prometheus registry + /metrics endpoint)
+		MetricsModule,
+
 		// HTTP Server module
 		ServerModule,
 

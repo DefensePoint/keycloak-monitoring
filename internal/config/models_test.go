@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -405,14 +406,35 @@ func TestAmfaCheckerConfig_ApplyDefaults(t *testing.T) {
 	if c.Checks.ClientLoginError.Window != 5*time.Minute {
 		t.Errorf("ClientLoginError.Window default = %v, want 5m", c.Checks.ClientLoginError.Window)
 	}
+	if c.Checks.LoginErrorByClient.Threshold != 5 {
+		t.Errorf("LoginErrorByClient.Threshold default = %d, want 5", c.Checks.LoginErrorByClient.Threshold)
+	}
+	if c.Checks.LoginErrorByClient.Window != 5*time.Minute {
+		t.Errorf("LoginErrorByClient.Window default = %v, want 5m", c.Checks.LoginErrorByClient.Window)
+	}
+	if c.Checks.RealmRejectBurst.Threshold != 10 {
+		t.Errorf("RealmRejectBurst.Threshold default = %d, want 10", c.Checks.RealmRejectBurst.Threshold)
+	}
+	if c.Checks.RealmRejectBurst.Window != 10*time.Minute {
+		t.Errorf("RealmRejectBurst.Window default = %v, want 10m", c.Checks.RealmRejectBurst.Window)
+	}
+	if c.Checks.LoginErrorByAccount.Threshold != 5 {
+		t.Errorf("LoginErrorByAccount.Threshold default = %d, want 5", c.Checks.LoginErrorByAccount.Threshold)
+	}
+	if c.Checks.LoginErrorByAccount.Window != 5*time.Minute {
+		t.Errorf("LoginErrorByAccount.Window default = %v, want 5m", c.Checks.LoginErrorByAccount.Window)
+	}
 }
 
 func TestAmfaCheckerConfig_ApplyDefaults_PreservesExplicit(t *testing.T) {
 	c := AmfaCheckerConfig{
 		PollInterval: 30 * time.Second,
 		Checks: AmfaCheckerChecksConfig{
-			RepeatedRisky: RepeatedRiskyConfig{Threshold: 10, Window: time.Hour, MinRiskLevel: 4},
-			LoginError:    ThresholdCheckConfig{Threshold: 99, Window: time.Minute},
+			RepeatedRisky:       RepeatedRiskyConfig{Threshold: 10, Window: time.Hour, MinRiskLevel: 4},
+			LoginError:          ThresholdCheckConfig{Threshold: 99, Window: time.Minute},
+			LoginErrorByClient:  ThresholdCheckConfig{Threshold: 42, Window: time.Minute},
+			RealmRejectBurst:    ThresholdCheckConfig{Threshold: 42, Window: time.Minute},
+			LoginErrorByAccount: ThresholdCheckConfig{Threshold: 42, Window: time.Minute},
 		},
 	}
 	c.ApplyDefaults()
@@ -425,5 +447,148 @@ func TestAmfaCheckerConfig_ApplyDefaults_PreservesExplicit(t *testing.T) {
 	}
 	if c.Checks.LoginError.Threshold != 99 {
 		t.Errorf("LoginError.Threshold overwritten: got %d", c.Checks.LoginError.Threshold)
+	}
+	if c.Checks.LoginErrorByClient.Threshold != 42 {
+		t.Errorf("LoginErrorByClient.Threshold overwritten: got %d", c.Checks.LoginErrorByClient.Threshold)
+	}
+	if c.Checks.RealmRejectBurst.Threshold != 42 {
+		t.Errorf("RealmRejectBurst.Threshold overwritten: got %d", c.Checks.RealmRejectBurst.Threshold)
+	}
+	if c.Checks.LoginErrorByAccount.Threshold != 42 {
+		t.Errorf("LoginErrorByAccount.Threshold overwritten: got %d", c.Checks.LoginErrorByAccount.Threshold)
+	}
+}
+
+// --- AMFA API transport selection -----------------------------------------
+
+func TestAmfaAPIConfigValidateAppliesDefaults(t *testing.T) {
+	cfg := AmfaAPIConfig{BaseURL: "https://amfa.internal/"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	// The trailing slash must go: paths are joined onto this, and "base//path"
+	// is a different URL to the server.
+	if cfg.BaseURL != "https://amfa.internal" {
+		t.Errorf("BaseURL = %q, want trailing slash trimmed", cfg.BaseURL)
+	}
+	if cfg.Timeout != 30*time.Second {
+		t.Errorf("Timeout = %v, want a 30s default", cfg.Timeout)
+	}
+}
+
+func TestAmfaAPIConfigRejectsUnusableURLs(t *testing.T) {
+	// Checked at startup rather than at the first poll: each of these parses
+	// cleanly enough to pass unnoticed, then fails on every request.
+	for _, tc := range []struct {
+		name    string
+		baseURL string
+	}{
+		{"no scheme", "amfa.internal"},
+		{"no host", "https://"},
+		{"wrong scheme", "ftp://amfa.internal"},
+		{"database dsn pasted by mistake", "postgres://user@host/db"},
+	} {
+		cfg := AmfaAPIConfig{BaseURL: tc.baseURL}
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("%s (%q): expected rejection", tc.name, tc.baseURL)
+		}
+	}
+}
+
+func TestAmfaAPIConfiguredIgnoresWhitespace(t *testing.T) {
+	// A commented-out or blanked base_url in YAML can arrive as spaces; that is
+	// "not configured", not a URL.
+	if (&AmfaAPIConfig{BaseURL: "   "}).Configured() {
+		t.Error("whitespace-only base_url should not count as configured")
+	}
+	if (&AmfaAPIConfig{}).Configured() {
+		t.Error("empty base_url should not count as configured")
+	}
+	if !(&AmfaAPIConfig{BaseURL: "https://amfa"}).Configured() {
+		t.Error("a real base_url should count as configured")
+	}
+}
+
+func TestAmfaTenantValidateAcceptsAPIWithoutDatabase(t *testing.T) {
+	// The point of the API path: no database credentials in config at all.
+	cfg := AmfaTenantConfig{
+		Enabled: true,
+		API:     AmfaAPIConfig{BaseURL: "https://amfa.internal"},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("API-only config should validate: %v", err)
+	}
+	if cfg.EventsLookbackDays != 30 {
+		t.Errorf("EventsLookbackDays = %d, want a 30 default", cfg.EventsLookbackDays)
+	}
+}
+
+func TestAmfaTenantValidateStillAcceptsDatabaseOnly(t *testing.T) {
+	// Deployments whose AMFA predates the API must keep working untouched.
+	cfg := AmfaTenantConfig{
+		Enabled: true,
+		Database: AmfaDatabaseConfig{
+			Host: "amfa-db", Database: "adaptive_mfa", User: "kmt_ro",
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("database-only config should validate: %v", err)
+	}
+	if cfg.Database.Port != 5432 || cfg.Database.SSLMode != "require" {
+		t.Errorf("database defaults not applied: %+v", cfg.Database)
+	}
+}
+
+func TestAmfaTenantValidateRequiresOneTransport(t *testing.T) {
+	cfg := AmfaTenantConfig{Enabled: true}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected an error when neither transport is configured")
+	}
+	// The message has to name both options, or an operator adding the API block
+	// is told only that a database host is missing.
+	if !strings.Contains(err.Error(), "api.base_url") || !strings.Contains(err.Error(), "database.host") {
+		t.Errorf("error should name both transports, got: %v", err)
+	}
+}
+
+func TestAmfaTenantValidateSkipsDatabaseChecksWhenAPIWins(t *testing.T) {
+	// A half-filled database block left behind after migrating must not fail
+	// validation, since it is no longer read.
+	cfg := AmfaTenantConfig{
+		Enabled:  true,
+		API:      AmfaAPIConfig{BaseURL: "https://amfa.internal"},
+		Database: AmfaDatabaseConfig{Host: "stale-host"}, // no database, no user
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("a leftover database block should not block the API path: %v", err)
+	}
+}
+
+func TestAmfaTenantValidateIsNoOpWhenDisabled(t *testing.T) {
+	cfg := AmfaTenantConfig{Enabled: false}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("disabled AMFA should require nothing: %v", err)
+	}
+}
+
+func TestAmfaLookbackIsCappedOnBothTransports(t *testing.T) {
+	// Both paths must cap identically, or the same tenant would read a
+	// different span of history depending on which transport it uses.
+	api := AmfaTenantConfig{
+		Enabled: true, EventsLookbackDays: 9999,
+		API: AmfaAPIConfig{BaseURL: "https://amfa"},
+	}
+	db := AmfaTenantConfig{
+		Enabled: true, EventsLookbackDays: 9999,
+		Database: AmfaDatabaseConfig{Host: "h", Database: "d", User: "u"},
+	}
+	for name, cfg := range map[string]*AmfaTenantConfig{"api": &api, "database": &db} {
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if cfg.EventsLookbackDays != 90 {
+			t.Errorf("%s: lookback = %d, want the 90-day cap", name, cfg.EventsLookbackDays)
+		}
 	}
 }

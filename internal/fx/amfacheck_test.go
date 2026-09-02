@@ -60,6 +60,15 @@ func (acRepoStub) CountByEventTypeInWindow(_ context.Context, _, _ string, _, _ 
 func (acRepoStub) ListEventsSince(_ context.Context, _ string, _ time.Time, _ int) ([]amfa.EventRow, error) {
 	return nil, nil
 }
+func (acRepoStub) CountByEventTypeAndClientInWindow(_ context.Context, _, _ string, _, _ time.Time, _ int) ([]amfa.ClientEventCount, error) {
+	return nil, nil
+}
+func (acRepoStub) CountDistinctRejectedUsersSince(_ context.Context, _ string, _ time.Time) (int64, error) {
+	return 0, nil
+}
+func (acRepoStub) CountByEventTypeByUser(_ context.Context, _, _ string, _ time.Time, _ int) ([]amfa.UserRiskyCount, error) {
+	return nil, nil
+}
 
 func acRegistry(tenantIDs ...string) *amfa.Registry {
 	reg := amfa.NewRegistry()
@@ -102,5 +111,51 @@ func TestBuildAmfaCheckServices_OnePerEnabledTenant(t *testing.T) {
 	svcs := buildAmfaCheckServices(cfg, acRegistry("t1", "t2", "t3"), acRealmRepoStub{}, acFakeAlertStore{}, acFakeNotifier{}, nil)
 	if len(svcs) != 1 {
 		t.Errorf("expected 1 service (only t1), got %d", len(svcs))
+	}
+}
+
+func TestBuildAmfaChecks_EnablesNewRulesFromConfig(t *testing.T) {
+	var amfaCfg config.AmfaCheckerConfig
+	amfaCfg.Checks.LoginErrorByClient.Enabled = true
+	amfaCfg.Checks.RealmRejectBurst.Enabled = true
+	amfaCfg.Checks.LoginErrorByAccount.Enabled = true
+	amfaCfg.ApplyDefaults()
+
+	checks := buildAmfaChecks("tenant-1", amfacheck.RealmsFunc(func(context.Context) ([]string, error) { return nil, nil }),
+		acRepoStub{}, amfaCfg, noopAmfacheckLogger{})
+
+	want := map[string]bool{
+		"amfa-login-error-by-client":  false,
+		"amfa-realm-reject-burst":     false,
+		"amfa-login-error-by-account": false,
+	}
+	for _, c := range checks {
+		if _, ok := want[c.GetCheckType()]; ok {
+			want[c.GetCheckType()] = true
+		}
+	}
+	for checkType, found := range want {
+		if !found {
+			t.Errorf("expected check %q to be present when its config flag is enabled", checkType)
+		}
+	}
+}
+
+func TestBuildAmfaChecks_NewRulesAbsentWhenDisabled(t *testing.T) {
+	var amfaCfg config.AmfaCheckerConfig
+	amfaCfg.ApplyDefaults() // all three new checks default to Enabled: false
+
+	checks := buildAmfaChecks("tenant-1", amfacheck.RealmsFunc(func(context.Context) ([]string, error) { return nil, nil }),
+		acRepoStub{}, amfaCfg, noopAmfacheckLogger{})
+
+	disallowed := map[string]bool{
+		"amfa-login-error-by-client":  true,
+		"amfa-realm-reject-burst":     true,
+		"amfa-login-error-by-account": true,
+	}
+	for _, c := range checks {
+		if disallowed[c.GetCheckType()] {
+			t.Errorf("check %q present despite being disabled by default", c.GetCheckType())
+		}
 	}
 }

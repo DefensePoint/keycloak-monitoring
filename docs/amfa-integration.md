@@ -120,25 +120,25 @@ The following walks through a full local smoke against the `keycloak-deployment`
 ### Prerequisites
 
 - Docker Desktop running with enough VM disk (≥20 GB free inside the VM — see `docker system df`).
-- `point-adaptive-authentication` (AMFA) and `keycloak-deployment` repos cloned to sibling directories.
+- The Adaptive MFA (AMFA) service and a Keycloak deployment, each with a Docker Compose setup, available as sibling directories (`adaptive-mfa`, `keycloak-deployment`).
 
 ### Step 1: Bring up Keycloak and AMFA
 
 ```bash
 # Keycloak (provides the realms KMT will discover and the users for enrichment)
-cd ../point-iam/keycloak-deployment
+cd ../keycloak-deployment
 docker compose up -d
 # wait until 'docker inspect keycloak-deployment-keycloak-1 --format "{{.State.Health.Status}}"' is "healthy"
 
 # AMFA (the database KMT will read from)
-cd ../../point-adaptive-authentication
+cd ../adaptive-mfa
 docker compose -f docker-compose.local.yml up -d postgres adaptive_auth
 ```
 
 ### Step 2: Set up KMT's read-only role on AMFA's PostgreSQL
 
 ```bash
-docker exec point-adaptive-authentication-postgres-1 psql -U keycloak -d adaptive_mfa <<'SQL'
+docker exec adaptive-mfa-postgres-1 psql -U keycloak -d adaptive_mfa <<'SQL'
 CREATE USER kmt_ro WITH PASSWORD '<your-strong-password>';
 GRANT CONNECT ON DATABASE adaptive_mfa TO kmt_ro;
 GRANT USAGE ON SCHEMA public TO kmt_ro;
@@ -175,7 +175,7 @@ keycloak:
 Get the current schema head:
 
 ```bash
-docker exec point-adaptive-authentication-postgres-1 \
+docker exec adaptive-mfa-postgres-1 \
   psql -U keycloak -d adaptive_mfa -tAc "SELECT version_num FROM alembic_version"
 ```
 
@@ -226,13 +226,13 @@ Each page refresh should produce three `200` lines (one each for `/amfa/events`,
 make docker-down && make docker-up
 
 # Stop AMFA + Keycloak stacks:
-cd ../point-adaptive-authentication
+cd ../adaptive-mfa
 docker compose -f docker-compose.local.yml stop
-cd ../point-iam/keycloak-deployment
+cd ../keycloak-deployment
 docker compose stop
 
 # Optionally drop the RO role on AMFA's DB:
-docker exec point-adaptive-authentication-postgres-1 psql -U keycloak -d adaptive_mfa <<'SQL'
+docker exec adaptive-mfa-postgres-1 psql -U keycloak -d adaptive_mfa <<'SQL'
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM kmt_ro;
 REVOKE USAGE ON SCHEMA public FROM kmt_ro;
 REVOKE CONNECT ON DATABASE adaptive_mfa FROM kmt_ro;
@@ -242,7 +242,7 @@ SQL
 
 ## Seeding demo data for UI development
 
-For development / UI work without waiting for real AMFA traffic, the spec repository ships an example seed script that populates ~40 synthetic `auth_process` rows + ~55 events across 10 cities, mixed risk levels, mixed event types, with some events in the last 24h. See `docs/superpowers/plans/2026-05-26-amfa-events.md` § Demo data, or use the simpler approach:
+For development / UI work without waiting for real AMFA traffic, seed a few synthetic `auth_process` rows and events directly:
 
 ```sql
 -- Insert one realistic record set:
@@ -274,7 +274,7 @@ In the current implementation, AMFA event enrichment with Keycloak usernames/ema
 1. Expose a per-tenant Keycloak admin client lookup function to `internal/fx/amfa.go` (small refactor of `internal/fx/monitoring.go`'s `MonitorPoolManager`).
 2. Or construct a dedicated process-scope admin client for AMFA in `internal/fx/amfa.go`.
 
-The UUID-only fallback is documented in the spec at `docs/superpowers/specs/2026-05-26-amfa-events-design.md` §14 (risks) and the spec's design contemplates this path.
+The UUID-only fallback is a deliberate degraded mode, not a bug: enrichment quality drops, correctness does not.
 
 ## Alerts
 
@@ -435,7 +435,7 @@ Step 2: inject fresh events that trigger all five rules for a realm KMT has disc
 
 ```bash
 # grab reusable FK-satisfying values from any existing auth_process
-docker exec point-adaptive-authentication-postgres-1 psql -U keycloak -d adaptive_mfa -x -c \
+docker exec adaptive-mfa-postgres-1 psql -U keycloak -d adaptive_mfa -x -c \
   "SELECT auth_context_hash, device_info_hash, network_location_hash, parameters_config_id FROM auth_process LIMIT 1"
 ```
 
@@ -455,7 +455,7 @@ Step 4: clean up and restore:
 
 ```bash
 # remove injected AMFA rows (adjust marker/prefix to what you used)
-docker exec point-adaptive-authentication-postgres-1 psql -U keycloak -d adaptive_mfa -c \
+docker exec adaptive-mfa-postgres-1 psql -U keycloak -d adaptive_mfa -c \
   "DELETE FROM auth_event WHERE details='AMFACHECK_LIVE_TEST'; \
    DELETE FROM auth_process WHERE id::text LIKE '00000000-0000-0000-0000-%';"
 # remove the test alerts from KMT
@@ -466,10 +466,3 @@ docker compose -f deployments/local/docker-compose.yml up -d --force-recreate ap
 ```
 
 > Disk note: rebuilding the server image generates a large Docker build cache. If a build or a database container starts failing with "No space left on device", reclaim it with `docker builder prune -af`.
-
-## Reference
-
-- AMFA Events design spec: [`docs/superpowers/specs/2026-05-26-amfa-events-design.md`](superpowers/specs/2026-05-26-amfa-events-design.md)
-- AMFA Events implementation plan: [`docs/superpowers/plans/2026-05-26-amfa-events.md`](superpowers/plans/2026-05-26-amfa-events.md)
-- AMFA Risk Alerts design spec: [`docs/superpowers/specs/2026-06-02-amfa-risk-alerts-design.md`](superpowers/specs/2026-06-02-amfa-risk-alerts-design.md)
-- AMFA Risk Alerts implementation plan: [`docs/superpowers/plans/2026-06-02-amfa-risk-alerts.md`](superpowers/plans/2026-06-02-amfa-risk-alerts.md)

@@ -81,7 +81,7 @@ const eventRowSelect = `
         FROM auth_event e
         LEFT JOIN auth_process p   ON p.id   = e.auth_process
         LEFT JOIN auth_context ac  ON ac.hash = e.auth_context_hash
-        WHERE p.auth_context_json->>'realm_id' = ?`
+        WHERE ` + realmFilterExpr
 
 // ListRejectedEventsSince returns risk-rejected (pre_auth_risk_decision = 4)
 // events newer than `since` for the realm, oldest first.
@@ -95,7 +95,7 @@ func (r *Repository) ListRejectedEventsSince(ctx context.Context, realm string, 
         ORDER BY e.event_time ASC`
 
 	var rows []eventRowScan
-	if err := r.db.WithContext(ctx).Raw(sql, realm, since).Scan(&rows).Error; err != nil {
+	if err := r.db.WithContext(ctx).Raw(sql, realm, realm, since).Scan(&rows).Error; err != nil {
 		return nil, classifyDBError(err, "amfa list rejected events")
 	}
 	out := make([]amfa.EventRow, 0, len(rows))
@@ -121,7 +121,7 @@ func (r *Repository) ListVPNRiskyEventsSince(ctx context.Context, realm string, 
         ORDER BY e.event_time ASC`
 
 	var rows []eventRowScan
-	if err := r.db.WithContext(ctx).Raw(sql, realm, minRisk, since).Scan(&rows).Error; err != nil {
+	if err := r.db.WithContext(ctx).Raw(sql, realm, realm, minRisk, since).Scan(&rows).Error; err != nil {
 		return nil, classifyDBError(err, "amfa list vpn risky events")
 	}
 	out := make([]amfa.EventRow, 0, len(rows))
@@ -148,7 +148,7 @@ func (r *Repository) ListEventsSince(ctx context.Context, realm string, since ti
         LIMIT ?`
 
 	var rows []eventRowScan
-	if err := r.db.WithContext(ctx).Raw(sql, realm, since, limit).Scan(&rows).Error; err != nil {
+	if err := r.db.WithContext(ctx).Raw(sql, realm, realm, since, limit).Scan(&rows).Error; err != nil {
 		return nil, classifyDBError(err, "amfa list events since")
 	}
 	out := make([]amfa.EventRow, 0, len(rows))
@@ -168,7 +168,7 @@ func (r *Repository) CountRepeatedRiskyByUser(ctx context.Context, realm string,
         SELECT e.user_id AS user_id, COUNT(*) AS cnt
         FROM auth_event e
         LEFT JOIN auth_process p ON p.id = e.auth_process
-        WHERE p.auth_context_json->>'realm_id' = ?
+        WHERE ` + realmFilterExpr + `
           AND p.pre_auth_risk_decision >= ?
           AND e.event_time >= ?
           AND e.user_id IS NOT NULL
@@ -180,7 +180,7 @@ func (r *Repository) CountRepeatedRiskyByUser(ctx context.Context, realm string,
 		Cnt    int64  `gorm:"column:cnt"`
 	}
 	var rows []scanRow
-	if err := r.db.WithContext(ctx).Raw(sql, realm, minRisk, since, threshold).Scan(&rows).Error; err != nil {
+	if err := r.db.WithContext(ctx).Raw(sql, realm, realm, minRisk, since, threshold).Scan(&rows).Error; err != nil {
 		return nil, classifyDBError(err, "amfa count repeated risky by user")
 	}
 	out := make([]amfa.UserRiskyCount, 0, len(rows))
@@ -200,13 +200,103 @@ func (r *Repository) CountByEventTypeInWindow(ctx context.Context, realm, eventT
         SELECT COUNT(*)
         FROM auth_event e
         LEFT JOIN auth_process p ON p.id = e.auth_process
-        WHERE p.auth_context_json->>'realm_id' = ?
+        WHERE ` + realmFilterExpr + `
           AND e.event_type = ?
           AND e.event_time BETWEEN ? AND ?`
 
 	var count int64
-	if err := r.db.WithContext(ctx).Raw(sql, realm, eventType, start, end).Scan(&count).Error; err != nil {
+	if err := r.db.WithContext(ctx).Raw(sql, realm, realm, eventType, start, end).Scan(&count).Error; err != nil {
 		return 0, classifyDBError(err, "amfa count by event type in window")
 	}
 	return count, nil
+}
+
+// CountByEventTypeAndClientInWindow returns, per OAuth client in the realm,
+// the count of eventType events in [start, end], keeping only clients whose
+// count >= threshold. Used by the per-client login-error rule.
+func (r *Repository) CountByEventTypeAndClientInWindow(ctx context.Context, realm, eventType string, start, end time.Time, threshold int) ([]amfa.ClientEventCount, error) {
+	if realm == "" {
+		return nil, fmt.Errorf("amfa.CountByEventTypeAndClientInWindow: realm is required")
+	}
+	sql := `
+        SELECT ` + exprClient + ` AS client, COUNT(*) AS cnt
+        FROM auth_event e
+        LEFT JOIN auth_process p   ON p.id   = e.auth_process
+        LEFT JOIN auth_context ac  ON ac.hash = e.auth_context_hash
+        WHERE ` + realmFilterExpr + `
+          AND e.event_type = ?
+          AND e.event_time BETWEEN ? AND ?
+          AND ` + exprClient + ` <> ''
+        GROUP BY ` + exprClient + `
+        HAVING COUNT(*) >= ?`
+
+	type scanRow struct {
+		Client string `gorm:"column:client"`
+		Cnt    int64  `gorm:"column:cnt"`
+	}
+	var rows []scanRow
+	if err := r.db.WithContext(ctx).Raw(sql, realm, realm, eventType, start, end, threshold).Scan(&rows).Error; err != nil {
+		return nil, classifyDBError(err, "amfa count by event type and client in window")
+	}
+	out := make([]amfa.ClientEventCount, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, amfa.ClientEventCount{Client: row.Client, Count: row.Cnt})
+	}
+	return out, nil
+}
+
+// CountDistinctRejectedUsersSince returns the number of distinct users with at
+// least one pre_auth_risk_decision=4 (rejected) event in the realm since
+// `since`. Used by the realm-wide reject-burst rule.
+func (r *Repository) CountDistinctRejectedUsersSince(ctx context.Context, realm string, since time.Time) (int64, error) {
+	if realm == "" {
+		return 0, fmt.Errorf("amfa.CountDistinctRejectedUsersSince: realm is required")
+	}
+	sql := `
+        SELECT COUNT(DISTINCT e.user_id)
+        FROM auth_event e
+        LEFT JOIN auth_process p ON p.id = e.auth_process
+        WHERE ` + realmFilterExpr + `
+          AND p.pre_auth_risk_decision = 4
+          AND e.event_time >= ?
+          AND e.user_id IS NOT NULL`
+
+	var count int64
+	if err := r.db.WithContext(ctx).Raw(sql, realm, realm, since).Scan(&count).Error; err != nil {
+		return 0, classifyDBError(err, "amfa count distinct rejected users since")
+	}
+	return count, nil
+}
+
+// CountByEventTypeByUser returns, per user in the realm, the count of
+// eventType events since `since`, keeping only users whose count >=
+// threshold. Used by the per-account login-error rule.
+func (r *Repository) CountByEventTypeByUser(ctx context.Context, realm, eventType string, since time.Time, threshold int) ([]amfa.UserRiskyCount, error) {
+	if realm == "" {
+		return nil, fmt.Errorf("amfa.CountByEventTypeByUser: realm is required")
+	}
+	sql := `
+        SELECT e.user_id AS user_id, COUNT(*) AS cnt
+        FROM auth_event e
+        LEFT JOIN auth_process p ON p.id = e.auth_process
+        WHERE ` + realmFilterExpr + `
+          AND e.event_type = ?
+          AND e.event_time >= ?
+          AND e.user_id IS NOT NULL
+        GROUP BY e.user_id
+        HAVING COUNT(*) >= ?`
+
+	type scanRow struct {
+		UserID string `gorm:"column:user_id"`
+		Cnt    int64  `gorm:"column:cnt"`
+	}
+	var rows []scanRow
+	if err := r.db.WithContext(ctx).Raw(sql, realm, realm, eventType, since, threshold).Scan(&rows).Error; err != nil {
+		return nil, classifyDBError(err, "amfa count by event type by user")
+	}
+	out := make([]amfa.UserRiskyCount, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, amfa.UserRiskyCount{UserID: row.UserID, Count: row.Cnt})
+	}
+	return out, nil
 }

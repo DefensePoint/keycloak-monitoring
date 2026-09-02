@@ -13,6 +13,7 @@ func TestNewMemorySessionStore(t *testing.T) {
 
 	if store == nil {
 		t.Fatal("NewMemorySessionStore returned nil")
+		return
 	}
 
 	if store.maxAge != maxAge {
@@ -223,6 +224,7 @@ func TestNewCookieSessionManager(t *testing.T) {
 
 	if manager == nil {
 		t.Fatal("NewCookieSessionManager returned nil")
+		return
 	}
 
 	if manager.name != sessionName {
@@ -322,6 +324,7 @@ func TestNewStateStore(t *testing.T) {
 
 	if store == nil {
 		t.Fatal("NewStateStore returned nil")
+		return
 	}
 
 	if store.maxAge != maxAge {
@@ -495,6 +498,7 @@ func TestNewSessionBlacklist(t *testing.T) {
 
 	if bl == nil {
 		t.Fatal("NewSessionBlacklist returned nil")
+		return
 	}
 
 	if bl.maxAge != maxAge {

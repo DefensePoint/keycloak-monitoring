@@ -1,18 +1,21 @@
 package fx
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
 	"go.uber.org/fx"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa/httpclient"
 	amfapg "repos.defensepoint.com/iam/oss-pmt/kmt/amfa/postgres"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/amfacheck"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
 	chihttp "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/chi"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/keycloakadmin"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/saferequest"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/rbac"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/tenant"
 )
@@ -40,6 +43,7 @@ var AmfaModule = fx.Module("amfa",
 		provideAmfaHandlers,
 	),
 	fx.Invoke(logAmfaStartup),
+	fx.Invoke(registerAmfaTenantSync),
 )
 
 // provideAmfaRegistry builds the per-tenant Repository registry by walking
@@ -47,43 +51,125 @@ var AmfaModule = fx.Module("amfa",
 // skipped silently. Tenants with invalid AMFA configuration or unreachable
 // databases are logged and skipped — they never abort startup.
 func provideAmfaRegistry(cfg *config.AppConfig, log *logger.Logger) *amfa.Registry {
-	return buildAmfaRegistry(cfg.Keycloak.Tenants, log)
+	return buildAmfaRegistry(cfg, cfg.Keycloak.Tenants, log)
 }
 
 // buildAmfaRegistry is the unit-testable core of provideAmfaRegistry. It is
 // intentionally non-fatal on per-tenant errors: AMFA is an optional add-on
 // and a single misconfigured tenant must not bring down the platform.
-func buildAmfaRegistry(tenants map[string]config.TenantConfig, log *logger.Logger) *amfa.Registry {
+func buildAmfaRegistry(cfg *config.AppConfig, tenants map[string]config.TenantConfig, log *logger.Logger) *amfa.Registry {
 	reg := amfa.NewRegistry()
 	for tenantID, tcfg := range tenants {
 		if tcfg.Amfa == nil || !tcfg.Amfa.Enabled {
 			continue
 		}
-		// Validate also fills in defaults (port, sslmode, pool sizes), so it
-		// must run before NewClient.
+		// Validate also fills in defaults (port, sslmode, pool sizes, timeouts),
+		// so it must run before either client is constructed.
 		amfaCfg := tcfg.Amfa
 		if err := amfaCfg.Validate(); err != nil {
 			logWarn(log, "AMFA config invalid for tenant; skipping",
 				logger.Str("tenant_id", tenantID), logger.Err(err))
 			continue
 		}
-		db, err := amfapg.NewClient(amfaCfg.Database, log)
+
+		repo, transport, err := newAmfaRepository(tenantID, tcfg, cfg, log)
 		if err != nil {
-			logWarn(log, "AMFA database connection failed; tenant will not expose AMFA endpoints",
+			logWarn(log, "AMFA unavailable for tenant; tenant will not expose AMFA endpoints",
 				logger.Str("tenant_id", tenantID), logger.Err(err))
 			continue
 		}
-		// Schema drift is non-fatal; CheckAmfaSchema logs internally.
-		if err := amfapg.CheckAmfaSchema(db, amfaCfg.ExpectedSchemaVersion, log); err != nil {
-			logWarn(log, "AMFA schema check returned error",
-				logger.Str("tenant_id", tenantID), logger.Err(err))
-		}
-		reg.Register(tenantID, amfapg.NewRepositoryWithLookback(db, amfaCfg.EventsLookbackDays))
+
+		reg.Register(tenantID, repo)
 		logInfo(log, "AMFA registered for tenant",
 			logger.Str("tenant_id", tenantID),
+			logger.Str("transport", transport),
 			logger.Int("events_lookback_days", amfaCfg.EventsLookbackDays))
 	}
 	return reg
+}
+
+// newAmfaRepository builds the repository for one tenant, preferring AMFA's
+// read-only HTTP API over a direct database connection.
+//
+// The API path is chosen whenever it is configured: it needs no database
+// credentials in config and does not couple this platform to AMFA's schema. The
+// database path remains for deployments whose AMFA predates the API, and is
+// removed once every tenant has migrated.
+//
+// The returned string names the transport actually used, so the startup log
+// tells an operator which path a tenant took rather than leaving them to infer
+// it from config.
+func newAmfaRepository(
+	tenantID string, tcfg config.TenantConfig, cfg *config.AppConfig, log *logger.Logger,
+) (amfa.Repository, string, error) {
+	amfaCfg := tcfg.Amfa
+
+	if amfaCfg.API.Configured() {
+		// Both hops reuse the Keycloak connection policy's SSRF/TLS rules
+		// (host allow-list, private-range and TLS-verify behavior), but not its
+		// timeout: token requests hit the tenant's Keycloak and should use the
+		// same timeout every other Keycloak call does, while AMFA requests
+		// should honor amfa.api.timeout, which this tenant configured
+		// specifically for its own AMFA instance.
+		keycloakPolicy := keycloakSafeRequestPolicy(cfg)
+		tokenHTTPClient := saferequest.HTTPClient(keycloakPolicy)
+
+		amfaPolicy := keycloakPolicy
+		amfaPolicy.Timeout = amfaCfg.API.Timeout
+		amfaHTTPClient := saferequest.HTTPClient(amfaPolicy)
+
+		// Tokens come from the tenant's own Keycloak, using the confidential
+		// client this platform already holds for the Admin API. AMFA verifies
+		// them against that realm's JWKS and rejects any token whose realm does
+		// not match the requested one, so a tenant's credentials can only read
+		// that tenant's events.
+		tokens := httpclient.NewClientCredentialsTokenSource(
+			tcfg.ServerURL,
+			amfaAuthRealm(tcfg),
+			tcfg.ClientID,
+			tcfg.ClientSecret,
+			tokenHTTPClient,
+		)
+		repo, err := httpclient.New(httpclient.Config{
+			BaseURL:      amfaCfg.API.BaseURL,
+			Timeout:      amfaCfg.API.Timeout,
+			LookbackDays: amfaCfg.EventsLookbackDays,
+		}, tokens, log, httpclient.WithHTTPClient(amfaHTTPClient))
+		if err != nil {
+			return nil, "", fmt.Errorf("amfa api client: %w", err)
+		}
+		// Deliberately no reachability probe here. Unlike a database connection,
+		// which must be established before it can be pooled, an HTTP client has
+		// nothing to verify at construction, and failing startup on a
+		// momentarily unreachable AMFA would take the tenant's endpoints down
+		// for as long as the outage lasted. Request-time errors surface as 503.
+		return repo, "api", nil
+	}
+
+	db, err := amfapg.NewClient(amfaCfg.Database, log)
+	if err != nil {
+		return nil, "", fmt.Errorf("amfa database connection: %w", err)
+	}
+	// Schema drift is non-fatal; CheckAmfaSchema logs internally. Only relevant
+	// on this path: reading through the API means AMFA owns its own schema and
+	// this platform no longer depends on its shape.
+	if err := amfapg.CheckAmfaSchema(db, amfaCfg.ExpectedSchemaVersion, log); err != nil {
+		logWarn(log, "AMFA schema check returned error",
+			logger.Str("tenant_id", tenantID), logger.Err(err))
+	}
+	return amfapg.NewRepositoryWithLookback(db, amfaCfg.EventsLookbackDays), "database", nil
+}
+
+// amfaAuthRealm returns the realm whose token endpoint issues AMFA tokens.
+//
+// This is the tenant's admin realm, the same one the Admin API client
+// authenticates against, because that is where the confidential client and its
+// service account live.
+func amfaAuthRealm(tcfg config.TenantConfig) string {
+	if tcfg.AdminRealm != "" {
+		return tcfg.AdminRealm
+	}
+	return "master"
 }
 
 // provideAmfaEnrichment wires the AMFA Keycloak enrichment cache against

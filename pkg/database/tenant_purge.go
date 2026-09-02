@@ -41,6 +41,10 @@ var tenantScopedTables = []tenantTable{
 	{name: "alert_rules"},
 	{name: "tenant_policies"},
 	{name: "user_roles"},
+	// One tiny row per (tenant, realm), so it is deleted inline rather than
+	// drained: leaving it behind would hand a re-created tenant of the same id
+	// a stale read position and skip its events.
+	{name: "amfa_mirror_watermarks"},
 	{name: "keycloak_events", telemetry: true},
 	{name: "keycloak_metrics", telemetry: true},
 	{name: "keycloak_health", telemetry: true},

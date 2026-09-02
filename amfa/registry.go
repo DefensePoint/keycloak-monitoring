@@ -50,3 +50,12 @@ func (r *Registry) TenantIDs() []string {
 	sort.Strings(ids)
 	return ids
 }
+
+// Unregister removes a tenant's repository. Used when a tenant is deleted, has
+// AMFA switched off, or is reconfigured, so a stale endpoint is never queried
+// after the tenant stopped pointing at it.
+func (r *Registry) Unregister(tenantID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.repos, tenantID)
+}

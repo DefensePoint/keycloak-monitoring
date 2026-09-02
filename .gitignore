@@ -56,3 +56,6 @@ Thumbs.db
 # Local security scan output
 reports/security/
 .trivy-cache/
+
+# Local Claude Code state (may contain internal notes)
+.claude/

@@ -10,9 +10,26 @@ interface UseAmfaStatsParams {
 }
 
 /**
+ * Error code the backend returns (HTTP 501) when a tenant's AMFA transport
+ * can't aggregate stats across all realms (see amfa.ErrAllRealmsUnsupported
+ * server-side) - e.g. the HTTP-API repository, whose credentials are scoped
+ * to a single realm.
+ */
+export const AMFA_ALL_REALMS_UNSUPPORTED = "amfa_all_realms_unsupported";
+
+export function isAllRealmsUnsupportedError(error: unknown): boolean {
+  return (
+    error instanceof Error && error.message === AMFA_ALL_REALMS_UNSUPPORTED
+  );
+}
+
+/**
  * AMFA KPI counters. Gated on tenant only: when `realm` is omitted the backend
  * aggregates across every realm in the tenant's AMFA DB ("all realms"), matching
- * the "All Realms" selection on the Events page.
+ * the "All Realms" selection on the Events page. That aggregation isn't
+ * supported by every AMFA transport, so once the backend reports it's
+ * unsupported for this tenant, stop retrying/polling - the answer won't
+ * change until a specific realm is selected instead.
  */
 export const useAmfaStats = (params: UseAmfaStatsParams) =>
   useQuery({
@@ -28,5 +45,8 @@ export const useAmfaStats = (params: UseAmfaStatsParams) =>
       );
     },
     enabled: Boolean(params.tenantId),
-    refetchInterval: 30_000,
+    retry: (failureCount, error) =>
+      !isAllRealmsUnsupportedError(error) && failureCount < 1,
+    refetchInterval: (query) =>
+      isAllRealmsUnsupportedError(query.state.error) ? false : 30_000,
   });

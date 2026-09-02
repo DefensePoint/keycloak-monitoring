@@ -17,6 +17,7 @@ func TestAmfaReadPermissionExists(t *testing.T) {
 
 	if found == nil {
 		t.Fatalf("GetSystemPermissions() does not include %q permission", PermissionAmfaRead)
+		return
 	}
 
 	if found.Name != "amfa:read" {

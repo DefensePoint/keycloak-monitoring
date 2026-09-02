@@ -19,6 +19,13 @@ import (
 // starting.
 const createClientTimeout = 5 * time.Second
 
+// MetricsRecorder is a local interface for recording monitor metrics.
+// This decouples tenant from the concrete metrics implementation.
+type MetricsRecorder interface {
+	SetTenantMonitorUp(tenantID, tenantName string, up bool)
+	SetTenantMonitorsActive(n int)
+}
+
 // Logger is a local interface for logging.
 // This decouples tenant from the concrete logger implementation.
 type Logger interface {
@@ -50,7 +57,22 @@ type MonitorPoolManager struct {
 	realmRepo           RealmRepository
 	eventAlertConverter EventAlertConverter
 	healthAlertManager  HealthAlertManager
+	metrics             MetricsRecorder
 	mu                  sync.RWMutex
+}
+
+// SetMetrics attaches a metrics recorder for monitor up/down gauges.
+func (m *MonitorPoolManager) SetMetrics(r MetricsRecorder) {
+	m.metrics = r
+}
+
+// syncMonitorGauges refreshes the per-tenant gauge and the active-monitor total.
+func (m *MonitorPoolManager) syncMonitorGauges(tenantID, tenantName string, up bool) {
+	if m.metrics == nil {
+		return
+	}
+	m.metrics.SetTenantMonitorUp(tenantID, tenantName, up)
+	m.metrics.SetTenantMonitorsActive(m.GetActiveMonitorCount())
 }
 
 // NewMonitorPoolManager creates a new monitor pool manager
@@ -288,6 +310,7 @@ func (m *MonitorPoolManager) startMonitorForTenant(ctx context.Context, tenant *
 		cancel:  cancel,
 	}
 	m.monitors.Store(tenant.TenantID, instance)
+	m.syncMonitorGauges(tenant.TenantID, tenant.Name, true)
 
 	// Update tenant health status
 	_ = m.service.UpdateHealth(ctx, tenant.TenantID, "healthy", "Monitor started successfully")
@@ -340,6 +363,7 @@ func (m *MonitorPoolManager) stopMonitor(tenantID string, instance *monitorInsta
 
 	// Remove from map
 	m.monitors.Delete(tenantID)
+	m.syncMonitorGauges(tenantID, instance.tenant.Name, false)
 
 	m.logger.Info("Monitor stopped for tenant", "tenant_id", tenantID)
 	return nil

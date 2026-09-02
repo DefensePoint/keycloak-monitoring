@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -52,6 +54,17 @@ type DatabaseConfig struct {
 type HTTPConfig struct {
 	Server          HTTPServerConfig      `mapstructure:"server"`
 	SecurityHeaders SecurityHeadersConfig `mapstructure:"security_headers"`
+	Metrics         MetricsConfig         `mapstructure:"metrics"`
+}
+
+// MetricsConfig controls the Prometheus /metrics endpoint. The endpoint
+// exposes tenant names and infrastructure topology, so it must not be routed
+// through a public reverse proxy.
+type MetricsConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+
+	// AuthToken, when set, requires callers to present it as a bearer token.
+	AuthToken string `mapstructure:"auth_token"`
 }
 
 // HTTPServerConfig represents HTTP server configuration
@@ -170,13 +183,57 @@ type TenantConfig struct {
 }
 
 // AmfaTenantConfig represents AMFA integration configuration for a tenant.
-// When Enabled is true, the platform connects to the AMFA database described
-// here to fetch events and validate the schema version.
+// When Enabled is true, the platform reads this tenant's AMFA events either
+// through AMFA's read-only HTTP API (preferred) or by connecting directly to its
+// database (the original path, retained for deployments not yet upgraded).
+//
+// When both API and Database are configured, API wins: it needs no database
+// credentials and does not couple this platform to AMFA's schema.
 type AmfaTenantConfig struct {
 	Enabled               bool               `mapstructure:"enabled"`
 	EventsLookbackDays    int                `mapstructure:"events_lookback_days"`
 	ExpectedSchemaVersion string             `mapstructure:"expected_schema_version"`
+	API                   AmfaAPIConfig      `mapstructure:"api"`
 	Database              AmfaDatabaseConfig `mapstructure:"database"`
+}
+
+// AmfaAPIConfig represents AMFA read-only monitoring API settings for a tenant.
+//
+// No credentials appear here. Requests authenticate with a service-account token
+// obtained from the tenant's own Keycloak using the confidential client this
+// platform already uses for the Admin API, so there is nothing extra to store.
+type AmfaAPIConfig struct {
+	BaseURL string        `mapstructure:"base_url"`
+	Timeout time.Duration `mapstructure:"timeout"`
+}
+
+// Configured reports whether this tenant should read AMFA over HTTP.
+func (a *AmfaAPIConfig) Configured() bool {
+	return strings.TrimSpace(a.BaseURL) != ""
+}
+
+// Validate checks the API settings and applies defaults.
+func (a *AmfaAPIConfig) Validate() error {
+	a.BaseURL = strings.TrimRight(strings.TrimSpace(a.BaseURL), "/")
+
+	parsed, err := url.Parse(a.BaseURL)
+	if err != nil {
+		return fmt.Errorf("amfa.api.base_url is not a valid URL: %w", err)
+	}
+	// Checked here rather than left to the first request: a missing scheme or
+	// host produces a URL that parses cleanly but fails at every poll, and
+	// startup is where an operator will see the message.
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("amfa.api.base_url must use http or https, got %q", parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("amfa.api.base_url must include a host")
+	}
+
+	if a.Timeout == 0 {
+		a.Timeout = 30 * time.Second
+	}
+	return nil
 }
 
 // AmfaDatabaseConfig represents PostgreSQL connection settings for an AMFA tenant.
@@ -200,8 +257,26 @@ func (a *AmfaTenantConfig) Validate() error {
 	if !a.Enabled {
 		return nil
 	}
+
+	// The API path is preferred and needs no database settings, so validate it
+	// instead of them rather than as well as them. Requiring both would force
+	// every deployment to keep database credentials in config purely to satisfy
+	// validation, which is the thing moving to the API removes.
+	if a.API.Configured() {
+		if err := a.API.Validate(); err != nil {
+			return err
+		}
+		if a.EventsLookbackDays == 0 {
+			a.EventsLookbackDays = 30
+		}
+		if a.EventsLookbackDays > 90 {
+			a.EventsLookbackDays = 90
+		}
+		return nil
+	}
+
 	if a.Database.Host == "" {
-		return fmt.Errorf("amfa.database.host is required when amfa.enabled=true")
+		return fmt.Errorf("amfa requires either amfa.api.base_url or amfa.database.host when amfa.enabled=true")
 	}
 	if a.Database.Port == 0 {
 		a.Database.Port = 5432
@@ -412,11 +487,14 @@ type AmfaCheckerConfig struct {
 
 // AmfaCheckerChecksConfig holds the per-rule toggles and thresholds.
 type AmfaCheckerChecksConfig struct {
-	RiskRejected     PerEventCheckConfig  `mapstructure:"risk_rejected"`      // rule 1
-	RepeatedRisky    RepeatedRiskyConfig  `mapstructure:"repeated_risky"`     // rule 2
-	VPNRisky         PerEventCheckConfig  `mapstructure:"vpn_risky"`          // rule 3
-	LoginError       ThresholdCheckConfig `mapstructure:"login_error"`        // rule 4a
-	ClientLoginError ThresholdCheckConfig `mapstructure:"client_login_error"` // rule 4b
+	RiskRejected        PerEventCheckConfig  `mapstructure:"risk_rejected"`          // rule 1
+	RepeatedRisky       RepeatedRiskyConfig  `mapstructure:"repeated_risky"`         // rule 2
+	VPNRisky            PerEventCheckConfig  `mapstructure:"vpn_risky"`              // rule 3
+	LoginError          ThresholdCheckConfig `mapstructure:"login_error"`            // rule 4a
+	ClientLoginError    ThresholdCheckConfig `mapstructure:"client_login_error"`     // rule 4b
+	LoginErrorByClient  ThresholdCheckConfig `mapstructure:"login_error_by_client"`  // per-client login-error burst
+	RealmRejectBurst    ThresholdCheckConfig `mapstructure:"realm_reject_burst"`     // many distinct users rejected in a realm
+	LoginErrorByAccount ThresholdCheckConfig `mapstructure:"login_error_by_account"` // per-account login-error burst
 }
 
 // PerEventCheckConfig is the config shape for per-event rules (1 and 3) that
@@ -486,6 +564,24 @@ func (c *AmfaCheckerConfig) ApplyDefaults() {
 	}
 	if c.Checks.ClientLoginError.Window <= 0 {
 		c.Checks.ClientLoginError.Window = 5 * time.Minute
+	}
+	if c.Checks.LoginErrorByClient.Threshold <= 0 {
+		c.Checks.LoginErrorByClient.Threshold = 5
+	}
+	if c.Checks.LoginErrorByClient.Window <= 0 {
+		c.Checks.LoginErrorByClient.Window = 5 * time.Minute
+	}
+	if c.Checks.RealmRejectBurst.Threshold <= 0 {
+		c.Checks.RealmRejectBurst.Threshold = 10
+	}
+	if c.Checks.RealmRejectBurst.Window <= 0 {
+		c.Checks.RealmRejectBurst.Window = 10 * time.Minute
+	}
+	if c.Checks.LoginErrorByAccount.Threshold <= 0 {
+		c.Checks.LoginErrorByAccount.Threshold = 5
+	}
+	if c.Checks.LoginErrorByAccount.Window <= 0 {
+		c.Checks.LoginErrorByAccount.Window = 5 * time.Minute
 	}
 }
 

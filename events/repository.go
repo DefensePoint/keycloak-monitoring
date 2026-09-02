@@ -15,8 +15,10 @@ type ListOptions struct {
 	// Source filters rows whose source contains this substring.
 	Source string
 	// Sources, when non-empty, takes precedence over Source and matches rows
-	// whose source contains ANY of the given substrings (OR of LIKEs). Used by
-	// the unified Events view to select keycloak:<realm> and amfa:<realm>.
+	// whose source is exactly one of the given values (SQL IN). Used to scope a
+	// query to a closed set of sources such as a tenant's keycloak:<realm> and
+	// amfa:<realm> feeds; exact matching keeps one tenant's realms from matching
+	// another tenant's prefix-sharing realm names.
 	Sources   []string
 	StartTime *string
 	EndTime   *string
@@ -39,26 +41,34 @@ type Repository interface {
 	// CountWithFilter returns the count of events matching the filter criteria.
 	CountWithFilter(ctx context.Context, opts *ListOptions) (int64, error)
 
-	// LatestTimestampBySource returns the newest event timestamp among rows with
-	// an exactly matching source (e.g. "amfa:MyRealm"). Returns the zero time
-	// when no such rows exist. Used by mirrors to derive their watermark.
-	LatestTimestampBySource(ctx context.Context, source string) (time.Time, error)
+	// AmfaMirrorWatermark returns the AMFA events mirror's recorded read
+	// position for one (tenant, realm), or the zero time when none is recorded.
+	// Scoped by tenant because realm names are unique per-tenant, not globally.
+	AmfaMirrorWatermark(ctx context.Context, tenantID, realm string) (time.Time, error)
 
-	// MergeKeycloakEvent saves a Keycloak-sourced event, first absorbing a
-	// pre-existing standalone AMFA row that shares the same amfa_event_id
-	// (AMFA arrived first): its AMFA fields are folded onto this event and the
-	// standalone row is removed, so one canonical Keycloak row remains.
-	// Falls back to a normal upsert when there is no such AMFA row.
+	// SaveAmfaMirrorWatermark records the mirror's read position for one
+	// (tenant, realm). Monotonic: an older position never replaces a newer one.
+	SaveAmfaMirrorWatermark(ctx context.Context, tenantID, realm string, eventTime time.Time) error
+
+	// MergeKeycloakEvent saves a Keycloak-sourced event as its own row via a
+	// plain upsert. It does NOT inline-absorb a pre-existing standalone AMFA
+	// row that shares the same amfa_event_id — that convergence is handled
+	// separately and asynchronously by ReconcileAMFAMerges, so a login whose
+	// AMFA half arrived first may briefly exist as two rows until the next
+	// reconcile sweep.
 	MergeKeycloakEvent(ctx context.Context, event *domain.Event) error
 
-	// MergeAmfaEvent enriches an existing Keycloak row that shares the
-	// amfa_event_id (AMFA arrived second), writing the AMFA fields onto it and
-	// returning without inserting. When no Keycloak twin exists (AMFA-only, or
-	// AMFA arrived first) it inserts a standalone AMFA row.
+	// MergeAmfaEvent saves an AMFA-sourced event as its own row via a plain
+	// upsert. It does NOT check for or write onto an existing Keycloak twin —
+	// that convergence is handled separately and asynchronously by
+	// ReconcileAMFAMerges, so a login whose Keycloak half arrived first may
+	// briefly exist as two rows until the next reconcile sweep.
 	MergeAmfaEvent(ctx context.Context, event *domain.Event) error
 
 	// ReconcileAMFAMerges converges standalone AMFA rows onto their Keycloak
-	// twin (matched by amfa_event_id) and soft-deletes the absorbed AMFA rows.
-	// Idempotent and order-independent; returns the number of rows absorbed.
+	// twin (matched by amfa_event_id) by copying the AMFA-owned fields onto
+	// the Keycloak row, then hard-deletes the absorbed AMFA rows. Idempotent
+	// and order-independent; returns the number of rows absorbed. AMFA-only
+	// events (no Keycloak twin) are left untouched.
 	ReconcileAMFAMerges(ctx context.Context) (int64, error)
 }

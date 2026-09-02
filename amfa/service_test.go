@@ -43,6 +43,15 @@ func (s *stubRepo) CountByEventTypeInWindow(_ context.Context, _, _ string, _, _
 func (s *stubRepo) ListEventsSince(_ context.Context, _ string, _ time.Time, _ int) ([]EventRow, error) {
 	return nil, nil
 }
+func (s *stubRepo) CountByEventTypeAndClientInWindow(_ context.Context, _, _ string, _, _ time.Time, _ int) ([]ClientEventCount, error) {
+	return nil, nil
+}
+func (s *stubRepo) CountDistinctRejectedUsersSince(_ context.Context, _ string, _ time.Time) (int64, error) {
+	return 0, nil
+}
+func (s *stubRepo) CountByEventTypeByUser(_ context.Context, _, _ string, _ time.Time, _ int) ([]UserRiskyCount, error) {
+	return nil, nil
+}
 
 // stubKCClient is a minimal KeycloakClient for service-level tests; declared
 // here to avoid coupling to enrichment_test.go (Go test files in the same

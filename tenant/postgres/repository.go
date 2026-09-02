@@ -225,13 +225,30 @@ func (r *Repository) convertTenant(db *database.KeycloakTenant) (*domain.Keycloa
 		LastError:         db.LastError,
 		LastErrorAt:       db.LastErrorAt,
 		IsDefault:         db.IsDefault,
+		IsConfigDefined:   db.IsConfigDefined,
 		Tags:              tags,
 		Owner:             db.Owner,
 		InfinispanEnabled: db.InfinispanEnabled,
 		InfinispanPort:    db.InfinispanPort,
+		Amfa:              amfaFromDB(db),
 		CreatedAt:         db.CreatedAt,
 		UpdatedAt:         db.UpdatedAt,
 	}, nil
+}
+
+// amfaFromDB returns the tenant's AMFA settings, or nil when the tenant has
+// none. Nil rather than a zeroed struct: an absent block and a disabled one
+// mean different things to the registry.
+func amfaFromDB(db *database.KeycloakTenant) *domain.TenantAmfa {
+	if !db.AmfaEnabled && db.AmfaAPIBaseURL == "" {
+		return nil
+	}
+	return &domain.TenantAmfa{
+		Enabled:            db.AmfaEnabled,
+		APIBaseURL:         db.AmfaAPIBaseURL,
+		EventsLookbackDays: db.AmfaEventsLookback,
+		APITimeoutSeconds:  db.AmfaAPITimeoutSecond,
+	}
 }
 
 // convertTenantList converts a list of database tenants to domain tenants. A
@@ -282,7 +299,7 @@ func (r *Repository) convertToDBTenant(t *domain.KeycloakTenant) (*database.Keyc
 		clientSecret = encrypted
 	}
 
-	return &database.KeycloakTenant{
+	out := &database.KeycloakTenant{
 		ID:                t.ID,
 		TenantID:          t.TenantID,
 		Name:              t.Name,
@@ -300,13 +317,21 @@ func (r *Repository) convertToDBTenant(t *domain.KeycloakTenant) (*database.Keyc
 		LastError:         t.LastError,
 		LastErrorAt:       t.LastErrorAt,
 		IsDefault:         t.IsDefault,
+		IsConfigDefined:   t.IsConfigDefined,
 		Tags:              tagsJSON,
 		Owner:             t.Owner,
 		InfinispanEnabled: t.InfinispanEnabled,
 		InfinispanPort:    t.InfinispanPort,
 		CreatedAt:         t.CreatedAt,
 		UpdatedAt:         t.UpdatedAt,
-	}, nil
+	}
+	if t.Amfa != nil {
+		out.AmfaEnabled = t.Amfa.Enabled
+		out.AmfaAPIBaseURL = t.Amfa.APIBaseURL
+		out.AmfaEventsLookback = t.Amfa.EventsLookbackDays
+		out.AmfaAPITimeoutSecond = t.Amfa.APITimeoutSeconds
+	}
+	return out, nil
 }
 
 // Ensure Repository implements tenant.Repository

@@ -9,6 +9,7 @@ import (
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/metrics"
 )
 
 // Service defines the interface for notification operations.
@@ -47,6 +48,23 @@ type service struct {
 	slack   Notifier
 	gitlab  Notifier
 	enabled bool
+	metrics metrics.Recorder
+}
+
+// SetMetrics attaches a metrics recorder. Passing nil installs a no-op recorder.
+func (s *service) SetMetrics(r metrics.Recorder) {
+	if r == nil {
+		r = metrics.NopRecorder{}
+	}
+	s.metrics = r
+}
+
+// recorder returns the configured recorder, falling back to a no-op.
+func (s *service) recorder() metrics.Recorder {
+	if s.metrics == nil {
+		return metrics.NopRecorder{}
+	}
+	return s.metrics
 }
 
 // NewService creates a new notification service.
@@ -285,8 +303,11 @@ func (s *service) sendToChannel(ctx context.Context, alert *domain.Alert, notifi
 				logger.Str("channel", channel),
 				logger.Err(logErr))
 		}
+		s.recorder().IncNotification(channel, "failure")
 		return fmt.Errorf("notification failed: %w", err)
 	}
+
+	s.recorder().IncNotification(channel, "success")
 
 	// Log successful notification
 	if err := s.logNotificationAttempt(ctx, alert, channel, externalID, StatusSent.String(), ""); err != nil {

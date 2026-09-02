@@ -330,11 +330,11 @@ The AMFA repository tests (`amfa/postgres/repository_integration_test.go`) execu
 
 ```bash
 # Bring up AMFA (Postgres + Redis + adaptive_auth, which applies alembic migrations on boot)
-cd ../point-adaptive-authentication
+cd ../adaptive-mfa
 docker compose -f docker-compose.local.yml up -d postgres adaptive_auth
 
 # Wait ~10s for migrations, then verify the schema is in:
-docker exec point-adaptive-authentication-postgres-1 \
+docker exec adaptive-mfa-postgres-1 \
   psql -U keycloak -d adaptive_mfa -c "\dt"
 # Should list: alembic_version, auth_context, auth_event, auth_process,
 #              decision_params_config, device, location_network
@@ -362,7 +362,7 @@ docker run --rm \
 **Teardown:**
 
 ```bash
-cd ../point-adaptive-authentication
+cd ../adaptive-mfa
 docker compose -f docker-compose.local.yml stop
 ```
 

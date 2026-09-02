@@ -54,7 +54,7 @@ interface EventStats {
   total: number
   byType: Record<string, number>
   byRealm: Record<string, number>
-  timeline: TimelinePoint[]
+  timeline: TimelineBucket[]
 }
 ```
 

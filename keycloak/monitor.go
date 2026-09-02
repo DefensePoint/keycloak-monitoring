@@ -6,9 +6,11 @@ import (
 	"strconv"
 	"time"
 
+	eventsource "repos.defensepoint.com/iam/oss-pmt/kmt/events"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/metrics"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/keycloakadmin"
 )
 
@@ -34,6 +36,9 @@ type Monitor struct {
 
 	// Health alert manager
 	healthAlertManager HealthAlertManager
+
+	// Metrics recorder (never nil; NopRecorder when metrics are disabled)
+	metrics metrics.Recorder
 
 	// Optional: keeps the tenant record's health_status current (best-effort).
 	healthUpdater TenantHealthUpdater
@@ -134,6 +139,24 @@ func (m *Monitor) Stop() error {
 }
 
 // pollEvents periodically fetches and stores Keycloak events
+// SetMetrics attaches a metrics recorder. Passing nil installs a no-op
+// recorder so call sites never need a nil check.
+func (m *Monitor) SetMetrics(r metrics.Recorder) {
+	if r == nil {
+		r = metrics.NopRecorder{}
+	}
+	m.metrics = r
+}
+
+// recorder returns the configured recorder, falling back to a no-op when the
+// monitor was constructed without one.
+func (m *Monitor) recorder() metrics.Recorder {
+	if m.metrics == nil {
+		return metrics.NopRecorder{}
+	}
+	return m.metrics
+}
+
 func (m *Monitor) pollEvents(ctx context.Context) {
 	ticker := time.NewTicker(m.instanceConfig.Polling.EventsInterval)
 	defer ticker.Stop()
@@ -160,6 +183,11 @@ func (m *Monitor) pollEvents(ctx context.Context) {
 
 // collectEvents fetches and stores events from Keycloak
 func (m *Monitor) collectEvents(ctx context.Context) {
+	start := time.Now()
+	defer func() {
+		m.recorder().ObservePollCycle(m.tenantID, "events", time.Since(start))
+	}()
+
 	m.logger.Info("🔍 [DEBUG] Starting event collection cycle",
 		logger.Str("tenant_id", m.tenantID),
 		logger.Str("tenant_name", m.tenantName))
@@ -264,9 +292,9 @@ func (m *Monitor) collectEvents(ctx context.Context) {
 				Category:     "authentication",
 				Severity:     severity,
 				Description:  description,
-				Source:       fmt.Sprintf("keycloak:%s", realmName),
+				Source:       eventsource.SourceForKeycloakRealm(realmName),
 				SourceIP:     event.IPAddress,
-				SourceSystem: "keycloak",
+				SourceSystem: eventsource.SourceSystemKeycloak,
 				UserID:       event.UserID,
 				Username:     username,
 				Email:        email,
@@ -298,6 +326,7 @@ func (m *Monitor) collectEvents(ctx context.Context) {
 			logger.Int("count", len(keycloakEvents)))
 
 		if err := m.eventRepo.SaveEvents(ctx, keycloakEvents); err != nil {
+			m.recorder().IncPollCycleError(m.tenantID, "events")
 			m.logger.Error("❌ [DEBUG] Failed to save Keycloak events to database",
 				logger.Str("tenant_id", m.tenantID),
 				logger.Str("realm", realmName),
@@ -305,6 +334,8 @@ func (m *Monitor) collectEvents(ctx context.Context) {
 				logger.Err(err))
 			continue
 		}
+
+		m.recorder().AddEventsCollected(m.tenantID, realmName, len(keycloakEvents))
 
 		m.logger.Info("✅ [DEBUG] Keycloak events saved successfully to keycloak_events table",
 			logger.Str("tenant_id", m.tenantID),
@@ -380,6 +411,11 @@ func (m *Monitor) pollMetrics(ctx context.Context) {
 
 // collectMetrics fetches and stores metrics from Keycloak
 func (m *Monitor) collectMetrics(ctx context.Context) {
+	start := time.Now()
+	defer func() {
+		m.recorder().ObservePollCycle(m.tenantID, "metrics", time.Since(start))
+	}()
+
 	m.logger.Debug("Collecting Keycloak metrics")
 
 	realms := m.getRealmsToMonitor(ctx)
@@ -490,6 +526,11 @@ func (m *Monitor) pollHealth(ctx context.Context) {
 
 // collectHealth performs health check and stores result
 func (m *Monitor) collectHealth(ctx context.Context) {
+	start := time.Now()
+	defer func() {
+		m.recorder().ObservePollCycle(m.tenantID, "health", time.Since(start))
+	}()
+
 	m.logger.Debug("Performing Keycloak health check")
 
 	healthMetrics := m.client.GetHealthMetrics(ctx)
@@ -588,6 +629,11 @@ func (m *Monitor) pollRealmInfo(ctx context.Context) {
 
 // collectRealmInfo fetches and stores realm information
 func (m *Monitor) collectRealmInfo(ctx context.Context) {
+	start := time.Now()
+	defer func() {
+		m.recorder().ObservePollCycle(m.tenantID, "realm_info", time.Since(start))
+	}()
+
 	m.logger.Debug("Collecting realm information")
 
 	var realms []*keycloakadmin.RealmRepresentation

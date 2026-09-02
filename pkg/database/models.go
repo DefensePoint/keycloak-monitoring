@@ -181,6 +181,10 @@ type KeycloakTenant struct {
 	// Default tenant (only one tenant can be default at a time)
 	IsDefault bool `gorm:"default:false;index"` // Whether this is the default tenant
 
+	// Config-defined tenants are managed exclusively via config.yaml + restart;
+	// set only by the bootstrap config-sync path, never via the public API.
+	IsConfigDefined bool `gorm:"default:false;index"`
+
 	// Metadata
 	Tags  string `gorm:"type:text"` // JSON array of tags for organization
 	Owner string // Owner/team responsible for this tenant
@@ -188,6 +192,18 @@ type KeycloakTenant struct {
 	// High Availability
 	InfinispanEnabled bool `gorm:"default:false"` // Whether this tenant has InfiniSpan enabled
 	InfinispanPort    int  `gorm:"default:0"`     // Port for InfiniSpan metrics (0 = use same port as server_url)
+
+	// AMFA integration. Only the API endpoint is stored: reading AMFA over its
+	// HTTP API needs no database credentials, and a tenant form must never ask
+	// for a database host and password.
+	// No index: this column is never used in a SQL WHERE/ORDER BY (only
+	// compared in Go after the row is loaded), and it's low-cardinality, so an
+	// index would add write overhead on every tenant insert/update with no
+	// matching read benefit.
+	AmfaEnabled          bool   `gorm:"default:false"`
+	AmfaAPIBaseURL       string `gorm:"size:512"`
+	AmfaEventsLookback   int    `gorm:"default:0"` // Days; 0 applies the platform default
+	AmfaAPITimeoutSecond int    `gorm:"default:0"` // 0 applies the platform default
 }
 
 // TableName specifies the table name for KeycloakTenant.
@@ -776,4 +792,29 @@ type PendingTenantPurge struct {
 // TableName specifies the table name for PendingTenantPurge.
 func (PendingTenantPurge) TableName() string {
 	return "pending_tenant_purges"
+}
+
+// AmfaMirrorWatermark records how far the AMFA events mirror has read for one
+// (tenant, realm) pair, so a restart resumes where it left off.
+//
+// The mirror used to re-derive this from the events table with
+// MAX(timestamp) WHERE source = 'amfa:<realm>'. That was wrong twice over.
+// The events table has no tenant column and a source string is only
+// "amfa:<realm>", while realm names are unique per-tenant rather than globally
+// (see KeycloakRealmInfo.TenantID), so two tenants monitoring a realm of the
+// same name shared one watermark and whichever polled second skipped its own
+// older events for good. It was also derived from rows that
+// ReconcileAMFAMerges deletes once they merge onto their Keycloak twin, so the
+// value could go backwards or vanish. Keying the position on (tenant, realm)
+// here removes both problems.
+type AmfaMirrorWatermark struct {
+	TenantID  string    `gorm:"primaryKey;size:100"`
+	Realm     string    `gorm:"primaryKey;size:255"`
+	EventTime time.Time `gorm:"not null"`
+	UpdatedAt time.Time
+}
+
+// TableName specifies the table name for AmfaMirrorWatermark.
+func (AmfaMirrorWatermark) TableName() string {
+	return "amfa_mirror_watermarks"
 }

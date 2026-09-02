@@ -2,12 +2,18 @@ package rbac
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
 )
+
+// ErrAdminRoleTenantScoped is returned when an admin role assignment carries a
+// tenant scope. The administrator role is global-only: a tenant-scoped admin
+// grant would otherwise be treated as a platform administrator.
+var ErrAdminRoleTenantScoped = errors.New("admin role cannot be assigned with a tenant scope; the administrator role is global-only")
 
 // Service defines the interface for RBAC operations.
 type Service interface {
@@ -91,7 +97,7 @@ func (s *service) HasAccessToTenant(ctx context.Context, userID uint, tenantID s
 	}
 
 	for _, userRole := range roles {
-		if userRole.Role != nil && userRole.Role.Name == RoleAdmin {
+		if userRole.Role != nil && userRole.Role.Name == RoleAdmin && userRole.TenantID == nil {
 			return true, nil
 		}
 	}
@@ -107,7 +113,7 @@ func (s *service) HasAccessToRealm(ctx context.Context, userID uint, tenantID, r
 	}
 
 	for _, userRole := range roles {
-		if userRole.Role != nil && userRole.Role.Name == RoleAdmin {
+		if userRole.Role != nil && userRole.Role.Name == RoleAdmin && userRole.TenantID == nil {
 			return true, nil
 		}
 	}
@@ -138,6 +144,10 @@ func (s *service) AssignRoleToUser(ctx context.Context, userID, roleID uint, ten
 	}
 	if role == nil {
 		return fmt.Errorf("role not found")
+	}
+
+	if role.Name == RoleAdmin && tenantID != nil {
+		return ErrAdminRoleTenantScoped
 	}
 
 	userRole := &domain.UserRole{
@@ -342,16 +352,26 @@ func (s *service) ListPermissions(ctx context.Context, resource string) ([]*doma
 	return s.permissionRepo.ListPermissions(ctx, resource)
 }
 
-// IsAdmin checks if a user is admin.
+// IsAdmin reports whether a user is a platform administrator. Only a global
+// (non-tenant-scoped) admin grant that has not expired confers platform admin;
+// a tenant-scoped admin assignment must never be treated as global.
 func (s *service) IsAdmin(ctx context.Context, userID uint) (bool, error) {
 	roles, err := s.userRoleRepo.GetUserRoles(ctx, userID)
 	if err != nil {
 		return false, err
 	}
+	now := time.Now()
 	for _, userRole := range roles {
-		if userRole.Role != nil && userRole.Role.Name == RoleAdmin {
-			return true, nil
+		if userRole.Role == nil || userRole.Role.Name != RoleAdmin {
+			continue
 		}
+		if userRole.TenantID != nil {
+			continue
+		}
+		if userRole.ExpiresAt != nil && !userRole.ExpiresAt.After(now) {
+			continue
+		}
+		return true, nil
 	}
 	return false, nil
 }

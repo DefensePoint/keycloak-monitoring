@@ -45,6 +45,7 @@ func TestKeycloakAdapter_PassesThroughUser(t *testing.T) {
 	}
 	if u == nil {
 		t.Fatal("expected non-nil user")
+		return
 	}
 	if u.Username == nil || *u.Username != "alice" {
 		t.Errorf("Username = %v, want alice", u.Username)

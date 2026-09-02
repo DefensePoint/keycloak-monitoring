@@ -137,6 +137,15 @@ func (nopRepository) CountByEventTypeInWindow(_ context.Context, _, _ string, _,
 func (nopRepository) ListEventsSince(_ context.Context, _ string, _ time.Time, _ int) ([]EventRow, error) {
 	return nil, nil
 }
+func (nopRepository) CountByEventTypeAndClientInWindow(_ context.Context, _, _ string, _, _ time.Time, _ int) ([]ClientEventCount, error) {
+	return nil, nil
+}
+func (nopRepository) CountDistinctRejectedUsersSince(_ context.Context, _ string, _ time.Time) (int64, error) {
+	return 0, nil
+}
+func (nopRepository) CountByEventTypeByUser(_ context.Context, _, _ string, _ time.Time, _ int) ([]UserRiskyCount, error) {
+	return nil, nil
+}
 
 // nopService is a no-op stub used to verify the Service interface compiles.
 type nopService struct{}
