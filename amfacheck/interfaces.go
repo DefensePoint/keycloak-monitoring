@@ -2,7 +2,7 @@
 // It deliberately mirrors the shape of the eventscheck package: one per-tenant
 // poll loop running a set of Check implementations whose alerts flow through
 // the existing alerts repository and notification fan-out. It is a sibling of
-// eventscheck rather than a refactor of it - see docs/superpowers/specs.
+// eventscheck rather than a refactor of it.
 package amfacheck
 
 import (

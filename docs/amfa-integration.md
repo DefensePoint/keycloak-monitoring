@@ -242,7 +242,7 @@ SQL
 
 ## Seeding demo data for UI development
 
-For development / UI work without waiting for real AMFA traffic, the spec repository ships an example seed script that populates ~40 synthetic `auth_process` rows + ~55 events across 10 cities, mixed risk levels, mixed event types, with some events in the last 24h. See `docs/superpowers/plans/2026-05-26-amfa-events.md` § Demo data, or use the simpler approach:
+For development / UI work without waiting for real AMFA traffic, seed a few synthetic `auth_process` rows and events directly:
 
 ```sql
 -- Insert one realistic record set:
@@ -274,7 +274,7 @@ In the current implementation, AMFA event enrichment with Keycloak usernames/ema
 1. Expose a per-tenant Keycloak admin client lookup function to `internal/fx/amfa.go` (small refactor of `internal/fx/monitoring.go`'s `MonitorPoolManager`).
 2. Or construct a dedicated process-scope admin client for AMFA in `internal/fx/amfa.go`.
 
-The UUID-only fallback is documented in the spec at `docs/superpowers/specs/2026-05-26-amfa-events-design.md` §14 (risks) and the spec's design contemplates this path.
+The UUID-only fallback is a deliberate degraded mode, not a bug: enrichment quality drops, correctness does not.
 
 ## Alerts
 
@@ -466,10 +466,3 @@ docker compose -f deployments/local/docker-compose.yml up -d --force-recreate ap
 ```
 
 > Disk note: rebuilding the server image generates a large Docker build cache. If a build or a database container starts failing with "No space left on device", reclaim it with `docker builder prune -af`.
-
-## Reference
-
-- AMFA Events design spec: [`docs/superpowers/specs/2026-05-26-amfa-events-design.md`](superpowers/specs/2026-05-26-amfa-events-design.md)
-- AMFA Events implementation plan: [`docs/superpowers/plans/2026-05-26-amfa-events.md`](superpowers/plans/2026-05-26-amfa-events.md)
-- AMFA Risk Alerts design spec: [`docs/superpowers/specs/2026-06-02-amfa-risk-alerts-design.md`](superpowers/specs/2026-06-02-amfa-risk-alerts-design.md)
-- AMFA Risk Alerts implementation plan: [`docs/superpowers/plans/2026-06-02-amfa-risk-alerts.md`](superpowers/plans/2026-06-02-amfa-risk-alerts.md)
