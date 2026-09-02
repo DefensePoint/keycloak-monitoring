@@ -34,6 +34,7 @@ import {
   useAmfaGeo,
   useAmfaRealms,
   useSessionStorage,
+  isAllRealmsUnsupportedError,
 } from "@/shared/hooks";
 import {
   RealmSelector,
@@ -44,6 +45,7 @@ import {
   RiskBadge,
   AmfaKpiRow,
   AmfaGeoMap,
+  AlertBanner,
 } from "@/shared/components";
 import { Refresh } from "@mui/icons-material";
 import { MRT_OPTIONS_WITH_TOOLBAR } from "@/shared/constants";
@@ -158,12 +160,16 @@ export function EventsPage() {
 
   // AMFA KPI counters for the selected realm. AMFA stats are per-realm, so the
   // strip only populates once a specific realm is chosen (dashes for "all").
-  const { data: amfaStats } = useAmfaStats({
+  // Some AMFA transports can't aggregate across all realms and return a 501;
+  // surface that as an explanatory banner instead of unexplained dashes.
+  const { data: amfaStats, error: amfaStatsError } = useAmfaStats({
     tenantId: selectedTenant?.tenant_id,
     realm: selectedRealm !== "all" ? selectedRealm : undefined,
     startTime,
     endTime,
   });
+  const amfaAllRealmsUnsupported =
+    selectedRealm === "all" && isAllRealmsUnsupportedError(amfaStatsError);
 
   // AMFA geo buckets for the login map. The /amfa/geo endpoint is per-realm, and
   // the map only renders for a specific AMFA-enabled realm, so gate the query on
@@ -435,8 +441,19 @@ export function EventsPage() {
       </PageHeader>
 
       {/* AMFA KPI strip: only for AMFA-enabled realms (or "all" when any realm
-          uses AMFA). Empty/dashes when a specific AMFA realm has no data yet. */}
-      {showAmfaSections && <AmfaKpiRow stats={amfaStats} />}
+          uses AMFA). Empty/dashes when a specific AMFA realm has no data yet.
+          When "All Realms" is selected on a tenant whose AMFA transport can't
+          aggregate across realms, explain that instead of showing dashes. */}
+      {showAmfaSections &&
+        (amfaAllRealmsUnsupported ? (
+          <AlertBanner
+            severity="info"
+            message="This tenant's AMFA integration doesn't support aggregating stats across all realms. Select a specific realm to see AMFA metrics."
+            sx={{ mb: 3 }}
+          />
+        ) : (
+          <AmfaKpiRow stats={amfaStats} />
+        ))}
 
       {/* Material React Table */}
       <FeatureErrorBoundary
@@ -794,7 +811,8 @@ export function EventsPage() {
                     </Typography>
                   </Box>
                 )}
-                {selectedEvent.amfa_event_id && (
+                {(selectedEvent.amfa_event_id ||
+                  selectedEvent.risk_level != null) && (
                   <Box
                     sx={{
                       borderTop: 1,
@@ -847,25 +865,29 @@ export function EventsPage() {
                         </Typography>
                       </Box>
                     )}
-                    <Box>
-                      <Typography
-                        variant="caption"
-                        sx={{
-                          textTransform: "uppercase",
-                          letterSpacing: "0.05em",
-                          color: "text.secondary",
-                        }}
-                      >
-                        VPN
-                      </Typography>
-                      <Box sx={{ mt: 0.5 }}>
-                        <Chip
-                          label={selectedEvent.is_vpn ? "VPN detected" : "No VPN"}
-                          color={selectedEvent.is_vpn ? "warning" : "default"}
-                          size="small"
-                        />
+                    {selectedEvent.is_vpn != null && (
+                      <Box>
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            textTransform: "uppercase",
+                            letterSpacing: "0.05em",
+                            color: "text.secondary",
+                          }}
+                        >
+                          VPN
+                        </Typography>
+                        <Box sx={{ mt: 0.5 }}>
+                          <Chip
+                            label={
+                              selectedEvent.is_vpn ? "VPN detected" : "No VPN"
+                            }
+                            color={selectedEvent.is_vpn ? "warning" : "default"}
+                            size="small"
+                          />
+                        </Box>
                       </Box>
-                    </Box>
+                    )}
                     {selectedEvent.country && (
                       <Box>
                         <Typography
