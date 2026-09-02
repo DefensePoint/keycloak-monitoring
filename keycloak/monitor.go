@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	eventsource "repos.defensepoint.com/iam/oss-pmt/kmt/events"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
@@ -291,9 +292,9 @@ func (m *Monitor) collectEvents(ctx context.Context) {
 				Category:     "authentication",
 				Severity:     severity,
 				Description:  description,
-				Source:       fmt.Sprintf("keycloak:%s", realmName),
+				Source:       eventsource.SourceForKeycloakRealm(realmName),
 				SourceIP:     event.IPAddress,
-				SourceSystem: "keycloak",
+				SourceSystem: eventsource.SourceSystemKeycloak,
 				UserID:       event.UserID,
 				Username:     username,
 				Email:        email,

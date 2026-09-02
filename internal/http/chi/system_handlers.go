@@ -82,7 +82,7 @@ func (h *SystemHandlers) tenantEventSources(ctx context.Context, tenantID, reque
 		if realm == nil || realm.RealmName == "" {
 			continue
 		}
-		allowed = append(allowed, "keycloak:"+realm.RealmName, "amfa:"+realm.RealmName)
+		allowed = append(allowed, events.SourcesForRealm(realm.RealmName)...)
 	}
 
 	if requestedSource == "" {

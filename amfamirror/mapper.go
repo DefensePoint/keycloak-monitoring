@@ -6,12 +6,13 @@ import (
 	"strings"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/events"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
 )
 
 const (
 	// SourceSystem marks mirrored rows in the events table.
-	SourceSystem = "amfa"
+	SourceSystem = events.SourceSystemAmfa
 	// eventIDPrefix namespaces AMFA event IDs inside the events table's global
 	// event_id unique index. Internal only: the UI never displays it.
 	eventIDPrefix = "amfa-"
@@ -20,7 +21,7 @@ const (
 // SourceForRealm returns the events-table source value for a realm,
 // e.g. "amfa:MyRealm".
 func SourceForRealm(realm string) string {
-	return SourceSystem + ":" + realm
+	return events.SourceForAmfaRealm(realm)
 }
 
 // ToDomainEvent flattens one AMFA event row into a platform domain.Event.

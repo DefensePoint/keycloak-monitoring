@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"repos.defensepoint.com/iam/oss-pmt/kmt/events"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
 )
@@ -69,7 +70,7 @@ func (s *service) tenantEventSources(ctx context.Context, tenantID string) ([]st
 		if realm == nil || realm.RealmName == "" {
 			continue
 		}
-		sources = append(sources, "keycloak:"+realm.RealmName, "amfa:"+realm.RealmName)
+		sources = append(sources, events.SourcesForRealm(realm.RealmName)...)
 	}
 	return sources, nil
 }
