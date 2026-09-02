@@ -194,7 +194,7 @@ func TestNewAmfaRepository_PrefersAPIWhenConfigured(t *testing.T) {
 	// credentials and does not couple this platform to AMFA's schema.
 	tcfg := amfaAPITenant("https://amfa.internal")
 	tcfg.Amfa.Database = config.AmfaDatabaseConfig{
-		Host: "amfa-db", Database: "adaptive_mfa", User: "point_ro",
+		Host: "amfa-db", Database: "adaptive_mfa", User: "kmt_ro",
 	}
 	if err := tcfg.Amfa.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)

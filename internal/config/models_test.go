@@ -528,7 +528,7 @@ func TestAmfaTenantValidateStillAcceptsDatabaseOnly(t *testing.T) {
 	cfg := AmfaTenantConfig{
 		Enabled: true,
 		Database: AmfaDatabaseConfig{
-			Host: "amfa-db", Database: "adaptive_mfa", User: "point_ro",
+			Host: "amfa-db", Database: "adaptive_mfa", User: "kmt_ro",
 		},
 	}
 	if err := cfg.Validate(); err != nil {
