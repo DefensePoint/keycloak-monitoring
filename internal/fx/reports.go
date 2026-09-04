@@ -41,6 +41,7 @@ func (a *eventListerAdapter) List(ctx context.Context, opts *reports.EventListOp
 		Offset:    opts.Offset,
 		StartTime: opts.StartTime,
 		EndTime:   opts.EndTime,
+		TenantID:  opts.TenantID,
 		Sources:   opts.Sources,
 	}
 

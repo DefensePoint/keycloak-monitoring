@@ -12,6 +12,10 @@ import (
 type ListOptions struct {
 	Limit  int
 	Offset int
+	// TenantID scopes the query to one tenant's rows. This is the isolation
+	// boundary; Source/Sources only narrow within it. Empty means unscoped, so
+	// every caller serving a tenant-facing surface must set it.
+	TenantID string
 	// Source filters rows whose source contains this substring.
 	Source string
 	// Sources, when non-empty, takes precedence over Source and matches rows

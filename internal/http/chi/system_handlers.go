@@ -228,9 +228,10 @@ func (h *SystemHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	opts := &events.ListOptions{
-		Limit:   limit,
-		Offset:  offset,
-		Sources: sources,
+		Limit:    limit,
+		Offset:   offset,
+		TenantID: tenantID,
+		Sources:  sources,
 	}
 
 	if startTime != "" {
@@ -310,7 +311,8 @@ func (h *SystemHandlers) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	opts := &events.ListOptions{
-		Sources: sources,
+		TenantID: tenantID,
+		Sources:  sources,
 	}
 
 	if startTime != "" {

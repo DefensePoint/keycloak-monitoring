@@ -14,8 +14,23 @@ type Event struct {
 	UpdatedAt time.Time
 	DeletedAt gorm.DeletedAt `gorm:"index"`
 
+	// TenantID identifies which monitored Keycloak instance this row belongs
+	// to. Every writer knows it: the Keycloak monitor and the AMFA mirror are
+	// both constructed per tenant.
+	//
+	// Rows written before this column existed carry '' (the column default),
+	// meaning "owner unknown". Those are excluded from every tenant-scoped
+	// query, because equality against a real tenant id never matches ''. They
+	// are also the reason tenant deletion could not previously remove a
+	// tenant's events: there was nothing to delete by.
+	TenantID string `gorm:"index;uniqueIndex:idx_events_tenant_event,priority:1;default:''"`
+
 	// Event identification
-	EventID   string    `gorm:"uniqueIndex;not null"`
+	//
+	// event_id is unique per tenant, not globally: two tenants pointed at the
+	// same Keycloak see the same event ids, and a global unique index made them
+	// silently overwrite each other's rows.
+	EventID   string    `gorm:"not null;uniqueIndex:idx_events_tenant_event,priority:2"`
 	Timestamp time.Time `gorm:"index;not null"`
 
 	// Event classification

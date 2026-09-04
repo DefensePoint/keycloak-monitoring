@@ -36,7 +36,9 @@ func (r *Repository) Save(ctx context.Context, event *domain.Event) error {
 	dbEvent := toDBEvent(event)
 	// Use GORM's Clauses for upsert (ON CONFLICT DO UPDATE)
 	result := r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "event_id"}},
+		// event_id is unique per tenant, so the conflict target must name
+		// both columns or the upsert will not find the existing row.
+		Columns: []clause.Column{{Name: "tenant_id"}, {Name: "event_id"}},
 		// NOTE: the AMFA value columns (final_status, is_vpn, country, lat, long,
 		// raw_data) are deliberately NOT in this update set. They are owned by
 		// the AMFA side and written onto a Keycloak row by ReconcileAMFAMerges;
@@ -185,6 +187,11 @@ func (r *Repository) CountWithFilter(ctx context.Context, opts *events.ListOptio
 // name would leak one tenant's events into another whose realm name is a prefix
 // (for example "prod" matching "prod-staging").
 func applySourceFilter(query *gorm.DB, opts *events.ListOptions) *gorm.DB {
+	// Tenant first: it is the isolation boundary, and equality never matches
+	// the '' carried by rows written before tenant_id existed.
+	if opts.TenantID != "" {
+		query = query.Where("tenant_id = ?", opts.TenantID)
+	}
 	if len(opts.Sources) > 0 {
 		return query.Where("source IN ?", opts.Sources)
 	}
@@ -283,6 +290,7 @@ func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 		FROM events AS a
 		WHERE a.source_system = 'amfa' AND a.deleted_at IS NULL
 		  AND k.source_system = 'keycloak' AND k.deleted_at IS NULL
+		  AND k.tenant_id = a.tenant_id
 		  AND k.amfa_event_id = a.amfa_event_id`
 	if err := r.db.WithContext(ctx).Exec(enrich).Error; err != nil {
 		return 0, fmt.Errorf("amfa reconcile enrich: %w", err)
@@ -304,6 +312,7 @@ func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 		WHERE a.source_system = 'amfa' AND a.deleted_at IS NULL
 		  AND k.source_system = 'keycloak'
 		  AND k.deleted_at IS NULL
+		  AND k.tenant_id = a.tenant_id
 		  AND k.amfa_event_id = a.amfa_event_id`
 	res := r.db.WithContext(ctx).Exec(del)
 	if res.Error != nil {
@@ -325,6 +334,7 @@ func toDomainEvent(event *database.Event) *domain.Event {
 
 	return &domain.Event{
 		ID:               event.ID,
+		TenantID:         event.TenantID,
 		EventID:          event.EventID,
 		Type:             event.Type,
 		Category:         event.Category,
@@ -372,6 +382,7 @@ func toDBEvent(event *domain.Event) *database.Event {
 
 	return &database.Event{
 		ID:               event.ID,
+		TenantID:         event.TenantID,
 		EventID:          event.EventID,
 		Type:             event.Type,
 		Category:         event.Category,

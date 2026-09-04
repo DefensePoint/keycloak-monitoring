@@ -224,7 +224,7 @@ func (s *service) mirrorRealm(ctx context.Context, realm string) error {
 					user = &u
 				}
 			}
-			if err := s.store.MergeAmfaEvent(ctx, ToDomainEvent(row, realm, user)); err != nil {
+			if err := s.store.MergeAmfaEvent(ctx, ToDomainEvent(row, s.tenantID, realm, user)); err != nil {
 				// Stop the realm cycle at the first failed save so the
 				// watermark never advances past an unsaved event.
 				return fmt.Errorf("save event %s: %w", row.EventID, err)

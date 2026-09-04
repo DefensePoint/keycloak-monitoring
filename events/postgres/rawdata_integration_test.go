@@ -64,8 +64,12 @@ func newRawDataTestRepo(t *testing.T) (*Repository, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("failed to open test database: %v", err)
 	}
-	if err := db.AutoMigrate(&database.Event{}); err != nil {
-		t.Fatalf("failed to auto-migrate events table: %v", err)
+	// Every table these suites touch, so a fresh database works. The
+	// watermark tests used to fail on one because only Event was migrated
+	// here, and they only passed locally on databases that already had the
+	// table from an application run.
+	if err := db.AutoMigrate(&database.Event{}, &database.AmfaMirrorWatermark{}); err != nil {
+		t.Fatalf("failed to auto-migrate test tables: %v", err)
 	}
 
 	log := logger.New(zerolog.New(io.Discard))

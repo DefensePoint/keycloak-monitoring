@@ -41,6 +41,10 @@ var tenantScopedTables = []tenantTable{
 	{name: "alert_rules"},
 	{name: "tenant_policies"},
 	{name: "user_roles"},
+	// Mirrored Keycloak and AMFA login events. Until events carried a
+	// tenant_id there was nothing to purge by, so a deleted tenant's usernames,
+	// emails, source IPs and coordinates outlived it indefinitely.
+	{name: "events"},
 	// One tiny row per (tenant, realm), so it is deleted inline rather than
 	// drained: leaving it behind would hand a re-created tenant of the same id
 	// a stale read position and skip its events.

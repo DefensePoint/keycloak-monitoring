@@ -90,6 +90,62 @@ func NewClient(cfg *config.DatabaseConfig, log *logger.Logger) (*Client, error) 
 	return client, nil
 }
 
+// backfillEventTenantIDs attributes pre-existing event rows to a tenant where
+// that can be established, and leaves the rest alone.
+//
+// Rows written before events.tenant_id existed recorded no tenant. The only
+// tenant signal they carry is the realm name inside source
+// ("keycloak:<realm>", "amfa:<realm>"), so a row is attributable exactly when
+// its realm name belongs to one tenant and no other. Where a realm name is
+// shared, and "master" is shared by every Keycloak, the owner is genuinely
+// unrecoverable and the row keeps its empty tenant_id: excluded from every
+// tenant-scoped query, and still awaiting a decision on whether to delete it.
+//
+// Deliberately not a guess. Attributing a shared-realm row to whichever tenant
+// happens to hold that realm now would assert ownership of personal data that
+// cannot be verified, which is the opposite of the point.
+//
+// One honest limit: "unique today" is not quite "always was". If a realm was
+// previously owned by a tenant that has since been deleted, its rows attribute
+// to the current holder of that name. Nothing recorded enough to do better.
+//
+// Idempotent: it only touches rows with no tenant, of which writers create
+// none, so after the first successful run this is a no-op.
+func (c *Client) backfillEventTenantIDs() error {
+	const backfill = `
+		UPDATE events AS e
+		SET tenant_id = unambiguous.tenant_id
+		FROM (
+			SELECT realm_name, MIN(tenant_id) AS tenant_id
+			FROM keycloak_realms
+			WHERE deleted_at IS NULL
+			GROUP BY realm_name
+			HAVING COUNT(DISTINCT tenant_id) = 1
+		) AS unambiguous
+		WHERE (e.tenant_id IS NULL OR e.tenant_id = '')
+		  AND split_part(e.source, ':', 2) = unambiguous.realm_name`
+
+	res := c.db.Exec(backfill)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		c.logger.Info("Attributed pre-existing events to a tenant",
+			logger.Int64("rows", res.RowsAffected))
+	}
+
+	var unattributed int64
+	if err := c.db.Raw(
+		`SELECT count(*) FROM events WHERE tenant_id IS NULL OR tenant_id = ''`).
+		Scan(&unattributed).Error; err == nil && unattributed > 0 {
+		c.logger.Warn("Events remain unattributed to any tenant: their realm name is shared "+
+			"between tenants so the owner cannot be established. They are excluded from "+
+			"tenant-scoped queries and are not removed by tenant deletion",
+			logger.Int64("rows", unattributed))
+	}
+	return nil
+}
+
 // AutoMigrate automatically migrates the database schema.
 func (c *Client) AutoMigrate() error {
 	c.logger.Info("Running GORM auto-migration")
@@ -112,6 +168,27 @@ func (c *Client) AutoMigrate() error {
 				c.logger.Warn("Could not drop unused tenant index", logger.Str("index", idx), logger.Err(err))
 			}
 		}
+	}
+
+	// events.event_id used to be globally unique. Uniqueness is now per tenant
+	// (idx_events_tenant_event), because two tenants pointed at the same
+	// Keycloak see the same event ids and a global index made them silently
+	// overwrite each other. AutoMigrate adds the composite index but never
+	// removes the old one, so drop it explicitly or the old constraint keeps
+	// rejecting the second tenant's rows.
+	if c.db.Migrator().HasIndex(&Event{}, "idx_events_event_id") {
+		if err := c.db.Migrator().DropIndex(&Event{}, "idx_events_event_id"); err != nil {
+			c.logger.Warn("Could not drop the global unique index on events.event_id; "+
+				"two tenants monitoring the same Keycloak will collide until it is removed",
+				logger.Err(err))
+		} else {
+			c.logger.Info("Dropped the global unique index on events.event_id (now unique per tenant)")
+		}
+	}
+
+	if err := c.backfillEventTenantIDs(); err != nil {
+		c.logger.Warn("Could not backfill events.tenant_id; unattributed rows stay hidden from "+
+			"tenant-scoped queries and will be retried next startup", logger.Err(err))
 	}
 
 	// Add new columns to existing configuration_alerts table if they don't exist

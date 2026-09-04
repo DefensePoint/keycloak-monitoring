@@ -4,7 +4,10 @@ import "time"
 
 // Event represents a security monitoring event.
 type Event struct {
-	ID           uint      `json:"id"`
+	ID uint `json:"id"`
+	// TenantID identifies the monitored Keycloak instance this event came
+	// from. Set by whichever mirror wrote the row; both are per-tenant.
+	TenantID     string    `json:"tenant_id"`
 	EventID      string    `json:"event_id"`
 	Type         string    `json:"type"`
 	Category     string    `json:"category"`

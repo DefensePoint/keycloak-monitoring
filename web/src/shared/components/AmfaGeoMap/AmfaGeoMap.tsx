@@ -9,6 +9,7 @@ import { MapContainer, Marker, Popup, TileLayer, Tooltip } from "react-leaflet";
 import MarkerClusterGroup from "react-leaflet-cluster";
 import { Box } from "@mui/material";
 import type { AmfaGeoBucket } from "@/shared/types";
+import { cartoDarkTileUrl } from "./basemap";
 
 // react-leaflet 4.x doesn't bundle marker icons correctly under Vite; merge the
 // canonical default icon URLs so markers render without manual asset handling.
@@ -39,8 +40,14 @@ export function AmfaGeoMap({ buckets }: Props) {
         style={{ height: 600, width: "100%" }}
       >
         <TileLayer
-          attribution="&copy; OpenStreetMap, &copy; CARTO"
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          attribution={
+            // Visible attribution is the condition of CARTO's free tier, and
+            // OpenStreetMap's licence asks for "contributors" plus a link to
+            // the copyright page. Leaflet renders this HTML in the corner.
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, ' +
+            '&copy; <a href="https://carto.com/attributions">CARTO</a>'
+          }
+          url={cartoDarkTileUrl(import.meta.env.VITE_CARTO_BASEMAP_KEY)}
         />
         <MarkerClusterGroup>
           {buckets.map((b) => (
