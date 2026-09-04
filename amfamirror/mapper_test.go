@@ -21,13 +21,18 @@ func TestToDomainEvent_StampsTheAmfaSource(t *testing.T) {
 		EventTime: time.Now().UTC(),
 		EventType: "LOGIN",
 	}
-	ev := ToDomainEvent(row, "MyRealm", nil)
+	ev := ToDomainEvent(row, "tenantA", "MyRealm", nil)
 
 	if got, want := ev.Source, "amfa:MyRealm"; got != want {
 		t.Errorf("Source = %q, want %q", got, want)
 	}
 	if got, want := ev.SourceSystem, "amfa"; got != want {
 		t.Errorf("SourceSystem = %q, want %q", got, want)
+	}
+	// The tenant is the isolation boundary, so an unstamped row would be
+	// invisible to every tenant-scoped query and un-purgeable.
+	if got, want := ev.TenantID, "tenantA"; got != want {
+		t.Errorf("TenantID = %q, want %q", got, want)
 	}
 
 	// And the value must be one a reader scoping to this realm will match,

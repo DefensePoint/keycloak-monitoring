@@ -34,8 +34,11 @@ type RealmLister interface {
 
 // EventListOptions contains options for listing events.
 type EventListOptions struct {
-	Limit     int
-	Offset    int
+	Limit  int
+	Offset int
+	// TenantID scopes the query to the report tenant's rows. This is the
+	// isolation boundary; Sources only narrows within it.
+	TenantID  string
 	StartTime *string
 	EndTime   *string
 	// Sources restricts the query to these exact event sources. The report

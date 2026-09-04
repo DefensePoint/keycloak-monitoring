@@ -164,6 +164,7 @@ func (s *service) AggregateData(ctx context.Context, req *GenerateRequest) (*Dat
 			Offset:    0,
 			StartTime: &startStr,
 			EndTime:   &endStr,
+			TenantID:  req.TenantID,
 			Sources:   sources,
 		})
 		if err != nil {

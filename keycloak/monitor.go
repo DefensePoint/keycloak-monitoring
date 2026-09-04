@@ -286,6 +286,7 @@ func (m *Monitor) collectEvents(ctx context.Context) {
 			}
 
 			generalEvent := &domain.Event{
+				TenantID:     m.tenantID,
 				EventID:      eventID,
 				Timestamp:    eventTime,
 				Type:         event.Type,
