@@ -197,7 +197,13 @@ test:frontend:
     - cd web
     - npm ci --no-audit --no-fund
     - echo "Running frontend tests..."
-    - npm test -- --run
+    # Vitest sizes its worker pool from available parallelism, which inside a
+    # container reports the node's CPU count rather than this job's limit. The
+    # default therefore starts far more jsdom workers than the memory limit
+    # allows: the suite ran about 100x slower, two tests crossed the 5s default
+    # timeout, and the container was OOMKilled (exit 137). Two workers is
+    # enough to keep the wall clock reasonable and stays inside the limit.
+    - npm test -- --run --pool=threads --poolOptions.threads.maxThreads=2
     - echo "All frontend tests passed"
     - echo "Building frontend..."
     - npm run build
