@@ -114,11 +114,19 @@ func (s *amfaTenantSync) handleTenantChange(event tenant.Event, t *domain.Keyclo
 
 // apply registers or unregisters one tenant based on its current settings, and
 // reports whether it ended up registered.
+func (s *amfaTenantSync) apply(t *domain.KeycloakTenant) bool {
+	return applyAmfaTenant(s.registry, t, s.cfg, s.log)
+}
+
+// applyAmfaTenant registers or unregisters one database tenant based on its
+// current settings, and reports whether it ended up registered. It is the
+// single code path both assemblies (web tenant sync and MCP startup load) use
+// for database-defined tenants.
 //
 // A config-defined tenant is skipped: it was already registered from
 // config.yaml, which is the authoritative source for it, and re-registering
 // from a database copy could override the file with stale values.
-func (s *amfaTenantSync) apply(t *domain.KeycloakTenant) bool {
+func applyAmfaTenant(registry *amfa.Registry, t *domain.KeycloakTenant, cfg *config.AppConfig, log *logger.Logger) bool {
 	if t == nil {
 		return false
 	}
@@ -127,28 +135,28 @@ func (s *amfaTenantSync) apply(t *domain.KeycloakTenant) bool {
 	}
 
 	if t.Amfa == nil || !t.Amfa.Enabled || t.Amfa.APIBaseURL == "" || !t.Enabled {
-		s.registry.Unregister(t.TenantID)
+		registry.Unregister(t.TenantID)
 		return false
 	}
 
 	tcfg := amfaTenantConfigFrom(t)
 	if err := tcfg.Amfa.Validate(); err != nil {
-		logWarn(s.log, "AMFA config invalid for tenant; skipping",
+		logWarn(log, "AMFA config invalid for tenant; skipping",
 			logger.Str("tenant_id", t.TenantID), logger.Err(err))
-		s.registry.Unregister(t.TenantID)
+		registry.Unregister(t.TenantID)
 		return false
 	}
 
-	repo, transport, err := newAmfaRepository(t.TenantID, tcfg, s.cfg, s.log)
+	repo, transport, err := newAmfaRepository(t.TenantID, tcfg, cfg, log)
 	if err != nil {
-		logWarn(s.log, "AMFA unavailable for tenant; tenant will not expose AMFA endpoints",
+		logWarn(log, "AMFA unavailable for tenant; tenant will not expose AMFA endpoints",
 			logger.Str("tenant_id", t.TenantID), logger.Err(err))
-		s.registry.Unregister(t.TenantID)
+		registry.Unregister(t.TenantID)
 		return false
 	}
 
-	s.registry.Register(t.TenantID, repo)
-	logInfo(s.log, "AMFA registered for tenant",
+	registry.Register(t.TenantID, repo)
+	logInfo(log, "AMFA registered for tenant",
 		logger.Str("tenant_id", t.TenantID),
 		logger.Str("transport", transport),
 		logger.Bool("is_config_defined", t.IsConfigDefined),

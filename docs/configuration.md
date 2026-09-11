@@ -1093,6 +1093,116 @@ export MONITORING_LOGGING_OUTPUT_STDOUT_ENABLED=true
 export MONITORING_LOGGING_OUTPUT_STDOUT_PRETTY=false
 ```
 
+### MCP Server
+
+Configuration for the read-only Model Context Protocol (MCP) server, which serves monitoring data to MCP clients. It runs as its own binary (`cmd/mcp-server`); see `cmd/mcp-server/README.md` for the tool reference and client setup.
+
+```yaml
+mcp:
+  # Enable/disable the MCP server
+  # The mcp-server binary exits immediately when disabled
+  # Default: false
+  enabled: false
+
+  # Port for the MCP endpoint (/mcp), /health, /ready and /metrics
+  # Default: 7889
+  port: 7889
+
+  # Page size applied when a tool call does not request one
+  # Default: 50
+  default_page_size: 50
+
+  # Hard cap on any page size a tool call does request
+  # These two replace the older max_page_size (the default) and
+  # absolute_max_page_size (the cap); a config still carrying
+  # absolute_max_page_size fails startup, since max_page_size now caps what it
+  # used to default
+  # Default: 500
+  max_page_size: 500
+
+  # Keyed-hash message authentication code (HMAC) key signing the pagination
+  # cursors handed to clients. Required, minimum 32 bytes.
+  # Generate with: openssl rand -base64 32
+  # The server refuses to start on an empty or shorter key rather than fall
+  # back to a per-process one, whose cursors stop verifying after a restart
+  # Default: "" (which fails startup)
+  cursor_hmac_key: ""
+
+  # Exact Origin header values accepted on MCP requests
+  # An empty list rejects every request carrying an Origin header, which is
+  # the DNS-rebinding defense; MCP clients are not browsers and send none
+  # Default: [] (reject all origins)
+  origin_allowlist: []
+
+  # Prometheus metrics on the MCP port
+  metrics:
+    # Expose /metrics
+    # Default: false
+    enabled: false
+
+    # Bearer token required on /metrics. /metrics is served outside the MCP
+    # authentication middleware, so this is required whenever enabled is
+    # true; the server refuses to start on an enabled endpoint with no token
+    # Default: ""
+    auth_token: ""
+
+  # Token-bucket rate limits; a rate of 0 or less disables that limiter
+  rate:
+    # Tool calls per user per minute, applied after authentication
+    # One budget shared by all of a user's tokens
+    # Default: 120
+    per_user_per_minute: 120
+
+    # Requests per minute per remote address, applied before authentication
+    # Default: 300
+    per_ip_per_minute: 300
+
+    # Instantaneous allowance of both buckets
+    # Default: 30
+    burst: 30
+
+  # Maximum serialized size of a tool result in bytes; a larger result is
+  # replaced with an error telling the caller to retry with a smaller limit
+  # 0 or less falls back to the default; the cap cannot be disabled
+  # Default: 1048576 (1 MiB)
+  max_response_bytes: 1048576
+
+  # Required: the read-only role the MCP server runs under. Same keys as the
+  # top-level database block. There is no fallback to that block, which names
+  # the read-write application role, so the MCP server refuses to start when
+  # this block is missing.
+  #
+  # These keys are deliberately not registered as defaults, so an environment
+  # variable is only picked up for a key that is present here: keep
+  # password: "" in the file and set MONITORING_MCP_DATABASE_PASSWORD.
+  database:
+    host: "kmt-postgres"
+    port: 5432
+    database: "monitoring"
+    user: "kmt_ro"
+    password: ""
+    ssl_mode: "require"
+    max_conns: 10
+    min_conns: 2
+    timeout: 30s
+```
+
+or
+
+```bash
+export MONITORING_MCP_ENABLED=true
+export MONITORING_MCP_PORT=7889
+export MONITORING_MCP_DEFAULT_PAGE_SIZE=50
+export MONITORING_MCP_MAX_PAGE_SIZE=500
+export MONITORING_MCP_CURSOR_HMAC_KEY=$(openssl rand -base64 32)
+export MONITORING_MCP_METRICS_ENABLED=false
+export MONITORING_MCP_METRICS_AUTH_TOKEN=metrics_scrape_token
+export MONITORING_MCP_RATE_PER_USER_PER_MINUTE=120
+export MONITORING_MCP_RATE_PER_IP_PER_MINUTE=300
+export MONITORING_MCP_RATE_BURST=30
+export MONITORING_MCP_MAX_RESPONSE_BYTES=1048576
+```
+
 ## Configuration Examples
 
 ### Development Configuration

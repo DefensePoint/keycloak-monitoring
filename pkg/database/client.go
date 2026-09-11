@@ -23,6 +23,48 @@ type Client struct {
 
 // NewClient creates a new GORM database client and auto-migrates the schema.
 func NewClient(cfg *config.DatabaseConfig, log *logger.Logger) (*Client, error) {
+	client, err := openClient(cfg, log)
+	if err != nil {
+		return nil, err
+	}
+
+	// Auto-migrate schema
+	if err := client.AutoMigrate(); err != nil {
+		if sqlDB, dbErr := client.db.DB(); dbErr == nil {
+			_ = sqlDB.Close()
+		}
+		return nil, fmt.Errorf("failed to auto-migrate schema: %w", err)
+	}
+
+	log.Info("Database client initialized with GORM",
+		logger.Str("host", cfg.Host),
+		logger.Int("port", cfg.Port),
+		logger.Str("database", cfg.Database))
+
+	return client, nil
+}
+
+// NewReadOnlyClient opens the same GORM pool as NewClient but never migrates:
+// no AutoMigrate, no TimescaleDB setup, no backfills. Constructing against an
+// unmigrated database succeeds; queries against missing tables still fail.
+// Enforcing read-only access is a deployment concern (a read-only database
+// role); this constructor only guarantees it issues no schema changes itself.
+func NewReadOnlyClient(cfg *config.DatabaseConfig, log *logger.Logger) (*Client, error) {
+	client, err := openClient(cfg, log)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Info("Read-only database client initialized with GORM",
+		logger.Str("host", cfg.Host),
+		logger.Int("port", cfg.Port),
+		logger.Str("database", cfg.Database))
+
+	return client, nil
+}
+
+// openClient opens the GORM connection, configures the pool and pings.
+func openClient(cfg *config.DatabaseConfig, log *logger.Logger) (*Client, error) {
 	// Build connection DSN
 	dsn := fmt.Sprintf(
 		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s",
@@ -71,23 +113,10 @@ func NewClient(cfg *config.DatabaseConfig, log *logger.Logger) (*Client, error) 
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	client := &Client{
+	return &Client{
 		db:     db,
 		logger: log,
-	}
-
-	// Auto-migrate schema
-	if err := client.AutoMigrate(); err != nil {
-		_ = sqlDB.Close()
-		return nil, fmt.Errorf("failed to auto-migrate schema: %w", err)
-	}
-
-	log.Info("Database client initialized with GORM",
-		logger.Str("host", cfg.Host),
-		logger.Int("port", cfg.Port),
-		logger.Str("database", cfg.Database))
-
-	return client, nil
+	}, nil
 }
 
 // backfillEventTenantIDs attributes pre-existing event rows to a tenant where
@@ -223,6 +252,12 @@ func (c *Client) AutoMigrate() error {
 	err = c.db.AutoMigrate(&Role{}, &Permission{}, &UserRole{}, &RolePermission{}, &TenantPolicy{})
 	if err != nil {
 		return fmt.Errorf("failed to auto-migrate RBAC tables: %w", err)
+	}
+
+	// Migrate API tokens after its User dependency exists
+	err = c.db.AutoMigrate(&APIToken{})
+	if err != nil {
+		return fmt.Errorf("failed to auto-migrate api tokens table: %w", err)
 	}
 
 	// Data migration: Ensure amfa:read permission exists and is granted to default roles

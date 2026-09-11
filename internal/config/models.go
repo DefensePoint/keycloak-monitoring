@@ -18,6 +18,7 @@ type AppConfig struct {
 	Notifications NotificationsConfig `mapstructure:"notifications"`
 	AlertSilences AlertSilencesConfig `mapstructure:"alert_silences"`
 	Security      SecurityConfig      `mapstructure:"security"`
+	MCP           MCPConfig           `mapstructure:"mcp"`
 }
 
 // SecurityConfig holds settings for protecting stored secrets.

@@ -7,6 +7,7 @@ import (
 	"go.uber.org/fx"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/alerts"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/apitoken"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/auth"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/events"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
@@ -30,6 +31,7 @@ var HandlersModule = fx.Module("handlers",
 		provideAlertsHandlers,
 		provideOperatorHandlers,
 		provideRBACHandlers,
+		provideAPITokenHandlers,
 		provideUserHandlers,
 		provideTenantHandlers,
 		provideReportHandlers,
@@ -131,6 +133,25 @@ type RBACHandlersParams struct {
 
 func provideRBACHandlers(p RBACHandlersParams) *chihttp.RBACHandlers {
 	return chihttp.NewRBACHandlers(
+		p.Service,
+		p.Logger,
+		p.AuthMiddleware.Authenticate,
+		p.RBACMiddleware,
+	)
+}
+
+// APITokenHandlersParams contains dependencies for API token handlers.
+type APITokenHandlersParams struct {
+	fx.In
+
+	Service        apitoken.Service
+	Logger         *logger.Logger
+	AuthMiddleware *chihttp.AuthMiddleware
+	RBACMiddleware *chihttp.RBACMiddleware
+}
+
+func provideAPITokenHandlers(p APITokenHandlersParams) *chihttp.APITokenHandlers {
+	return chihttp.NewAPITokenHandlers(
 		p.Service,
 		p.Logger,
 		p.AuthMiddleware.Authenticate,
@@ -316,6 +337,7 @@ type RouterParams struct {
 	AuthMiddleware   *chihttp.AuthMiddleware
 	RBACMiddleware   *chihttp.RBACMiddleware
 	RBACHandlers     *chihttp.RBACHandlers
+	APITokenHandlers *chihttp.APITokenHandlers
 	UserHandlers     *chihttp.UserHandlers
 	AuthHandlers     *chihttp.AuthHandlers
 	SystemHandlers   *chihttp.SystemHandlers
@@ -333,6 +355,7 @@ func provideRouter(p RouterParams) *chihttp.Router {
 		p.AuthMiddleware.Authenticate,
 		p.RBACMiddleware,
 		p.RBACHandlers,
+		p.APITokenHandlers,
 		p.UserHandlers,
 		p.AuthHandlers,
 		p.SystemHandlers,

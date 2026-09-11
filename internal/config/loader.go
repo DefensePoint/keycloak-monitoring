@@ -129,6 +129,7 @@ func LoadConfig(configPath string) (*AppConfig, error) {
 	if err := v.Unmarshal(&config); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
+	config.MCP.RemovedKeys = removedMCPKeysInFile(v)
 
 	// Step 5: Final configuration summary
 	fmt.Println("┌─────────────────────────────────────────────────────────────────────────────┐")
@@ -359,6 +360,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("notifications.email.skip_verify", false)
 	v.SetDefault("notifications.email.subject", "[{{severity}}] Keycloak Monitoring Tool Alert: {{title}}")
 	v.SetDefault("notifications.email.min_severity", "error") // Only send emails for error and above
+
+	setMCPDefaults(v)
 }
 
 // NewLogger creates a logger from logging configuration
