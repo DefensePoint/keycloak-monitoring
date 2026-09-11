@@ -336,6 +336,31 @@ security:container-scan:
     - apk add --no-cache curl
     - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v${TRIVY_VERSION}
     - trivy --version
+    # The dind service container can report ready before its daemon accepts
+    # connections, and a docker build issued in that window fails with a bare
+    # "Cannot connect to the Docker daemon", which reads like a broken
+    # DOCKER_HOST rather than a race. Wait for the daemon, and say plainly
+    # when it never arrives: a service container that is up while nothing
+    # listens on DOCKER_HOST usually means dind was denied the privileged
+    # mode it requires, which is a cluster policy question, not a CI one.
+    - |
+      echo "Waiting for the Docker daemon at ${DOCKER_HOST}..."
+      ATTEMPTS=30
+      i=1
+      while [ "$i" -le "$ATTEMPTS" ]; do
+        if docker info >/dev/null 2>&1; then
+          echo "Docker daemon ready after $(( (i - 1) * 2 ))s"
+          break
+        fi
+        if [ "$i" -eq "$ATTEMPTS" ]; then
+          echo "Docker daemon did not come up within $(( ATTEMPTS * 2 ))s."
+          echo "The dind service is running but nothing is serving ${DOCKER_HOST}."
+          echo "Check whether privileged containers are permitted for this runner."
+          exit 1
+        fi
+        sleep 2
+        i=$(( i + 1 ))
+      done
   script:
     - |
       for svc in server web mcp-server; do
