@@ -1,0 +1,1266 @@
+################################################################################
+# Monitoring Dashboard Configuration
+################################################################################
+#
+# This is the main configuration file for the Monitoring Dashboard.
+# Copy this file to config.yaml and adjust values as needed.
+#
+# Configuration can also be set via environment variables using the prefix
+# MONITORING_ and replacing dots with underscores. For example:
+#   MONITORING_DATABASE_HOST=localhost
+#   MONITORING_HTTP_SERVER_PORT=7888
+#
+# Environment variables take precedence over values in this file.
+#
+################################################################################
+
+# =============================================================================
+# SECURITY CONFIGURATION
+# =============================================================================
+security:
+  # Base64-encoded 32-byte AES-256 key used to encrypt tenant client_secret
+  # values at rest in the database. Generate with: openssl rand -base64 32
+  #
+  # SECURITY: set via environment variable, never commit a real key here.
+  #   MONITORING_SECURITY_ENCRYPTION_KEY=<generated key>
+  #
+  # Leave unset to keep client_secret stored as plaintext (existing/default
+  # behavior). Once set, newly created or updated tenants are encrypted
+  # automatically; a separate one-time migration (see run_secret_migration
+  # below) is needed to encrypt tenants that already exist in the database.
+  encryption_key: ""
+
+  # Set to true for exactly one boot to encrypt every existing tenant's
+  # client_secret that isn't already encrypted. Only takes effect when
+  # encryption_key is also set. Not automatic on every restart — set it,
+  # restart once, confirm the result in the logs, then unset it again.
+  #   MONITORING_SECURITY_RUN_SECRET_MIGRATION=true
+  run_secret_migration: false
+
+# =============================================================================
+# HTTP SERVER CONFIGURATION
+# =============================================================================
+http:
+  server:
+    # Enable or disable the HTTP API server
+    # Set to false if you only want to run the database without the API
+    enabled: true
+
+    # Host/IP address to bind the server to
+    # Options:
+    #   - "0.0.0.0": Listen on all network interfaces (recommended for Docker)
+    #   - "127.0.0.1" or "localhost": Listen only on localhost (more secure for dev)
+    #   - Specific IP: Listen on a specific network interface
+    host: "0.0.0.0"
+
+    # Port number for the HTTP server
+    # The API server will listen on this port for incoming requests
+    port: 7888
+
+  # ===========================================================================
+  # RESPONSE SECURITY HEADERS
+  # ===========================================================================
+  # Prometheus metrics endpoint (/metrics).
+  #
+  # The endpoint exposes tenant names and infrastructure topology, so it must
+  # not be routed through a public reverse proxy. Scrape it from the host (for
+  # example, a Grafana Alloy agent running alongside the application) rather
+  # than exposing it externally.
+  metrics:
+    # Master switch. When disabled, no /metrics route is registered and no
+    # request instrumentation middleware is installed.
+    enabled: true
+
+    # Optional bearer token. When set, callers must send
+    # "Authorization: Bearer <token>" or the endpoint returns 401.
+    # Supply via MONITORING_HTTP_METRICS_AUTH_TOKEN rather than committing it.
+    auth_token: ""
+
+  # Browser-enforced protections applied to every HTTP response.
+  # Empty values disable the corresponding header.
+  security_headers:
+    # Master switch for the security headers middleware.
+    enabled: true
+
+    # Strict-Transport-Security tells browsers to only use HTTPS for the
+    # configured duration. Leave empty until ALL traffic is exclusively
+    # served over HTTPS (with HTTP -> HTTPS redirects).
+    # Recommended once HTTPS-only: "max-age=31536000; includeSubDomains"
+    hsts: ""
+
+    # Content-Security-Policy restricts the sources from which scripts,
+    # styles and other resources can be loaded. The default is restrictive;
+    # tighten or relax it based on the application's actual needs.
+    content_security_policy: "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+
+    # X-Content-Type-Options blocks MIME sniffing in browsers.
+    x_content_type_options: "nosniff"
+
+    # X-Frame-Options prevents the application from being embedded in
+    # iframes — protects against clickjacking on legacy browsers.
+    # Modern browsers honor frame-ancestors in CSP instead.
+    x_frame_options: "DENY"
+
+    # Referrer-Policy limits the referrer information sent in outbound
+    # requests originating from the application.
+    referrer_policy: "strict-origin-when-cross-origin"
+
+# =============================================================================
+# WEB FRONTEND SERVER CONFIGURATION
+# =============================================================================
+web:
+  server:
+    # Enable or disable the web frontend server
+    # Set to false if you don't want to serve the frontend
+    enabled: true
+
+    # Host/IP address to bind the web server to
+    # Options:
+    #   - "0.0.0.0": Listen on all network interfaces (recommended for Docker)
+    #   - "127.0.0.1" or "localhost": Listen only on localhost (more secure for dev)
+    #   - Specific IP: Listen on a specific network interface
+    host: "0.0.0.0"
+
+    # Port number for the web server
+    # The web server will listen on this port for serving the frontend
+    port: 3000
+
+    # Directory containing static frontend files
+    # This should point to the built frontend dist directory
+    static_dir: "/app/web/dist"
+
+    # API backend hostname for proxying requests
+    # The web server proxies /api and /auth requests to this backend
+    # Options:
+    #   - "http://api-server:7888": Docker service name (use in Docker Compose)
+    #   - "http://localhost:7888": Local development
+    #   - IP address or hostname: Custom backend server
+    api_host_url: "http://api-server:7888"
+
+# =============================================================================
+# KEYCLOAK MULTI-TENANCY CONFIGURATION
+# =============================================================================
+# This section defines global defaults and per-tenant Keycloak instances.
+# Global settings are inherited by all tenants unless overridden.
+
+keycloak:
+  # ===========================================================================
+  # GLOBAL SETTINGS
+  # ===========================================================================
+  # These settings apply to all tenants by default.
+  # Tenants may override these settings.
+  global:
+    # Realms to monitor (list of realm names)
+    # If empty, will monitor all realms
+    realms: []
+      # - "master"
+      # - "myrealm"
+      # - "another-realm"
+
+    # Default realm to display in the UI
+    # Leave empty to show all realms by default
+    # Example:
+    # default_realm: "master"
+    default_realm: ""
+
+    # InfiniSpan clustering enabled
+    # Set to true if your Keycloak instances use InfiniSpan for distributed caching
+    # and high availability. When enabled, InfiniSpan metrics will be collected
+    # and displayed in the High Availability dashboard.
+    # Can be overridden per tenant in the 'config' section
+    infinispan_enabled: false
+
+    # Polling intervals for different metric types
+    polling:
+      # How often to collect general metrics (users, clients, sessions)
+      # Valid time units: ns, us/µs, ms, s, m, h
+      metrics_interval: 5m
+
+      # How often to fetch events (login, logout, etc.)
+      # Events are fetched more frequently for real-time monitoring
+      # Valid time units: ns, us/µs, ms, s, m, h
+      events_interval: 1m
+
+      # How often to check server health
+      # Valid time units: ns, us/µs, ms, s, m, h
+      health_interval: 1m
+
+      # How often to refresh realm information
+      # Valid time units: ns, us/µs, ms, s, m, h
+      realm_info_interval: 15m
+
+    # Event filtering
+    events:
+      # Event types to collect (empty = collect all)
+      # Common types: LOGIN, LOGOUT, REGISTER, CODE_TO_TOKEN, REFRESH_TOKEN,
+      #               LOGIN_ERROR, REGISTER_ERROR, CLIENT_LOGIN, etc.
+      types: []
+      # Example:
+      # types:
+      #   - "LOGIN"
+      #   - "LOGIN_ERROR"
+      #   - "LOGOUT"
+      #   - "REGISTER"
+
+      # Maximum number of events to fetch per poll
+      # This prevents overwhelming the database with too many events at once
+      max_events_per_poll: 1000
+
+      # Lookback duration - how far back to look for events on each poll
+      # Should be slightly larger than events_interval to avoid gaps
+      # Valid time units: ns, us/µs, ms, s, m, h
+      lookback_duration: 1m
+
+    # Connection settings
+    connection:
+      # HTTP timeout for API requests
+      # Valid time units: ns, us/µs, ms, s, m, h
+      timeout: 30s
+
+      # Skip TLS verification (set to true only for development/testing)
+      # WARNING: Never set to true in production
+      skip_tls_verify: false
+
+      # Maximum retries for failed requests
+      max_retries: 3
+
+      # Retry backoff duration
+      # Valid time units: ns, us/µs, ms, s, m, h
+      retry_backoff: 5s
+
+      # SSRF guard: allow Keycloak server URLs that resolve to RFC1918
+      # private ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and
+      # IPv6 ULA (fc00::/7).
+      #
+      # Default: true (recommended for on-prem deployments where Keycloak
+      # runs on the customer's internal network, e.g.
+      # http://keycloak.internal:8080 or a docker-compose service name).
+      #
+      # Set to false ONLY if your Keycloak is reachable via a public domain
+      # (e.g. https://keycloak.yourcompany.com) AND you want extra hardening
+      # against SSRF abuse from a compromised admin account. With this off,
+      # the test-connection / create-tenant / update-tenant endpoints reject
+      # any server_url whose hostname resolves to a private IP.
+      #
+      # Loopback (127.0.0.0/8, ::1), link-local / cloud metadata
+      # (169.254.0.0/16, fe80::/10), unspecified (0.0.0.0, ::), multicast,
+      # and broadcast are ALWAYS blocked regardless of this setting — those
+      # are never legitimate Keycloak hosts.
+      allow_private_ranges: true
+
+    # =========================================================================
+    # CONFIGURATION CHECKER
+    # =========================================================================
+    # The configuration checker continuously validates Keycloak configurations
+    # and generates alerts for misconfigurations or security issues.
+    config_checker:
+      # How often to run configuration checks
+      # Valid time units: ns, us/µs, ms, s, m, h
+      # Recommended: 5m to 15m (balance between responsiveness and load)
+      poll_interval: 5m
+
+      # Configuration for individual checks
+      checks:
+        # Identity Provider Metadata Descriptor URL Check
+        # Validates that SAML identity providers have metadata descriptor URLs configured
+        # and checks certificate expiration status
+        identity_provider_metadata:
+          # Enable or disable this specific check
+          enabled: true
+
+          # Only check SAML identity providers (skip OIDC, social, etc.)
+          # SAML providers require metadata descriptor URLs for proper federation
+          check_saml_only: true
+
+          # Realms to exclude from this check (optional)
+          # Use this to skip test realms or realms with known exceptions
+          # Example:
+          # excluded_realms:
+          #   - "test-realm"
+          #   - "development"
+          excluded_realms: []
+
+          # Identity provider aliases to exclude from this check (optional)
+          # Use this to skip specific providers that are intentionally misconfigured
+          # Example:
+          # excluded_providers:
+          #   - "legacy-saml-provider"
+          excluded_providers: []
+
+          # Certificate expiration warning threshold (in days)
+          # Alerts will be created when certificates are within this many days of expiration
+          # Set to 0 to disable certificate expiration checking
+          certificate_expiration_warning_days: 30
+
+          # HTTP timeout for fetching SAML metadata
+          # How long to wait when retrieving metadata from IDP metadata descriptor URLs
+          # Valid time units: ns, us/µs, ms, s, m, h
+          certificate_check_timeout: 30s
+
+        # Realm Security Configuration Check
+        # Validates realm-level security configurations including SSL, password policies,
+        # brute force protection, and audit logging
+        realm_security:
+          # Enable or disable this specific check
+          enabled: true
+
+          # Check if SSL is required for all connections
+          # Validates that SslRequired is set to "all" or "external"
+          check_ssl_required: true
+
+          # Check if brute force protection is enabled
+          # Validates account lockout and login attempt limits
+          check_brute_force: true
+
+          # Check password policy strength
+          # Validates minimum length and complexity requirements
+          check_password_policy: true
+
+          # Check email verification configuration
+          # Ensures self-registration requires email verification
+          check_email_verification: true
+
+          # Check if admin event logging is enabled
+          # Validates audit trail for administrative changes
+          check_admin_events: true
+
+          # Check if user event logging is enabled
+          # Validates tracking of login attempts and authentication events
+          check_user_events: true
+
+          # Check if duplicate emails are allowed
+          # Validates uniqueness constraints for email addresses
+          check_duplicate_emails: true
+
+          # Minimum acceptable password length (characters)
+          # Alerts will be created for password policies below this threshold
+          # Recommended: 8-12 characters
+          min_password_length: 8
+
+          # Require password complexity (uppercase, lowercase, digits, special chars)
+          # When enabled, alerts will be created if complexity requirements are missing
+          require_password_complexity: true
+
+          # Maximum access token lifespan (minutes)
+          # Future enhancement: validates token expiration settings
+          # Recommended: 5-15 minutes
+          max_access_token_lifespan_minutes: 15
+
+          # Maximum SSO session idle time (minutes)
+          # Future enhancement: validates session timeout settings
+          # Recommended: 30-60 minutes
+          max_sso_session_idle_minutes: 30
+
+        # Client Security Configuration Check
+        # Validates client-level security configurations including redirect URIs,
+        # OAuth2 flows, and client authentication settings
+        client_security:
+          # Enable or disable this specific check
+          enabled: true
+
+          # Check redirect URI security
+          # Detects wildcard URIs, localhost in production, and HTTP (non-HTTPS) URIs
+          check_redirect_uris: true
+
+          # Check public client configurations
+          # Detects public clients with service accounts enabled (security risk)
+          check_public_clients: true
+
+          # Check for direct access grants (Resource Owner Password Credentials)
+          # The ROPC flow is less secure than authorization code flow
+          check_direct_access_grants: true
+
+          # Check if confidential clients have secrets
+          # Validates that non-public clients have proper authentication
+          check_client_secret: true
+
+          # Check for implicit flow usage
+          # The implicit flow is deprecated due to security concerns
+          check_implicit_flow: true
+
+          # Check standard flow configuration
+          # Future enhancement: validate PKCE enforcement for public clients
+          check_standard_flow: false
+
+          # Allow localhost redirect URIs in production
+          # Set to true to suppress warnings for localhost redirects
+          # Recommended: false for production environments
+          allow_localhost_redirects: false
+
+          # Enable production-specific checks
+          # When true, enables checks for localhost and HTTP redirect URIs
+          # Set to false for development/testing environments
+          production_environment: true
+
+        # Health Monitoring Check
+        # Monitors Keycloak server health metrics including memory usage and server status
+        # Uses data already collected by the health polling worker (every 1 minute)
+        health:
+          # Enable or disable this specific check
+          enabled: true
+
+          # Memory usage thresholds (percentage of max heap)
+          # Alert when JVM memory usage exceeds these thresholds
+          memory_warning_percent: 80   # Warning alert at 80% memory usage
+          memory_critical_percent: 90  # Critical alert at 90% memory usage
+
+    # =========================================================================
+    # EVENT CHECKER
+    # =========================================================================
+    # The event checker monitors Keycloak events for error patterns and creates
+    # alerts when thresholds are exceeded. Events are already collected by the
+    # polling worker (every 30s) and stored in the keycloak_events table.
+    event_checker:
+      # How often to run event-based checks
+      # Valid time units: ns, us/µs, ms, s, m, h
+      # Recommended: 5m (balance between responsiveness and performance)
+      poll_interval: 5m
+
+      # Configuration for individual event-based checks
+      checks:
+        # Login Error Check - Monitors LOGIN_ERROR events
+        # Medium priority: Threshold-based alerting for failed login attempts
+        login_error:
+          enabled: true
+          threshold: 10        # Alert when 10+ LOGIN_ERROR events occur
+          time_window: 5m      # Within a 5-minute time window
+
+        # Identity Provider Error Check - Monitors IDP-related errors
+        # High priority: Alerts immediately on IDP authentication failures
+        idp_error:
+          enabled: true
+          threshold: 1         # Alert on first occurrence (critical)
+          time_window: 5m
+          event_types:
+            - "IDENTITY_PROVIDER_LOGIN_ERROR"
+            - "IDENTITY_PROVIDER_POST_LOGIN_ERROR"
+            - "IDENTITY_PROVIDER_RESPONSE_ERROR"
+            - "IDENTITY_PROVIDER_RETRIEVE_TOKEN_ERROR"
+
+        # Code-to-Token Error Check - Monitors CODE_TO_TOKEN_ERROR events
+        # High priority: OAuth code exchange failures are critical
+        code_to_token:
+          enabled: true
+          threshold: 1         # Alert on first occurrence
+          time_window: 5m
+
+        # Client Login Error Check - Monitors CLIENT_LOGIN_ERROR events
+        # Medium priority: Threshold-based alerting for client authentication failures
+        client_error:
+          enabled: true
+          threshold: 10        # Alert when 10+ CLIENT_LOGIN_ERROR events occur
+          time_window: 5m
+
+        # Common Error Check - Monitors low-priority error events
+        # Low priority: Higher threshold for user-error events
+        common_errors:
+          enabled: true
+          threshold: 50        # Alert when 50+ events occur (likely indicates systemic issue)
+          time_window: 5m
+          event_types:
+            - "REGISTER_ERROR"
+            - "RESET_PASSWORD_ERROR"
+            - "LOGOUT_ERROR"
+
+    # =========================================================================
+    # AMFA CHECKER
+    # =========================================================================
+    # AMFA risk-alert checker. Converts high-risk AMFA login events into KMT
+    # alerts that flow through the normal alert lifecycle and notification
+    # fan-out. Disabled by default; opt in per check. See docs/amfa-integration.md.
+    amfa_checker:
+      enabled: false            # MASTER SWITCH - off by default
+      poll_interval: 1m
+      checks:
+        risk_rejected:      { enabled: true }                                        # rule 1: risk-engine rejections (critical)
+        repeated_risky:     { enabled: true, threshold: 3, window: 24h, min_risk_level: 2 }  # rule 2: repeated risky attempts per user/day
+        vpn_risky:          { enabled: true }                                        # rule 3: risky login from VPN/anonymizing IP
+        login_error:        { enabled: true, threshold: 5, window: 5m }              # rule 4a: LOGIN_ERROR burst
+        client_login_error: { enabled: true, threshold: 5, window: 5m }              # rule 4b: CLIENT_LOGIN_ERROR burst
+
+    # =========================================================================
+    # AMFA EVENTS MIRROR
+    # =========================================================================
+    # Polls each AMFA-enabled tenant's login events into the platform events
+    # table so the Events page serves one unified Keycloak + AMFA list. Rows are
+    # merged one-per-login on amfa_event_id.
+    amfa_mirror:
+      enabled: false            # MASTER SWITCH - off by default
+      poll_interval: 30s
+      backfill_days: 1          # first-run lookback window
+
+    # =========================================================================
+    # VERSION CHECKER
+    # =========================================================================
+    # The version checker monitors for new Keycloak releases
+    # and displays warnings when updates are available.
+    version_checker:
+      # Enable checking whether the monitored Keycloak is behind its latest
+      # release. OFF BY DEFAULT, and the only setting here that reaches a host
+      # outside your own infrastructure: api.github.com, for upstream Keycloak
+      # releases.
+      #
+      # Leave this false for any deployment that cannot reach the internet,
+      # including airgapped installations. There the requests fail on the HTTP
+      # timeout below with nothing on screen to explain it; the rest of the
+      # platform makes no external calls at all.
+      #
+      # With this false, no version checker is constructed and the UI simply
+      # shows no version information.
+      enabled: false
+
+      # How long to cache version information before checking again
+      # Valid time units: ns, us/µs, ms, s, m, h
+      # Recommended: 24h to 48h
+      cache_ttl: 24h
+
+      # HTTP timeout for GitHub API requests
+      # Valid time units: ns, us/µs, ms, s, m, h
+      http_timeout: 10s
+
+      # GitHub API base URL
+      # Only change this if you're using GitHub Enterprise Server
+      # Default: https://api.github.com
+      github_api_base_url: "https://api.github.com"
+
+      # GitHub organization/owner for Keycloak releases
+      # Default: keycloak (official Keycloak organization)
+      keycloak_owner: "keycloak"
+
+      # GitHub repository name for Keycloak releases
+      # Default: keycloak (official Keycloak repository)
+      keycloak_repo: "keycloak"
+
+  # ===========================================================================
+  # TENANTS
+  # ===========================================================================
+  # Define Keycloak instances to monitor. Each tenant represents a separate
+  # Keycloak deployment with its own connection details.
+  #
+  # The key (e.g., "prod-keycloak") is the tenant_id used throughout the system.
+  # Choose meaningful IDs for easy identification.
+  #
+  # SECURITY: For production, use environment variables for credentials:
+  #   MONITORING_KEYCLOAK_TENANTS_<TENANT_ID>_ADMIN_PASSWORD
+  # Example:
+  #   MONITORING_KEYCLOAK_TENANTS_PROD_KEYCLOAK_ADMIN_PASSWORD=secret123
+  tenants:
+    # Example: Production Keycloak instance
+    prod-keycloak:
+      # Enable monitoring for this tenant
+      # Set to false to temporarily disable without removing configuration
+      enabled: true
+
+      # Set as default tenant (automatically selected on app load)
+      # Only ONE tenant should be marked as default across all tenants
+      is_default: false
+
+      # Display name for the tenant (shown in UI)
+      name: "Production Keycloak"
+
+      # Optional description
+      description: "Main production Keycloak instance serving customer applications"
+
+      # Keycloak server URL (base URL of your Keycloak instance)
+      # The /auth prefix is auto-detected:
+      #   - Keycloak < 17: Will automatically use /auth prefix
+      #   - Keycloak 17+: Will automatically work without /auth prefix
+      # You can provide either format and it will be detected automatically:
+      #   - "https://keycloak.example.com" (recommended)
+      #   - "https://keycloak.example.com/auth" (also works)
+      server_url: "https://keycloak.example.com"
+
+      # Admin realm (usually 'master' for administrative access)
+      # Default: "master"
+      admin_realm: "master"
+
+      # Client ID for the confidential client (client_credentials grant)
+      # Create a dedicated client in Keycloak — see docs/keycloak-setup.md
+      client_id: "monitoring-service"
+
+      # Client secret — WARNING: use environment variables in production
+      # Example: MONITORING_KEYCLOAK_TENANTS_PROD_KEYCLOAK_CLIENT_SECRET=secret
+      client_secret: "change_me_in_production"
+
+      # Tags for organization and filtering (optional)
+      # Use tags to group tenants by environment, region, team, etc.
+      tags:
+        - "production"
+        - "critical"
+        - "us-east"
+
+      # Owner or team responsible for this tenant (optional)
+      # Useful for accountability and contact information
+      owner: "platform-team"
+
+      # Tenant-specific configuration overrides (optional)
+      # These settings override the global defaults for this specific tenant
+      config:
+        # Override InfiniSpan clustering for this tenant
+        # Set to true if THIS specific tenant uses InfiniSpan clustering
+        # When enabled, the High Availability dashboard will show cluster metrics
+        # including node count, replication status, and cache statistics
+        infinispan_enabled: true
+
+        # Custom port for InfiniSpan metrics endpoint (optional)
+        # By default, metrics are fetched from the same port as server_url
+        # Set this if InfiniSpan metrics are exposed on a different port
+        # Example: 9000 for metrics on port 9000
+        # Set to 0 or omit to use the same port as server_url
+        infinispan_port: 9000
+
+      # AMFA Events integration (optional, per-tenant).
+      # When enabled, KMT monitoring connects (read-only) to this tenant's Adaptive MFA PostgreSQL database
+      # to surface AMFA events under /api/tenants/<tenant_id>/amfa/{events,stats,geo}.
+      # Omit the block or set `enabled: false` to disable AMFA Events for this tenant.
+      # Tenants with invalid or unreachable AMFA configuration are logged and skipped
+      # at startup; they do NOT abort boot.
+      # SECURITY: Use a dedicated read-only Postgres role for `user`. KMT monitoring 
+      # never writes to AMFA. Pass `password` via an env var in production
+      # (the env-var name follows the existing MONITORING_KEYCLOAK_TENANTS_*
+      # convention used for admin credentials above).
+      #
+      # amfa:
+      #   enabled: false
+      #   # How many days of AMFA history to query by default. Hard-capped at
+      #   # 90 by Validate(); values <= 0 default to 30.
+      #   events_lookback_days: 30
+      #
+      #   # PREFERRED: read AMFA over its read-only monitoring API.
+      #   # When api.base_url is set it takes precedence over the database block
+      #   # below, and none of those database settings are required or read.
+      #   # No credentials belong here: requests carry a service-account token
+      #   # obtained from this tenant's own Keycloak using the client_id /
+      #   # client_secret already configured above for the Admin API. AMFA
+      #   # verifies it against that realm and rejects any token whose realm
+      #   # does not match the one being queried.
+      #   api:
+      #     base_url: "https://amfa.internal:8000"
+      #     # Per-request timeout. Defaults to 30s when omitted.
+      #     timeout: 30s
+      #   # alembic_version this KMT monitoring build was tested against. Leave empty
+      #   # to skip the schema check; mismatches log a WARN and continue.
+      #   expected_schema_version: ""
+      #   # LEGACY: direct database connection, for deployments whose AMFA
+      #   # predates the monitoring API. Ignored when api.base_url is set.
+      #   database:
+      #     host: "amfa.internal"
+      #     port: 5432
+      #     database: "adaptive_mfa"
+      #     user: "kmt_ro"
+      #     password: "${AMFA_DB_PASSWORD}"
+      #     # sslmode defaults to "require" when omitted. Supported values:
+      #     # disable, require, verify-ca, verify-full.
+      #     sslmode: "require"
+      #     # Connection pool sizing for this tenant's AMFA database.
+      #     max_conns: 5
+      #     min_conns: 1
+      #     # Per-connection lifetime / ping timeout.
+      #     timeout: 10s
+      #     # Optional read-replica host. When set, all queries prefer the
+      #     # replica over the primary `host`. Omit to use `host` only.
+      #     # read_replica_host: "amfa-replica.internal"
+
+    # Example: Staging Keycloak instance
+    staging-keycloak:
+      name: "Staging Keycloak"
+      description: "Pre-production testing environment"
+      server_url: "https://keycloak-staging.example.com"
+      admin_realm: "master"
+      client_id: "monitoring-service"
+      client_secret: "${KC_STAGING_CLIENT_SECRET}"
+      enabled: true
+      is_default: false
+      tags:
+        - "staging"
+        - "non-production"
+      owner: "platform-team"
+
+    # Example: Development Keycloak instance (disabled)
+    # dev-keycloak:
+    #   name: "Development Keycloak"
+    #   description: "Local development instance"
+    #   server_url: "http://localhost:8180"
+    #   admin_realm: "master"
+    #   client_id: "monitoring-service"
+    #   client_secret: "your-client-secret"
+    #   enabled: false  # Disabled - not monitored
+    #   tags:
+    #     - "development"
+    #     - "local"
+    #   owner: "developers"
+
+notifications:
+  # Base URL for Keycloak Monitoring Tool web UI
+  # Used in notifications to provide clickable links to alert details
+  # Example: "https://monitoring.example.com"
+  # Leave empty to disable links in notifications
+  base_url: "https://monitoring.example.com"
+
+  # =============================================================================
+  # GITLAB ISSUE INTEGRATION
+  # =============================================================================
+  # Creates GitLab issues for alerts.
+  gitlab:
+    # Enable or disable GitLab issue integration
+    enabled: false
+
+    # GitLab instance URL
+    # Examples:
+    #   - "https://gitlab.com" (GitLab SaaS)
+    #   - "https://gitlab.example.com" (Self-hosted GitLab)
+    url: "https://gitlab.com"
+
+    # GitLab personal access token or project access token
+    # Required scopes: api (or write_repository for project tokens)
+    # Generate at: Settings > Access Tokens
+    # WARNING: In production, use environment variables
+    # Example: MONITORING_NOTIFICATIONS_GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
+    token: ""
+
+    # GitLab project ID or path
+    # You can use either:
+    #   - Numeric project ID: "12345"
+    #   - Project path: "group/subgroup/project"
+    # Find at: Project > Settings > General
+    project_id: ""
+
+    # Milestone to assign issues to (optional)
+    # You can use either:
+    #   - Milestone IID (the #number shown in GitLab UI). Example: "41"
+    #   - Milestone title. Example: "Sprint 24" or "Q1 2025"
+    # The system will search for active milestones matching the IID or title
+    # Note: IID is the project-scoped number you see in the GitLab URL, not the internal database ID
+    # Leave empty to create issues without a milestone
+    milestone: ""
+
+    # Labels to add to created issues (optional)
+    # These help categorize and filter issues
+    # Example:
+    #   - "monitoring"
+    #   - "keycloak"
+    #   - "automated"
+    labels: []
+
+    # Minimum severity level for creating GitLab issues
+    # Only alerts with this severity or higher will create issues
+    # Options: info, warning, error, critical
+    #   - "info": Create issues for all alerts (info, warning, error, critical)
+    #   - "warning": Create issues for warning and above (warning, error, critical)
+    #   - "error": Create issues for error and above (error, critical)
+    #   - "critical": Create issues only for critical alerts
+    min_severity: "critical"
+
+  # =============================================================================
+  # SLACK INTEGRATION
+  # =============================================================================
+  # Sends formatted messages to Slack channels via incoming webhooks
+  slack:
+    # Enable or disable Slack integration
+    enabled: false
+
+    # Slack incoming webhook URL
+    # Create at: https://api.slack.com/messaging/webhooks
+    # Your Slack App > Incoming Webhooks > Add New Webhook to Workspace
+    # WARNING: In production, use environment variables
+    # Example: MONITORING_NOTIFICATIONS_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXX
+    webhook_url: ""
+
+    # Optional: Override the default channel specified in webhook
+    # Use channel name with # prefix (e.g., "#alerts") or channel ID
+    channel: ""
+
+    # Optional: Custom bot username for messages
+    # If not specified, uses the webhook's configured name
+    username: "Keycloak Monitoring Tool"
+
+    # Optional: Custom emoji icon for bot
+    # Examples: ":robot_face:", ":shield:", ":warning:"
+    icon_emoji: ":shield:"
+
+    # Minimum severity level for sending Slack messages
+    # Only alerts with this severity or higher will be sent to Slack
+    # Options: info, warning, error, critical
+    #   - "info": Send all alerts to Slack (info, warning, error, critical)
+    #   - "warning": Send warnings and above (warning, error, critical)
+    #   - "error": Send errors and above (error, critical)
+    #   - "critical": Send only critical alerts
+    min_severity: "warning"
+
+  # =============================================================================
+  # EMAIL INTEGRATION
+  # =============================================================================
+  # Sends email notifications via SMTP
+  email:
+    # Enable or disable email integration
+    enabled: false
+
+    # SMTP server hostname
+    # Examples:
+    #   - "smtp.gmail.com" (Gmail)
+    #   - "smtp.office365.com" (Office 365)
+    #   - "smtp.sendgrid.net" (SendGrid)
+    #   - "smtp.example.com" (Custom SMTP server)
+    smtp_host: "smtp.gmail.com"
+
+    # SMTP server port
+    # Common ports:
+    #   - 587: TLS (recommended)
+    #   - 465: SSL
+    #   - 25: Unencrypted (not recommended)
+    smtp_port: 587
+
+    # SMTP authentication username
+    # Usually your email address
+    # WARNING: In production, use environment variables
+    # Example: MONITORING_NOTIFICATIONS_EMAIL_USERNAME=alerts@example.com
+    username: ""
+
+    # SMTP authentication password
+    # For Gmail, use an "App Password" instead of your account password
+    # WARNING: In production, use environment variables
+    # Example: MONITORING_NOTIFICATIONS_EMAIL_PASSWORD=your-password
+    password: ""
+
+    # Sender email address
+    # This appears in the "From" field
+    from: "alerts@example.com"
+
+    # Recipient email addresses
+    # You can specify multiple recipients
+    to:
+      - "admin@example.com"
+      # - "security-team@example.com"
+      # - "devops@example.com"
+
+    # Use TLS encryption (recommended)
+    # Set to true for port 587, false for port 465 (SSL)
+    use_tls: true
+
+    # Skip TLS certificate verification
+    # WARNING: Only set to true for development/testing with self-signed certs
+    skip_verify: false
+
+    # Optional: Custom email subject template
+    # Available placeholders: {{severity}}, {{title}}, {{resource}}
+    # If not specified, uses default format
+    subject: "[{{severity}}] Keycloak Monitoring Tool Alert: {{title}}"
+
+    # Minimum severity level for sending email notifications
+    # Only alerts with this severity or higher will trigger emails
+    # Options: info, warning, error, critical
+    #   - "info": Send all alerts via email (info, warning, error, critical)
+    #   - "warning": Send warnings and above (warning, error, critical)
+    #   - "error": Send errors and above (error, critical) - Recommended
+    #   - "critical": Send only critical alerts
+    # Note: Email is typically reserved for higher severity alerts to avoid notification fatigue
+    min_severity: "error"
+
+# =============================================================================
+# ALERT SILENCES CONFIGURATION
+# =============================================================================
+# Define alert silence rules to suppress expected or non-actionable alerts.
+#
+# IMPORTANT: All events automatically become alerts based on their severity.
+# Silences allow you to filter out noise from expected events or maintenance windows.
+#
+# Use cases:
+# - Silence test/development environment alerts
+# - Temporary silences during planned maintenance
+# - Suppress known issues during migration periods
+# - Filter low-severity alerts from non-production tenants
+alert_silences:
+  # ==========================================================================
+  # EXAMPLE: Permanent Silence for Test Environment
+  # ==========================================================================
+  # Silences all alerts from test realms to reduce noise
+  - id: "silence-test-realm"
+    name: "Test Realm Alerts"
+    description: "Silence all alerts from test realm - used for development only"
+    enabled: true
+    matchers:
+      realm_name: "test-realm"        # Matches realm name exactly
+    # duration: ""                    # Empty = permanent silence
+    created_by: "system"
+    comment: "Test realm generates expected failures during QA testing"
+
+  # ==========================================================================
+  # EXAMPLE: Temporary Silence for Maintenance Window
+  # ==========================================================================
+  # Silences client authentication errors during planned maintenance
+  - id: "silence-client-maintenance"
+    name: "Client Credential Rotation Maintenance"
+    description: "Silence client auth errors during planned credential rotation"
+    enabled: false                    # Enable this when maintenance starts
+    matchers:
+      alert_type: "CLIENT_LOGIN_ERROR"
+      client_id: "production-app"    # Specific client undergoing maintenance
+    duration: "2h"                    # Silence for 2 hours
+    # starts_at: "2025-11-01T02:00:00Z"  # Optional: schedule for specific time
+    created_by: "system"
+    comment: "Rotating client secrets - expect temporary auth failures"
+
+  # ==========================================================================
+  # EXAMPLE: Silence Low-Severity Development Alerts
+  # ==========================================================================
+  # Filters out info-level alerts from development environment
+  - id: "silence-dev-info-alerts"
+    name: "Development Environment Info Alerts"
+    description: "Silence info-level alerts from development realm"
+    enabled: true
+    matchers:
+      realm_name: "development"
+      severity: "info"                # Only silence info level
+    created_by: "system"
+    comment: "Development generates many info alerts during testing"
+
+  # ==========================================================================
+  # EXAMPLE: Wildcard Pattern Matching
+  # ==========================================================================
+  # Silences alerts from multiple test clients using wildcard
+  # - id: "silence-test-clients"
+  #   name: "Test Client Alerts"
+  #   description: "Silence alerts from all test clients"
+  #   enabled: true
+  #   matchers:
+  #     client_id: "test-*"            # Matches test-app, test-service, etc.
+  #     severity: "*"                  # All severity levels
+  #   created_by: "system"
+  #   comment: "Test clients are temporary and generate noise"
+
+  # ==========================================================================
+  # EXAMPLE: Scheduled Maintenance Window
+  # ==========================================================================
+  # Pre-scheduled silence for upcoming maintenance
+  # - id: "silence-weekend-maintenance"
+  #   name: "Weekend Database Maintenance"
+  #   description: "Silence all alerts during weekend maintenance window"
+  #   enabled: true
+  #   matchers:
+  #     severity: "*"                  # Silence all severities
+  #     realm_name: "production"       # Only production realm
+  #   starts_at: "2025-11-15T00:00:00Z"  # Start time (RFC3339)
+  #   ends_at: "2025-11-15T04:00:00Z"    # End time (RFC3339)
+  #   created_by: "ops-team"
+  #   comment: "Database migration - expect service interruptions"
+
+  # ==========================================================================
+  # EXAMPLE: Tenant-Specific Silence
+  # ==========================================================================
+  # Silence alerts for a specific tenant during migration
+  # - id: "silence-tenant-migration"
+    #   name: "Tenant Migration"
+    #   description: "Silence alerts during tenant migration to new infrastructure"
+    #   enabled: true
+    #   tenant_id: "staging-keycloak"    # Apply only to this tenant
+    #   matchers:
+    #     alert_type: "*"                # All alert types
+    #   duration: "4h"
+    #   created_by: "migration-team"
+    #   comment: "Migrating tenant data - expect temporary issues"
+
+    # ==========================================================================
+    # EXAMPLE: Specific Error Type Silence
+    # ==========================================================================
+    # Silence a specific known issue that's being worked on
+    # - id: "silence-known-idp-issue"
+    #   name: "Known IDP Configuration Issue"
+    #   description: "Silence IDP errors for provider undergoing reconfiguration"
+    #   enabled: true
+    #   matchers:
+    #     alert_type: "IDENTITY_PROVIDER_*"  # Matches all IDP error types
+    #     realm_name: "production"
+    #   duration: "24h"
+    #   created_by: "security-team"
+    #   comment: "JIRA-1234: Reconfiguring SAML provider certificates"
+
+    # ==========================================================================
+    # Additional Silence Examples
+    # ==========================================================================
+    # For more examples and detailed documentation, see:
+    # docs/alert-silences-configuration.md
+    #
+    # Silence Metrics:
+    # - Total silenced alerts are tracked per rule
+    # - Metrics include breakdown by tenant, type, and rule
+    # - View silence metrics via API or UI dashboards
+
+# =============================================================================
+# DATABASE CONFIGURATION
+# =============================================================================
+database:
+  # PostgreSQL server hostname or IP address
+  # In Docker: use service name from docker-compose.yml (e.g., "postgres")
+  # In local dev: use "localhost" or "127.0.0.1"
+  host: "kmt-postgres"
+
+  # PostgreSQL server port
+  port: 5432
+
+  # Database name to connect to
+  database: "monitoring"
+
+  # Database user for authentication
+  user: "monitoring"
+
+  # Database password for authentication
+  # WARNING: In production, use environment variables or secrets management
+  # Example: MONITORING_DATABASE_PASSWORD=your_secure_password
+  password: "monitoring_password"
+
+  # SSL mode for database connection
+  # Options: disable, require, verify-ca, verify-full
+  #   - disable: No SSL (use only in development)
+  #   - require: Use SSL without certificate verification
+  #   - verify-ca: Verify server certificate against CA
+  # Default: disable
+  ssl_mode: "disable"
+
+  # Maximum number of connections in the pool
+  # Higher values allow more concurrent queries but use more resources
+  max_conns: 25
+
+  # Minimum number of idle connections to maintain in the pool
+  # Keeping idle connections improves response time for incoming requests
+  min_conns: 5
+
+  # Connection timeout for database operations
+  # Valid time units: ns, us/µs, ms, s, m, h
+  timeout: 30s
+
+# =============================================================================
+# AUTHENTICATION CONFIGURATION
+# =============================================================================
+# IMPORTANT: Authentication is ALWAYS required for the application
+# You must enable at least one authentication method (simple or OAuth2)
+auth:
+  # =============================================================================
+  # SIMPLE AUTHENTICATION (Username/Password)
+  # =============================================================================
+  simple:
+    # Enable or disable simple username/password authentication
+    enabled: true
+
+    # Initial admin credentials
+    # SECURITY NOTICE: These credentials are ONLY used when creating the initial admin user
+    # (when no users exist in the database). You will be REQUIRED to change the password
+    # on first login.
+    #
+    # CRITICAL: You MUST set the initial admin password via environment variable in production
+    # Example: MONITORING_AUTH_SIMPLE_DEFAULT_PASS='YourS3cur3P@ssw0rd!'
+    #
+    # Password requirements:
+    #   - Minimum 12 characters
+    #   - At least one uppercase letter
+    #   - At least one lowercase letter
+    #   - At least one number
+    #   - At least one special character
+    #   - Cannot be a common weak password (e.g., admin123, password123, etc.)
+    #
+    # NEVER commit the actual password to version control. Leave these blank and
+    # set via environment variables:
+    #   - MONITORING_AUTH_SIMPLE_DEFAULT_USER=admin
+    #   - MONITORING_AUTH_SIMPLE_DEFAULT_PASS=<strong-password>
+    #   - MONITORING_AUTH_SIMPLE_DEFAULT_EMAIL=admin@example.com
+    default_user: ""
+    default_pass: ""
+    default_email: ""
+
+  # =============================================================================
+  # OAUTH2/OIDC AUTHENTICATION (Keycloak SSO)
+  # =============================================================================
+  oauth2:
+    # Enable or disable OAuth2/OIDC authentication
+    enabled: false
+    # OAuth2/OIDC Provider URL (Keycloak realm URL)
+    # Example for Keycloak: https://keycloak.example.com/realms/myrealm
+    # The provider URL should point to your Keycloak realm
+    provider_url: "https://keycloak.example.com/auth/realms/master"
+
+    # OAuth2 Client ID (registered in Keycloak)
+    # This is the client ID you created in Keycloak for this application
+    client_id: "monitoring-dashboard"
+
+    # OAuth2 Client Secret (from Keycloak client configuration)
+    # WARNING: In production, use environment variables or secrets management
+    # Example: MONITORING_AUTH_OAUTH2_CLIENT_SECRET=your_client_secret
+    client_secret: "your-client-secret-here"
+
+    # OAuth2 Redirect URL (callback URL)
+    # This must match the redirect URL configured in Keycloak
+    # Format: http(s)://your-domain/auth/callback
+    redirect_url: "http://localhost:7880/auth/callback"
+
+    # OAuth2 Scopes to request
+    # Required scopes for OIDC authentication
+    # - openid: Required for OIDC (provides ID token)
+    # - profile: User profile information (name, username, etc.)
+    # - email: User email address
+    scopes:
+      - "openid"
+      - "profile"
+      - "email"
+
+    # Initial Admin Users (OAuth2/Keycloak only)
+    # List of email addresses that should be granted admin privileges on first login
+    # When these users authenticate via OAuth2/Keycloak for the first time,
+    # they will automatically be assigned the admin role and full permissions
+    #
+    # Example:
+    #   admin_users:
+    #     - "admin@example.com"
+    #     - "john.doe@example.com"
+    #     - "security-team@example.com"
+    #
+    # IMPORTANT: At least one admin user must be configured when using OAuth2-only auth
+    # Can also be set via environment variable (comma-separated):
+    #   MONITORING_AUTH_OAUTH2_ADMIN_USERS=admin@example.com,john.doe@example.com
+    admin_users: []
+
+    # Advanced settings (usually not needed)
+    # Skip issuer check (set to true only for development/testing)
+    skip_issuer_check: false
+
+    # Skip token expiry check (set to true only for development/testing)
+    skip_expiry_check: false
+
+  session:
+    # Session secret key for cookie encryption
+    # REQUIRED: with no secret every login answers 500 and the server logs
+    # "securecookie: hash key is not set"
+    # IMPORTANT: Use a strong random string (at least 32 characters)
+    # Generate with: openssl rand -base64 32
+    # WARNING: In production, use environment variables or secrets management
+    # Example: MONITORING_AUTH_SESSION_SECRET=your-32-chars-key
+    # Keep the key in this file when the value comes from that variable: no
+    # default is registered for it, so AutomaticEnv binds it only for a key
+    # config.yaml already carries
+    secret: "change-this-to-a-random-secret-key-at-least-32-chars"
+
+    # Session cookie name
+    name: "monitoring_session"
+
+    # Session maximum age (how long sessions remain valid)
+    # Valid time units: ns, us/µs, ms, s, m, h
+    max_age: 24h
+
+    # Use secure cookies (HTTPS only)
+    # Set to true in production when using HTTPS
+    # Set to false in development when using HTTP
+    secure: false
+
+    # SameSite cookie attribute for CSRF protection
+    # Options:
+    #   - lax: Recommended for most applications (default)
+    #   - strict: Stricter CSRF protection but may break some flows
+    #   - none: Allows cross-site requests (requires secure: true)
+    same_site: "lax"
+
+    # OAuth2 state parameter max age (for CSRF protection)
+    # This controls how long the state parameter is valid during login flow
+    # Valid time units: ns, us/µs, ms, s, m, h
+    state_max_age: 10m
+
+# =============================================================================
+# LOGGING CONFIGURATION
+# =============================================================================
+logging:
+  # Log level controls which messages are output
+  # Options (from least to most verbose):
+  #   - error: Only error messages
+  #   - warn: Warnings and errors
+  #   - info: Informational messages, warnings, and errors (recommended)
+  #   - debug: Debug information plus all above (verbose, use for troubleshooting)
+  level: "info"
+
+  # Log output format
+  # Options:
+  #   - json: Structured JSON logs (recommended for production, machine parsing)
+  #   - console: Human-readable console logs (better for development)
+  format: "json"
+
+  # Log output configuration
+  output:
+    stdout:
+      # Enable or disable logging to stdout (standard output)
+      enabled: true
+
+      # Pretty-print logs (only applies to JSON format)
+      # When true, JSON logs are indented and formatted for readability
+      # Set to false in production for compact logs
+      pretty: false
+
+# =============================================================================
+# MCP SERVER CONFIGURATION
+# =============================================================================
+# Read-only Model Context Protocol server (cmd/mcp-server). Authenticates MCP
+# clients with personal access tokens (/api/tokens) and never migrates the
+# database schema.
+mcp:
+  # Master switch. The mcp-server binary exits immediately when disabled.
+  enabled: false
+
+  # Port the MCP endpoint (/mcp), /health, /ready and /metrics listen on.
+  port: 7889
+
+  # Page size applied when a tool call does not request one, and the hard cap
+  # on any page size a tool call does request. They replace the older
+  # max_page_size (the default) and absolute_max_page_size (the cap): a config
+  # still carrying absolute_max_page_size fails startup, since max_page_size
+  # now caps what it used to default.
+  default_page_size: 50
+  max_page_size: 500
+
+  # Signs the pagination cursors MCP tools hand to clients. Required, minimum
+  # 32 bytes: the server refuses to start on a shorter one rather than fall
+  # back to a per-process key whose cursors stop verifying across a restart.
+  # Generate with: openssl rand -base64 32
+  cursor_hmac_key: ""
+
+  # Exact Origin header values accepted on MCP requests. An empty list rejects
+  # every Origin-bearing request (DNS-rebinding defense; MCP clients are not
+  # browsers and send no Origin).
+  origin_allowlist: []
+
+  # Prometheus /metrics on the MCP port; same convention as http.metrics.
+  # /metrics is served outside the MCP authentication middleware, so
+  # auth_token is required whenever enabled is true: the server refuses to
+  # start on an enabled endpoint with no token.
+  metrics:
+    enabled: false
+    auth_token: ""
+
+  # Token-bucket rate limits. per_user_per_minute is one budget shared by all
+  # of a user's API tokens and applies to tool calls after authentication.
+  # per_ip_per_minute applies to every request before authentication, keyed by
+  # the connection's direct remote address (X-Forwarded-For is ignored; the
+  # MCP server is not behind a trusted proxy by default). burst is the
+  # instantaneous allowance of both buckets. 0 disables a limiter.
+  rate:
+    per_user_per_minute: 120
+    per_ip_per_minute: 300
+    burst: 30
+
+  # Maximum serialized size of any tool result in bytes; a larger result is
+  # replaced with an error telling the caller to retry with a smaller limit
+  # (page-size caps normally keep results far below this). 0 or absent means
+  # the 1 MiB default; the cap cannot be disabled.
+  max_response_bytes: 1048576
+
+  # Required: the read-only database role the MCP server connects with. Same
+  # shape as the top-level database block. There is no fallback to that block,
+  # because it names the read-write application role; the MCP server refuses
+  # to start without this one. Create the role with
+  # deployments/postgres/mcp-readonly-role.sql, and supply the password
+  # through MONITORING_MCP_DATABASE_PASSWORD while keeping the empty
+  # password key here (Viper only binds an env var for a key it already sees).
+  database:
+    host: "kmt-postgres"
+    port: 5432
+    database: "monitoring"
+    user: "monitoring_readonly"
+    password: ""
+    ssl_mode: "disable"
+    max_conns: 10
+    min_conns: 2
+    timeout: 30s

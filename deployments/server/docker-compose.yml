@@ -1,0 +1,115 @@
+################################################################################
+# Production-style deployment template
+################################################################################
+#
+# For a self-hosted deployment behind a reverse proxy with TLS, using
+# pre-built images rather than building locally. Assumes an existing external
+# Docker network named "traefik-network" with a Traefik instance attached to
+# it, and a certresolver named "letsencrypt" configured on that Traefik
+# instance. See deployments/local/docker-compose.yml instead for local
+# development (no reverse proxy required).
+#
+# Fill in before use:
+#   - The three KMT_*_IMAGE values below. Build them with `make docker-build`
+#     (or the individual docker-build-server / docker-build-web /
+#     docker-build-mcp-server targets — all three build from the same
+#     build/Dockerfile, parameterized by the SERVICE build-arg), then push to
+#     a registry you control, or reference the local image tags directly.
+#   - kmt.yourdomain.com (both occurrences) with your real hostname.
+#   - POSTGRES_USER / POSTGRES_PASSWORD via environment variables or a .env
+#     file — do not hardcode real credentials into this file.
+#
+################################################################################
+
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: kmt-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: monitoring
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - kmt-postgres-data:/var/lib/postgresql/data
+    networks:
+      - kmt-network
+    restart: unless-stopped
+    # TimescaleDB configuration
+    command: >
+      postgres
+      -c shared_preload_libraries=timescaledb
+      -c max_connections=200
+      -c shared_buffers=512MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=128MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=10MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+
+  api-server:
+    image: ${KMT_API_IMAGE:-kmt-server:latest}
+    container_name: kmt-server
+    ports:
+      - "7888:7888"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    networks:
+      - kmt-network
+      - traefik-network
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
+  mcp-server:
+    image: ${KMT_MCP_IMAGE:-kmt-mcp-server:latest}
+    container_name: kmt-mcp-server
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    networks:
+      - kmt-network
+    restart: on-failure
+    depends_on:
+      - postgres
+
+  web:
+    image: ${KMT_WEB_IMAGE:-kmt-web:latest}
+    container_name: kmt-web
+    ports:
+      - "7880:7880"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    networks:
+      - kmt-network
+      - traefik-network
+    restart: unless-stopped
+    depends_on:
+      - api-server
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-network"
+      - "traefik.http.routers.kmt-web.rule=Host(`kmt.yourdomain.com`)"
+      - "traefik.http.routers.kmt-web.entrypoints=web"
+      - "traefik.http.routers.kmt-web.middlewares=kmt-https-redirect"
+      - "traefik.http.middlewares.kmt-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.kmt-https-redirect.redirectscheme.permanent=true"
+      - "traefik.http.routers.kmt-web-secure.rule=Host(`kmt.yourdomain.com`)"
+      - "traefik.http.routers.kmt-web-secure.entrypoints=websecure"
+      - "traefik.http.routers.kmt-web-secure.tls=true"
+      - "traefik.http.routers.kmt-web-secure.tls.certresolver=letsencrypt"
+      - "traefik.http.services.kmt-web.loadbalancer.server.port=7880"
+
+volumes:
+  kmt-postgres-data:
+
+networks:
+  kmt-network:
+    driver: bridge
+  traefik-network:
+    external: true
