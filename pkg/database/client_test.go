@@ -26,7 +26,7 @@ import (
 //
 // Example:
 //
-//	KMT_DESTRUCTIVE_TEST_DATABASE_DSN="host=localhost port=55432 dbname=pmp_test user=pmp password=pmp sslmode=disable" \
+//	KMT_DESTRUCTIVE_TEST_DATABASE_DSN="host=localhost port=55432 dbname=kmt_test user=kmt password=kmt sslmode=disable" \
 //	    go test ./pkg/database/...
 func newTestClient(t *testing.T) *Client {
 	t.Helper()

@@ -12,7 +12,7 @@ func TestDisposableName(t *testing.T) {
 		{"adaptive_mfa", false},
 		{"latest", false},
 		{"contest", false},
-		{"pmp_test", true},
+		{"kmt_test", true},
 		{"amfa_test", true},
 		{"test", true},
 		{"kmt-test-db", true},

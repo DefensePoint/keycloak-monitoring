@@ -31,6 +31,6 @@ func RequireDisposable(t testing.TB, dsn string) {
 		t.Fatalf("parse destructive test DSN: %v", err)
 	}
 	if !disposableName.MatchString(strings.ToLower(parsed.Database)) {
-		t.Fatalf("refusing to run a destructive test against database %q: the name needs a test, tmp or scratch component (e.g. pmp_test)", parsed.Database)
+		t.Fatalf("refusing to run a destructive test against database %q: the name needs a test, tmp or scratch component (e.g. kmt_test)", parsed.Database)
 	}
 }
