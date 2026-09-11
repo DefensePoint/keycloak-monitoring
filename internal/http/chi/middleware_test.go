@@ -75,6 +75,49 @@ func TestAllowedRealms(t *testing.T) {
 			wantAll: true,
 		},
 		{
+			// The fail-open shape. A blank realm names no realm, but left in
+			// the scope it survives every len(scope) == 0 guard and then
+			// widens the query: alert statistics strip empties and apply no
+			// realm filter at all, and an empty realm selects the AMFA
+			// all-realms aggregate. This must resolve exactly like a stored
+			// '[]', which is no realms and all = false.
+			name: "policy row of one blank realm allows no realm",
+			rbac: &mockRBACChecker{policies: policyFor("tenant-a", "")},
+		},
+		{
+			name: "policy row of nothing but blank realms allows no realm",
+			rbac: &mockRBACChecker{policies: policyFor("tenant-a", "", "   ", "\t")},
+		},
+		{
+			// Crucially all = false, not true: dropping every realm must not
+			// be mistaken for "no restriction".
+			name: "blanks are dropped without unrestricting the caller",
+			rbac: &mockRBACChecker{policies: []*domain.TenantPolicy{
+				{TenantID: "tenant-a", AllowedRealms: []string{"", "  "}},
+			}},
+			wantAll: false,
+		},
+		{
+			name:       "a blank beside a real realm keeps only the real one",
+			rbac:       &mockRBACChecker{policies: policyFor("tenant-a", "", "realmB")},
+			wantRealms: []string{"realmB"},
+		},
+		{
+			name: "a blank row alongside a listing row does not unrestrict",
+			rbac: &mockRBACChecker{policies: []*domain.TenantPolicy{
+				{TenantID: "tenant-a", AllowedRealms: []string{""}},
+				{TenantID: "tenant-a", AllowedRealms: []string{"realmB"}},
+			}},
+			wantRealms: []string{"realmB"},
+		},
+		{
+			// Realms are matched by exact equality, so a padded name is not
+			// rewritten into the realm it resembles. Only blanks are dropped.
+			name:       "a padded realm name is kept verbatim, not trimmed into a grant",
+			rbac:       &mockRBACChecker{policies: policyFor("tenant-a", " realmB ")},
+			wantRealms: []string{" realmB "},
+		},
+		{
 			name:    "policy lookup failure denies",
 			rbac:    &mockRBACChecker{policiesErr: errors.New("policy lookup failed")},
 			wantErr: true,
@@ -107,7 +150,10 @@ func TestAllowedRealms(t *testing.T) {
 				return
 			}
 			if !reflect.DeepEqual(realms, tt.wantRealms) {
-				t.Errorf("allowedRealms() realms = %v, want %v", realms, tt.wantRealms)
+				// %q, not %v: a scope of [""] prints as [] under %v, which is
+				// indistinguishable from the empty scope this test exists to
+				// tell it apart from.
+				t.Errorf("allowedRealms() realms = %q, want %q", realms, tt.wantRealms)
 			}
 		})
 	}

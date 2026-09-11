@@ -32,6 +32,9 @@ type AssignRole struct {
 //
 //	@Description	Request body for tenant policy creation
 type CreateTenantPolicy struct {
-	TenantID      string   `json:"tenant_id" validate:"required,min=1" example:"my-keycloak"`
-	AllowedRealms []string `json:"allowed_realms" validate:"omitempty" example:"master,production"`
+	TenantID string `json:"tenant_id" validate:"required,min=1" example:"my-keycloak"`
+	// dive,min=1 rejects a blank entry: a realm naming no realm reads as "no
+	// restriction" downstream and would widen the caller to the whole tenant.
+	// omitempty keeps an absent list meaning unrestricted.
+	AllowedRealms []string `json:"allowed_realms" validate:"omitempty,dive,min=1" example:"master,production"`
 }

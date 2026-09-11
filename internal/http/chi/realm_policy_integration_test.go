@@ -51,6 +51,10 @@ type policyColumn struct {
 	unrestrict  bool
 	viaAPI      []string
 	useAPIWrite bool
+	// grantsNothing marks a shape whose realms match no realm at all, so the
+	// caller is entitled to read nothing. Set explicitly because the shape is
+	// not detectable by sniffing writeSQL for '[]'.
+	grantsNothing bool
 }
 
 // policyColumns covers every shape a tenant_policies row can carry.
@@ -64,12 +68,25 @@ func policyColumns() []policyColumn {
 		{name: "written through CreatePolicy with no realms", useAPIWrite: true, unrestrict: true},
 		{name: "written through CreatePolicy with an empty list", useAPIWrite: true, viaAPI: []string{}},
 		{name: "written through CreatePolicy with a realm", useAPIWrite: true, viaAPI: []string{policyRealmAllowed}},
+		// A blank realm names no realm, so a policy of nothing but blanks
+		// grants nothing, exactly like a stored '[]'. Left in the scope it
+		// reads as "no filter" in alert statistics and as the all-realms
+		// aggregate in the AMFA KPIs, turning no entitlement into the whole
+		// tenant.
+		{name: "stored list of one empty realm", writeSQL: `'[""]'::jsonb`, grantsNothing: true},
+		{name: "stored list of only blank realms", writeSQL: `'["", "   "]'::jsonb`, grantsNothing: true},
+		// A blank alongside a real realm keeps the real one and drops the
+		// blank, so this caller reads exactly the realm it names.
+		{name: "stored blank beside a real realm", writeSQL: `'["", "` + policyRealmAllowed + `"]'::jsonb`},
 	}
 }
 
 // allowsAllowedRealm reports whether this caller may read policyRealmAllowed at
 // all. Only the two empty-list shapes may not.
 func (c policyColumn) allowsAllowedRealm() bool {
+	if c.grantsNothing {
+		return false
+	}
 	if c.unrestrict {
 		return true
 	}

@@ -633,6 +633,10 @@ func (h *RBACHandlers) createUserPolicy(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := h.service.CreateTenantPolicy(ctx, uint(userID), req.TenantID, req.AllowedRealms, grantedBy); err != nil {
+		if errors.Is(err, rbac.ErrAllowedRealmBlank) {
+			httputil.RespondBadRequest(w, h.log, err.Error())
+			return
+		}
 		h.log.Error("Failed to create tenant policy", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Failed to create policy")
 		return

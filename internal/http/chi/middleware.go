@@ -493,6 +493,20 @@ func allowedRealmsWithAdmin(ctx context.Context, svc RBACChecker, userID uint, t
 		}
 		matched = true
 		for _, realm := range policy.AllowedRealms {
+			// A blank realm names no realm, so it must never enter the scope.
+			// Left in, it slips past every len(scope) == 0 guard and then
+			// widens the query instead of narrowing it: alerts.GetStatistics
+			// strips empties and treats "nothing left" as no realm filter, and
+			// an empty realm selects the AMFA all-realms aggregate. A caller
+			// entitled to nothing would read the whole tenant.
+			//
+			// Dropped, not trimmed: a realm is only ever removed here, never
+			// rewritten into one the policy does not literally name. matched
+			// stays true, so a policy of nothing but blanks resolves to an
+			// empty scope and stays fail-closed, exactly like a stored '[]'.
+			if strings.TrimSpace(realm) == "" {
+				continue
+			}
 			if !slices.Contains(realms, realm) {
 				realms = append(realms, realm)
 			}
