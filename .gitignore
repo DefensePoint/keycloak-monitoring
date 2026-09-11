@@ -27,12 +27,17 @@ go.work
 # Configuration files with credentials
 config.yaml
 *.yaml
+# Both patterns are needed: `*.env` catches names like `local.env`, while
+# `.env*` catches the dotfile variants (.env.production, .env.local).
 .env
 *.env
+.env*
 
 # Keep example and compose files
 !config.yaml.example
 !docker-compose.yml
+# Holds variable names and no values; `.env*` would otherwise ignore it.
+!.env.example
 
 # IDE specific files
 .idea/
