@@ -32,8 +32,8 @@ Developer guide for working with the Keycloak Monitoring Tool codebase.
 
 ```bash
 # Clone repository
-git clone git@repos.defensepoint.com:iam/oss-pmt/kmt.git
-cd kmt
+git clone https://github.com/DefensePoint/keycloak-monitoring.git
+cd keycloak-monitoring
 
 # Install dependencies
 make deps

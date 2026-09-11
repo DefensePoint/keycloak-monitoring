@@ -34,8 +34,8 @@ This is the fastest way to get started. The entire stack (API server, web fronte
 ### Step 1: Clone the Repository
 
 ```bash
-git clone git@repos.defensepoint.com:iam/oss-pmt/kmt.git
-cd kmt
+git clone https://github.com/DefensePoint/keycloak-monitoring.git
+cd keycloak-monitoring
 ```
 
 ### Step 2: Create Configuration
