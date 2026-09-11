@@ -8,6 +8,7 @@ interface UseEventsParams {
   startTime?: string;
   endTime?: string;
   source?: string;
+  realm?: string;
   refetchInterval?: number;
 }
 
@@ -18,10 +19,20 @@ export function useEvents({
   startTime,
   endTime,
   source,
+  realm,
   refetchInterval = 10000,
 }: UseEventsParams) {
   return useQuery({
-    queryKey: ["events", tenantId, source, startTime, endTime, limit, offset],
+    queryKey: [
+      "events",
+      tenantId,
+      source,
+      realm,
+      startTime,
+      endTime,
+      limit,
+      offset,
+    ],
     queryFn: () =>
       eventsService.getEvents(
         tenantId!,
@@ -30,6 +41,7 @@ export function useEvents({
         startTime,
         endTime,
         source,
+        realm,
       ),
     enabled: !!tenantId,
     refetchInterval,

@@ -28,8 +28,14 @@ export {
   useResolveAlert,
 } from "./useAlerts";
 export { useEvents, useEventStats } from "./useEvents";
-export { useAmfaStats, isAllRealmsUnsupportedError } from "./useAmfaStats";
+export {
+  useAmfaStats,
+  isAllRealmsUnsupportedError,
+  isRealmScopeRequiresRealmError,
+} from "./useAmfaStats";
 export { useAmfaGeo } from "./useAmfaGeo";
 export { useAmfaRealms } from "./useAmfaRealms";
+export { useWorldGeo } from "./useWorldGeo";
+export { useWorldCities, type WorldCity } from "./useWorldCities";
 export { useVersion, useInfinispanMetrics } from "./useHealth";
 export { useFormErrors } from "./useFormErrors";

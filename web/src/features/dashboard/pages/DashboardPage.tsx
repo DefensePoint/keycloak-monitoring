@@ -190,7 +190,10 @@ export function DashboardPage() {
     limit: 10,
     startTime,
     endTime,
-    source: selectedRealm !== "all" ? `keycloak:${selectedRealm}` : undefined,
+    // Matches the stats call below, which already filters by realm. Encoding
+    // the realm as a Keycloak source here dropped the realm's AMFA events, so
+    // the counts and the list disagreed on the same page.
+    realm: selectedRealm !== "all" ? selectedRealm : undefined,
   });
 
   const { data: stats, dataUpdatedAt: statsUpdatedAt } = useEventStats({

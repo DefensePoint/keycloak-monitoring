@@ -5,7 +5,9 @@ import { createElement } from "react";
 import {
   useAmfaStats,
   isAllRealmsUnsupportedError,
+  isRealmScopeRequiresRealmError,
   AMFA_ALL_REALMS_UNSUPPORTED,
+  AMFA_REALM_SCOPE_REQUIRES_REALM,
 } from "./useAmfaStats";
 import { apiClient } from "@/shared/lib/apiClient";
 
@@ -33,6 +35,38 @@ describe("isAllRealmsUnsupportedError", () => {
       false,
     );
     expect(isAllRealmsUnsupportedError(undefined)).toBe(false);
+  });
+
+  it("does not match the permission-driven refusal", () => {
+    expect(
+      isAllRealmsUnsupportedError(new Error(AMFA_REALM_SCOPE_REQUIRES_REALM)),
+    ).toBe(false);
+  });
+});
+
+describe("isRealmScopeRequiresRealmError", () => {
+  it("matches the permission-driven backend error code", () => {
+    expect(
+      isRealmScopeRequiresRealmError(
+        new Error(AMFA_REALM_SCOPE_REQUIRES_REALM),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not match the transport's all-realms refusal", () => {
+    expect(
+      isRealmScopeRequiresRealmError(new Error(AMFA_ALL_REALMS_UNSUPPORTED)),
+    ).toBe(false);
+  });
+
+  it("does not match other errors or non-Error values", () => {
+    expect(
+      isRealmScopeRequiresRealmError(new Error("amfa_not_configured")),
+    ).toBe(false);
+    expect(
+      isRealmScopeRequiresRealmError(AMFA_REALM_SCOPE_REQUIRES_REALM),
+    ).toBe(false);
+    expect(isRealmScopeRequiresRealmError(undefined)).toBe(false);
   });
 });
 
@@ -86,5 +120,43 @@ describe("useAmfaStats", () => {
 
     // Only the initial attempt - the unsupported error must not be retried.
     expect(apiClient.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops retrying once the backend refuses on the caller's realm scope", async () => {
+    vi.mocked(apiClient.get).mockRejectedValue(
+      new Error(AMFA_REALM_SCOPE_REQUIRES_REALM),
+    );
+
+    const { result } = renderHook(
+      () => useAmfaStats({ tenantId: "tenant-1" }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(apiClient.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces the realm an all-realms request was narrowed to", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      total: 5,
+      risky: 2,
+      unique_users: 4,
+      flagged_ips: 0,
+      applied_realm_id: "master",
+    });
+
+    const { result } = renderHook(
+      () => useAmfaStats({ tenantId: "tenant-1" }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(apiClient.get).toHaveBeenCalledWith(
+      "/tenants/tenant-1/amfa/stats",
+      {},
+    );
+    expect(result.current.data?.applied_realm_id).toBe("master");
   });
 });
