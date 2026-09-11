@@ -3,8 +3,8 @@
 Two scripts, both run manually with psql, once per environment; neither is part
 of any migration or pipeline.
 
-- `mcp-readonly-role.sql` creates the least-privilege `kmt_ro` role the MCP
-  server (`cmd/mcp-server`) connects with.
+- `mcp-readonly-role.sql` creates the least-privilege `monitoring_readonly`
+  role the MCP server (`cmd/mcp-server`) connects with.
 - `events-keyset-index.sql` builds the keyset-pagination index `list_events`
   needs, with `CONCURRENTLY` so an environment that already holds events does
   not block writes for the length of the build.
@@ -48,9 +48,9 @@ of any migration or pipeline.
      -f mcp-readonly-role.sql
    ```
 
-   The script is not idempotent: `CREATE ROLE` fails if `kmt_ro` already
-   exists. To extend an existing role with a table added later, run only the
-   new `GRANT`.
+   The script is not idempotent: `CREATE ROLE` fails if `monitoring_readonly`
+   already exists. To extend an existing role with a table added later, run
+   only the new `GRANT`.
 
 4. Point `mcp.database` in `config.yaml` at the role, supplying the password
    through `MONITORING_MCP_DATABASE_PASSWORD` while keeping an empty

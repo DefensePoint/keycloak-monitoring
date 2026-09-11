@@ -32,10 +32,10 @@
 
 BEGIN;
 
-CREATE ROLE kmt_ro WITH LOGIN PASSWORD :'mcp_password';
+CREATE ROLE monitoring_readonly WITH LOGIN PASSWORD :'mcp_password';
 
-GRANT CONNECT ON DATABASE monitoring TO kmt_ro;
-GRANT USAGE ON SCHEMA public TO kmt_ro;
+GRANT CONNECT ON DATABASE monitoring TO monitoring_readonly;
+GRANT USAGE ON SCHEMA public TO monitoring_readonly;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
 GRANT SELECT ON
@@ -53,7 +53,7 @@ GRANT SELECT ON
     role_permissions,
     user_roles,
     tenant_policies
-TO kmt_ro;
+TO monitoring_readonly;
 
 -- Deliberately not granted: sessions, notification_logs, operator_actions,
 -- alert_rules, pending_tenant_purges, amfa_mirror_watermarks.

@@ -1179,7 +1179,7 @@ mcp:
     host: "kmt-postgres"
     port: 5432
     database: "monitoring"
-    user: "kmt_ro"
+    user: "monitoring_readonly"
     password: ""
     ssl_mode: "require"
     max_conns: 10
