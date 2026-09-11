@@ -601,14 +601,6 @@ func TestNewMonitor(t *testing.T) {
 	if monitor.tenantName != "Test Tenant" {
 		t.Errorf("tenantName = %s, want Test Tenant", monitor.tenantName)
 	}
-
-	if monitor.stopChan == nil {
-		t.Error("stopChan should not be nil")
-	}
-
-	if monitor.doneChan == nil {
-		t.Error("doneChan should not be nil")
-	}
 }
 
 func TestMonitor_StartStop(t *testing.T) {
@@ -650,10 +642,21 @@ func TestMonitor_StartStop(t *testing.T) {
 	// Give some time for workers to start and do initial collection
 	time.Sleep(200 * time.Millisecond)
 
-	// Stop should not return error
+	// Stop should not return error, and should not sit on its drain timeout.
+	//
+	// Stop used to wait on a done channel that nothing ever closed, so it
+	// blocked the full 10s and then logged a spurious stop timeout on every
+	// shutdown. This test passed throughout, because it only checked the
+	// error, so assert the duration too: with one monitor per tenant and fx
+	// running OnStop hooks sequentially, a 10s stall each blows the 15s fx
+	// shutdown timeout.
+	start := time.Now()
 	err = monitor.Stop()
 	if err != nil {
 		t.Fatalf("Stop() error = %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("Stop() took %s, want a prompt drain: the polling workers are not being awaited", elapsed)
 	}
 }
 
@@ -1884,4 +1887,143 @@ func TestCollectHealth_UpdatesTenantHealthStatus(t *testing.T) {
 			t.Errorf("expected last_error cleared (empty) on UP, got %q", updater.lastError)
 		}
 	})
+}
+
+// Cancelling the run context must let Stop drain promptly, even when a
+// collector is blocked on a slow Keycloak call.
+//
+// This is the sequence fx uses: OnStop cancels the run context, then calls
+// Stop. It matters here because pollEvents runs collectEvents once before
+// entering its select loop, so Stop waits on that first collection no matter
+// what the ticker is doing. The admin client builds its requests with
+// http.NewRequestWithContext, so a cancelled context aborts the in-flight
+// call; this test is what keeps that true. With one monitor per tenant and fx
+// running OnStop hooks sequentially, a stalled drain here would blow the 15s
+// fx shutdown timeout.
+func TestMonitor_StopDrainsPromptlyWhenContextCancelled(t *testing.T) {
+	client := newMockAdminAPI()
+
+	var once sync.Once
+	entered := make(chan struct{})
+	// Stand in for a slow Keycloak round trip that honours cancellation, the
+	// way http.NewRequestWithContext does. The 30s arm is far longer than
+	// Stop's 10s drain, so this cannot pass by simply waiting the call out.
+	client.GetRecentEventsFunc = func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error) {
+		once.Do(func() { close(entered) })
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(30 * time.Second):
+			return nil, nil
+		}
+	}
+
+	monitor := NewMonitor(
+		"tenant-1",
+		"Test Tenant",
+		client,
+		newTestConfig(),
+		newTestLogger(),
+		newMockEventRepository(),
+		newMockGeneralEventRepository(),
+		newMockMetricsRepository(),
+		newMockHealthRepository(),
+		newMockRealmRepository(),
+		newMockEventAlertConverter(),
+		newMockHealthAlertManager(),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := monitor.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	// Wait until a collector is genuinely blocked in the client before
+	// shutting down, rather than sleeping and hoping.
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("GetRecentEvents was never called; the collector never started")
+	}
+
+	start := time.Now()
+	cancel()
+	if err := monitor.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("Stop() took %s after cancellation, want a prompt drain: "+
+			"an in-flight collector is not honouring ctx", elapsed)
+	}
+}
+
+// Stop must not return while a polling worker is still in flight.
+//
+// The other two lifecycle tests here assert that Stop is prompt, which an
+// untracked worker also satisfies: dropping the tracking makes Stop faster,
+// not slower, so neither test could tell the difference. This one gates a
+// collector open and asserts Stop stays blocked until it finishes, which is
+// what actually pins the drain.
+func TestMonitor_StopWaitsForWorkers(t *testing.T) {
+	client := newMockAdminAPI()
+
+	var once sync.Once
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	client.GetRecentEventsFunc = func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error) {
+		once.Do(func() { close(entered) })
+		<-release
+		return nil, nil
+	}
+
+	monitor := NewMonitor(
+		"tenant-1",
+		"Test Tenant",
+		client,
+		newTestConfig(),
+		newTestLogger(),
+		newMockEventRepository(),
+		newMockGeneralEventRepository(),
+		newMockMetricsRepository(),
+		newMockHealthRepository(),
+		newMockRealmRepository(),
+		newMockEventAlertConverter(),
+		newMockHealthAlertManager(),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := monitor.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("the events collector never ran")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		_ = monitor.Stop()
+		close(stopped)
+	}()
+
+	// Stop must still be blocked, because the collector has not been released.
+	select {
+	case <-stopped:
+		close(release)
+		t.Fatal("Stop() returned while a polling worker was still in flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop() did not return after the worker finished")
+	}
 }

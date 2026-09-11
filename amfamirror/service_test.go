@@ -28,9 +28,16 @@ type fakeAmfaRepo struct {
 	maxInFlight int
 	// delay holds a cycle open long enough for another to collide with it.
 	delay time.Duration
+
+	// entered/release gate a cycle deterministically: entered is closed when a
+	// cycle first reaches the repo, and the call blocks until release is
+	// closed. Both nil means no gating, which is what most tests want.
+	entered     chan struct{}
+	enteredOnce sync.Once
+	release     chan struct{}
 }
 
-func (f *fakeAmfaRepo) ListEventsSince(_ context.Context, realm string, since time.Time, limit int) ([]amfa.EventRow, error) {
+func (f *fakeAmfaRepo) ListEventsSince(ctx context.Context, realm string, since time.Time, limit int) ([]amfa.EventRow, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, realm)
 	f.inFlight++
@@ -40,8 +47,32 @@ func (f *fakeAmfaRepo) ListEventsSince(_ context.Context, realm string, since ti
 	delay := f.delay
 	f.mu.Unlock()
 
+	if f.entered != nil {
+		f.enteredOnce.Do(func() { close(f.entered) })
+	}
+	if f.release != nil {
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			f.mu.Lock()
+			f.inFlight--
+			f.mu.Unlock()
+			return nil, ctx.Err()
+		}
+	}
+
+	// Abort the delay on cancellation rather than sleeping it out, the way a
+	// real database driver abandons an in-flight query when its context is
+	// cancelled. Tests that never cancel are unaffected.
 	if delay > 0 {
-		time.Sleep(delay)
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			f.mu.Lock()
+			f.inFlight--
+			f.mu.Unlock()
+			return nil, ctx.Err()
+		}
 	}
 
 	f.mu.Lock()
@@ -429,5 +460,108 @@ func TestMirror_AdvancePersistsPosition(t *testing.T) {
 	if !got.Equal(newest) {
 		t.Errorf("persisted position: want %s, got %s",
 			newest.Format(time.RFC3339), got.Format(time.RFC3339))
+	}
+}
+
+// Stop must not return while the immediate first cycle launched by Start is
+// still in flight.
+//
+// Start fires a cycle in its own goroutine and then starts the poller. Only
+// the poller closed doneChan, so Stop drained the ticker and returned while
+// that first cycle was still reading AMFA, writing events and updating
+// watermarks.
+//
+// The repo is gated on channels rather than a sleep so the assertion cannot go
+// soft under load: the cycle is provably in flight before Stop is called, and
+// provably still in flight while Stop is blocked.
+func TestMirror_StopWaitsForInitialCycle(t *testing.T) {
+	store := newFakeStore()
+	repo := &fakeAmfaRepo{
+		rowsByRealm: map[string][]amfa.EventRow{"master": eventRows(5)},
+		entered:     make(chan struct{}),
+		release:     make(chan struct{}),
+	}
+
+	// A poll interval far longer than the test: the only cycle in flight is
+	// the immediate one Start launches.
+	svc := NewService("tenantA", realmsFor("master"), repo, store, nil,
+		discardLogger{}, time.Hour, 24*time.Hour)
+
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start() returned error: %v", err)
+	}
+
+	select {
+	case <-repo.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the initial cycle never reached the AMFA repo")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		_ = svc.Stop()
+		close(stopped)
+	}()
+
+	// Stop must still be blocked, because the repo call has not been released.
+	select {
+	case <-stopped:
+		t.Fatal("Stop() returned while the initial cycle was still in flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(repo.release)
+
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop() did not return after the initial cycle finished")
+	}
+
+	if store.mergedCount() == 0 {
+		t.Error("Stop() returned before the initial cycle mirrored anything")
+	}
+}
+
+// Cancelling the run context must let Stop drain promptly.
+//
+// This is the sequence the fx hook actually uses: OnStop cancels the run
+// context and only then calls Stop. Stop waits for the immediate first cycle,
+// so the drain is bounded by how fast that cycle notices cancellation. If it
+// ignored ctx, Stop would sit on its 10s timeout, and with one mirror per
+// tenant and fx running OnStop hooks sequentially, shutdown would blow the
+// 15s fx timeout.
+func TestMirror_StopDrainsPromptlyWhenContextCancelled(t *testing.T) {
+	store := newFakeStore()
+	repo := &fakeAmfaRepo{
+		rowsByRealm: map[string][]amfa.EventRow{"master": eventRows(5)},
+		// Far longer than Stop's 10s drain: if cancellation is not honoured
+		// this test cannot pass by waiting the cycle out.
+		delay: 30 * time.Second,
+	}
+
+	svc := NewService("tenantA", realmsFor("master"), repo, store, nil,
+		discardLogger{}, time.Hour, 24*time.Hour)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start() returned error: %v", err)
+	}
+
+	// Let the cycle reach the repo call, then shut down the way fx does.
+	time.Sleep(20 * time.Millisecond)
+
+	start := time.Now()
+	cancel()
+	if err := svc.Stop(); err != nil {
+		t.Fatalf("Stop() returned error: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	// Generous enough not to flake on a loaded CI box, still far below both
+	// the 10s drain timeout and the 30s repo delay.
+	if elapsed > 2*time.Second {
+		t.Errorf("Stop() took %s after context cancellation, want prompt drain: "+
+			"the in-flight cycle is not honouring ctx", elapsed)
 	}
 }

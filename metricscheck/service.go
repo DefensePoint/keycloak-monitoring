@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/lifecycle"
 )
 
 // Service defines the interface for metrics checking operations.
@@ -31,8 +32,9 @@ type service struct {
 	notifier     NotificationService
 	logger       Logger
 	pollInterval time.Duration
-	stopChan     chan struct{}
-	doneChan     chan struct{}
+	// workers tracks every goroutine Start launches, including the
+	// immediate first run, so Stop drains all of them.
+	workers lifecycle.Workers
 }
 
 // NewService creates a new metrics checker service.
@@ -49,8 +51,6 @@ func NewService(
 		notifier:     notifier,
 		logger:       logger.WithComponent("metrics_checker"),
 		pollInterval: pollInterval,
-		stopChan:     make(chan struct{}),
-		doneChan:     make(chan struct{}),
 	}
 }
 
@@ -67,10 +67,14 @@ func (s *service) Start(ctx context.Context) error {
 		"poll_interval", s.pollInterval.String())
 
 	// Perform initial check immediately
-	go s.runChecks(ctx)
+	s.workers.Go(func() {
+		s.runChecks(ctx)
+	})
 
 	// Start polling worker
-	go s.pollChecks(ctx)
+	s.workers.Go(func() {
+		s.pollChecks(ctx)
+	})
 
 	return nil
 }
@@ -78,13 +82,9 @@ func (s *service) Start(ctx context.Context) error {
 // Stop gracefully stops the metrics checking service.
 func (s *service) Stop() error {
 	s.logger.Info("Stopping metrics checker service")
-	close(s.stopChan)
-
-	// Wait for worker to finish (with timeout)
-	select {
-	case <-s.doneChan:
+	if s.workers.Drain(10 * time.Second) {
 		s.logger.Info("Metrics checker service stopped gracefully")
-	case <-time.After(10 * time.Second):
+	} else {
 		s.logger.Warn("Metrics checker service stop timeout")
 	}
 
@@ -95,13 +95,12 @@ func (s *service) Stop() error {
 func (s *service) pollChecks(ctx context.Context) {
 	ticker := time.NewTicker(s.pollInterval)
 	defer ticker.Stop()
-	defer close(s.doneChan)
 
 	for {
 		select {
 		case <-ticker.C:
 			s.runChecks(ctx)
-		case <-s.stopChan:
+		case <-s.workers.Stopping():
 			s.logger.Info("Metrics checker polling stopped")
 			return
 		case <-ctx.Done():

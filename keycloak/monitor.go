@@ -9,6 +9,7 @@ import (
 	eventsource "repos.defensepoint.com/iam/oss-pmt/kmt/events"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/lifecycle"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/metrics"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/keycloakadmin"
@@ -43,9 +44,9 @@ type Monitor struct {
 	// Optional: keeps the tenant record's health_status current (best-effort).
 	healthUpdater TenantHealthUpdater
 
-	// Control channels
-	stopChan chan struct{}
-	doneChan chan struct{}
+	// workers tracks the polling workers Start launches so Stop can drain
+	// them.
+	workers lifecycle.Workers
 }
 
 // MonitorOption configures optional Monitor behavior.
@@ -99,8 +100,6 @@ func NewMonitor(
 		realmRepo:           realmRepo,
 		eventAlertConverter: eventAlertConverter,
 		healthAlertManager:  healthAlertManager,
-		stopChan:            make(chan struct{}),
-		doneChan:            make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -113,10 +112,15 @@ func (m *Monitor) Start(ctx context.Context) error {
 	m.logger.Info("Starting Keycloak monitoring service")
 
 	// Start all polling workers
-	go m.pollEvents(ctx)
-	go m.pollMetrics(ctx)
-	go m.pollHealth(ctx)
-	go m.pollRealmInfo(ctx)
+	for _, poll := range []func(context.Context){
+		m.pollEvents,
+		m.pollMetrics,
+		m.pollHealth,
+		m.pollRealmInfo,
+	} {
+		poll := poll
+		m.workers.Go(func() { poll(ctx) })
+	}
 
 	m.logger.Info("Keycloak monitoring service started successfully")
 	return nil
@@ -125,13 +129,12 @@ func (m *Monitor) Start(ctx context.Context) error {
 // Stop gracefully stops the monitoring process
 func (m *Monitor) Stop() error {
 	m.logger.Info("Stopping Keycloak monitoring service")
-	close(m.stopChan)
-
-	// Wait for all workers to finish (with timeout)
-	select {
-	case <-m.doneChan:
+	// Wait for all workers to finish (with timeout). A done channel used to
+	// stand in for this, but nothing ever closed it, so every shutdown sat
+	// here for the full 10s and then logged a spurious stop timeout.
+	if m.workers.Drain(10 * time.Second) {
 		m.logger.Info("Keycloak monitoring service stopped gracefully")
-	case <-time.After(10 * time.Second):
+	} else {
 		m.logger.Warn("Keycloak monitoring service stop timeout")
 	}
 
@@ -171,7 +174,7 @@ func (m *Monitor) pollEvents(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			m.collectEvents(ctx)
-		case <-m.stopChan:
+		case <-m.workers.Stopping():
 			m.logger.Info("Events polling worker stopped")
 			return
 		case <-ctx.Done():
@@ -400,7 +403,7 @@ func (m *Monitor) pollMetrics(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			m.collectMetrics(ctx)
-		case <-m.stopChan:
+		case <-m.workers.Stopping():
 			m.logger.Info("Metrics polling worker stopped")
 			return
 		case <-ctx.Done():
@@ -515,7 +518,7 @@ func (m *Monitor) pollHealth(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			m.collectHealth(ctx)
-		case <-m.stopChan:
+		case <-m.workers.Stopping():
 			m.logger.Info("Health polling worker stopped")
 			return
 		case <-ctx.Done():
@@ -618,7 +621,7 @@ func (m *Monitor) pollRealmInfo(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			m.collectRealmInfo(ctx)
-		case <-m.stopChan:
+		case <-m.workers.Stopping():
 			m.logger.Info("Realm info polling worker stopped")
 			return
 		case <-ctx.Done():

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/lifecycle"
 )
 
 // reNotifyInterval is how long an unacknowledged, still-active alert waits
@@ -33,8 +34,9 @@ type service struct {
 	notifier     NotificationService
 	logger       Logger
 	pollInterval time.Duration
-	stopChan     chan struct{}
-	doneChan     chan struct{}
+	// workers tracks every goroutine Start launches, including the
+	// immediate first run, so Stop drains all of them.
+	workers lifecycle.Workers
 }
 
 // NewService creates a per-tenant AMFA checker service.
@@ -53,8 +55,6 @@ func NewService(
 		notifier:     notifier,
 		logger:       log.WithComponent("amfa_checker"),
 		pollInterval: pollInterval,
-		stopChan:     make(chan struct{}),
-		doneChan:     make(chan struct{}),
 	}
 }
 
@@ -69,20 +69,21 @@ func (s *service) Start(ctx context.Context) error {
 		"num_checks", len(s.checks),
 		"poll_interval", s.pollInterval.String())
 
-	go func() {
+	s.workers.Go(func() {
 		_ = s.runChecks(ctx) // best-effort: errors are logged; the poller's first tick will retry
-	}()
-	go s.pollChecks(ctx)
+	})
+
+	s.workers.Go(func() {
+		s.pollChecks(ctx)
+	})
 	return nil
 }
 
 func (s *service) Stop() error {
 	s.logger.Info("Stopping amfacheck service", "tenant_id", s.tenantID)
-	close(s.stopChan)
-	select {
-	case <-s.doneChan:
+	if s.workers.Drain(10 * time.Second) {
 		s.logger.Info("amfacheck service stopped gracefully", "tenant_id", s.tenantID)
-	case <-time.After(10 * time.Second):
+	} else {
 		s.logger.Warn("amfacheck service stop timeout", "tenant_id", s.tenantID)
 	}
 	return nil
@@ -91,13 +92,12 @@ func (s *service) Stop() error {
 func (s *service) pollChecks(ctx context.Context) {
 	ticker := time.NewTicker(s.pollInterval)
 	defer ticker.Stop()
-	defer close(s.doneChan)
 
 	for {
 		select {
 		case <-ticker.C:
 			_ = s.runChecks(ctx) // best-effort: errors are logged; the loop retries next tick
-		case <-s.stopChan:
+		case <-s.workers.Stopping():
 			s.logger.Info("amfacheck polling stopped", "tenant_id", s.tenantID)
 			return
 		case <-ctx.Done():
