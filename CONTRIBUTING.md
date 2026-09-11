@@ -7,7 +7,7 @@ Thank you for your interest in contributing!
 1. Fork the repository and create a branch from `main`.
 2. Follow the setup instructions in the README to run the platform locally.
 3. Make your changes, add tests where applicable, and ensure all existing tests pass.
-4. Open a merge request with a clear description of the change.
+4. Open a pull request with a clear description of the change.
 
 ## Development Setup
 
@@ -38,20 +38,22 @@ make test-frontend   # Vitest
 make test-all        # both
 ```
 
-Before opening a merge request, run the full gate. It is the same set of checks
-CI runs:
+Before opening a pull request, run the full gate:
 
 ```bash
 make check           # tidy, fmt, vet, lint, test-all
 ```
 
-Integration tests that need a live PostgreSQL are excluded from `make
-test-backend` by the `-short` flag. Run them with `go test ./...` against a
-database when you touch repository code.
+Tests that need a live PostgreSQL skip silently unless you point them at one,
+so `make test-backend` passing does not mean they ran. Set
+`KMT_TEST_DATABASE_DSN` and run them whenever you touch repository code. A
+second set drops the schema and needs both `KMT_DESTRUCTIVE_TEST_DATABASE_DSN`
+and a run without `-short`; aim that one at a throwaway database only.
+`docs/engineering-guide.md` has the full table.
 
 ## Code Style
 
-- **Go 1.25+.** `gofmt` is enforced in CI and by the pre-commit hook. Lint with
+- **Go 1.25+.** `gofmt` is enforced by the pre-commit hook. Lint with
   `golangci-lint`.
 - **TypeScript + React** in `web/`, with Vite, MUI, and Recharts. ESLint and
   Prettier are enforced.
@@ -73,9 +75,9 @@ enforced by commitlint via a Husky hook. Allowed types: `feat`, `fix`, `docs`,
 feat(configcheck): flag realms without brute force protection
 ```
 
-## Merge Request Guidelines
+## Pull Request Guidelines
 
-- Keep merge requests focused on a single concern
+- Keep pull requests focused on a single concern
 - Include a test for any bug fix or new feature
 - Update relevant documentation in `docs/` if behavior changes
 
