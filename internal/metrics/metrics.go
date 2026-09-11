@@ -28,6 +28,10 @@ type Registry struct {
 	AlertsTotal       *prometheus.CounterVec
 	NotificationsSent *prometheus.CounterVec
 
+	MCPRequests         *prometheus.CounterVec
+	MCPToolCalls        *prometheus.CounterVec
+	MCPToolCallDuration *prometheus.HistogramVec
+
 	buildInfo *prometheus.GaugeVec
 }
 
@@ -100,6 +104,25 @@ func New() *Registry {
 			Help:      "Total notification delivery attempts by channel and result.",
 		}, []string{"channel", "result"}),
 
+		MCPRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "mcp_requests_total",
+			Help:      "Total inbound MCP JSON-RPC requests by method; methods outside the protocol set are labeled other.",
+		}, []string{"method"}),
+
+		MCPToolCalls: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "mcp_tool_calls_total",
+			Help:      "Total MCP tool calls by tool and outcome (allowed, denied, invalid, not_found, error or rate_limited).",
+		}, []string{"tool", "outcome"}),
+
+		MCPToolCallDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Name:      "mcp_tool_call_duration_seconds",
+			Help:      "MCP tool call latency by tool, observed for allowed calls only.",
+			Buckets:   prometheus.DefBuckets,
+		}, []string{"tool"}),
+
 		buildInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Name:      "build_info",
@@ -120,6 +143,9 @@ func New() *Registry {
 		m.EventsCollected,
 		m.AlertsTotal,
 		m.NotificationsSent,
+		m.MCPRequests,
+		m.MCPToolCalls,
+		m.MCPToolCallDuration,
 		m.buildInfo,
 	)
 

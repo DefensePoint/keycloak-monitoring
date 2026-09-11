@@ -23,9 +23,10 @@ var testTenantIDs = []string{
 }
 
 // newTenantMigrationTestClient opens a postgres-backed client with the
-// keycloak_tenants table migrated, following the same opt-in convention as
-// newTestClient: the DSN comes from KMT_TEST_DATABASE_DSN and the test is
-// skipped when it isn't set.
+// keycloak_tenants table migrated. The DSN comes from KMT_TEST_DATABASE_DSN
+// and the test is skipped when it isn't set. That is the non-destructive
+// variable: this helper only removes the fixtures in testTenantIDs, so unlike
+// newTestClient it does not need a throwaway database.
 func newTenantMigrationTestClient(t *testing.T) *Client {
 	t.Helper()
 

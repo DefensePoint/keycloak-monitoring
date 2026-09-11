@@ -70,12 +70,12 @@ func (r *EventRepository) GetEventsByRealm(ctx context.Context, tenantID, realmN
 	return convertDBEventsToDomain(dbEvents), nil
 }
 
-// GetEventsByType returns events of a specific type.
-func (r *EventRepository) GetEventsByType(ctx context.Context, tenantID, eventType string, from, to time.Time, limit, offset int) ([]*domain.KeycloakEvent, error) {
+// GetEventsByType returns events of a specific type within one realm.
+func (r *EventRepository) GetEventsByType(ctx context.Context, tenantID, realmName, eventType string, from, to time.Time, limit, offset int) ([]*domain.KeycloakEvent, error) {
 	var dbEvents []*database.KeycloakEvent
 
 	query := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND event_type = ? AND time >= ? AND time <= ?", tenantID, eventType, from, to).
+		Where("tenant_id = ? AND realm_name = ? AND event_type = ? AND time >= ? AND time <= ?", tenantID, realmName, eventType, from, to).
 		Order("time DESC")
 
 	if limit > 0 {

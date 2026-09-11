@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -262,6 +263,70 @@ func TestLoadConfig_EmptyPath(t *testing.T) {
 	_ = err
 }
 
+func TestLoadConfig_RemovedMCPPageSizeKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configContent := `
+mcp:
+  enabled: true
+  max_page_size: 50
+  absolute_max_page_size: 500
+`
+
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write config file: %v", err)
+	}
+
+	config, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() failed: %v", err)
+	}
+
+	removedErr := config.MCP.RemovedKeyError()
+	if removedErr == nil {
+		t.Fatal("a config still carrying mcp.absolute_max_page_size must not be usable")
+	}
+	for _, want := range []string{"mcp.default_page_size", "mcp.max_page_size"} {
+		if !strings.Contains(removedErr.Error(), want) {
+			t.Errorf("error = %v, want it to name %s", removedErr, want)
+		}
+	}
+}
+
+func TestLoadConfig_CurrentMCPPageSizeKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configContent := `
+mcp:
+  enabled: true
+  default_page_size: 100
+  max_page_size: 500
+`
+
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write config file: %v", err)
+	}
+
+	config, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() failed: %v", err)
+	}
+
+	if err := config.MCP.RemovedKeyError(); err != nil {
+		t.Fatalf("the current key names must load cleanly: %v", err)
+	}
+	if config.MCP.DefaultPageSize != 100 {
+		t.Errorf("Expected default_page_size 100, got %d", config.MCP.DefaultPageSize)
+	}
+	if config.MCP.MaxPageSize != 500 {
+		t.Errorf("Expected max_page_size 500, got %d", config.MCP.MaxPageSize)
+	}
+}
+
 func TestAppConfig_NewLogger(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -432,5 +497,47 @@ auth:
 		if i >= len(config.Auth.OAuth2.Scopes) || config.Auth.OAuth2.Scopes[i] != scope {
 			t.Errorf("Expected scope %s at index %d, got %v", scope, i, config.Auth.OAuth2.Scopes)
 		}
+	}
+}
+
+// TestLoadConfig_VersionCheckerOffByDefault pins the airgap default. The
+// version checker is the only component that contacts a host DefensePoint does
+// not operate, so an empty config, or one that omits the key, must leave it
+// off. A default of true would reach api.github.com in every deployment,
+// including airgapped ones.
+func TestLoadConfig_VersionCheckerOffByDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(""), 0644); err != nil {
+		t.Fatalf("Failed to write config file: %v", err)
+	}
+
+	config, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() failed: %v", err)
+	}
+
+	if config.Keycloak.Global.VersionChecker.Enabled {
+		t.Error("version checker is enabled by default; it must be opt-in")
+	}
+}
+
+// TestLoadConfig_VersionCheckerOptIn checks the flag is actually readable from
+// the file, so a deployment that wants version checking can turn it on.
+func TestLoadConfig_VersionCheckerOptIn(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	body := []byte("keycloak:\n  global:\n    version_checker:\n      enabled: true\n")
+	if err := os.WriteFile(configPath, body, 0644); err != nil {
+		t.Fatalf("Failed to write config file: %v", err)
+	}
+
+	config, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() failed: %v", err)
+	}
+
+	if !config.Keycloak.Global.VersionChecker.Enabled {
+		t.Error("version_checker.enabled: true was not read from the config file")
 	}
 }

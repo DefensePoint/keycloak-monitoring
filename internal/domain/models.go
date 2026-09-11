@@ -396,14 +396,19 @@ type UserRole struct {
 
 // TenantPolicy represents tenant-level access restrictions for a user.
 type TenantPolicy struct {
-	ID            uint      `json:"id"`
-	UserID        uint      `json:"user_id"`
-	TenantID      string    `json:"tenant_id"`
-	AllowedRealms []string  `json:"allowed_realms,omitempty"` // Empty = all realms
-	GrantedBy     string    `json:"granted_by,omitempty"`
-	GrantedAt     time.Time `json:"granted_at"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID       uint   `json:"id"`
+	UserID   uint   `json:"user_id"`
+	TenantID string `json:"tenant_id"`
+	// AllowedRealms lists the only realms this policy grants. An empty list
+	// grants no realm; unrestricted is the absence of a policy row.
+	AllowedRealms []string `json:"allowed_realms,omitempty"`
+	// RealmsUnrestricted reports an allowed_realms column holding no list at
+	// all, which grants every realm.
+	RealmsUnrestricted bool      `json:"-"`
+	GrantedBy          string    `json:"granted_by,omitempty"`
+	GrantedAt          time.Time `json:"granted_at"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // UserWithRoles extends User with role and permission information.

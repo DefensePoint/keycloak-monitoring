@@ -6,12 +6,12 @@
 # This pipeline deliberately stops at "the code is good". It does not build or
 # publish release images and it does not deploy anywhere: those steps belong to
 # whoever operates an instance. Build your own images from build/Dockerfile,
-# which takes a SERVICE build arg of either `server` or `web`.
+# which takes a SERVICE build arg of `server`, `web` or `mcp-server`.
 
 include:
   # DefensePoint reusable security components. Secrets and SAST are warn-only
   # (findings surface but do not block). The dependency scan blocks on
-  # Critical CVEs only, per Mihir's 2026-08-26 escalation rule.
+  # Critical CVEs only.
   - component: $CI_SERVER_FQDN/cloud/ci-components/security/secrets@~latest
     inputs:
       stage: security
@@ -197,7 +197,13 @@ test:frontend:
     - cd web
     - npm ci --no-audit --no-fund
     - echo "Running frontend tests..."
-    - npm test -- --run
+    # Vitest sizes its worker pool from available parallelism, which inside a
+    # container reports the node's CPU count rather than this job's limit. The
+    # default therefore starts far more jsdom workers than the memory limit
+    # allows: the suite ran about 100x slower, two tests crossed the 5s default
+    # timeout, and the container was OOMKilled (exit 137). Two workers is
+    # enough to keep the wall clock reasonable and stays inside the limit.
+    - npm test -- --run --pool=threads --poolOptions.threads.maxThreads=2
     - echo "All frontend tests passed"
     - echo "Building frontend..."
     - npm run build
@@ -232,6 +238,38 @@ test:backend:
     - go tool cover -html=coverage.out -o coverage.html
   coverage: '/total:.*\s+(\d+\.\d+)%/'
 
+test:integration:
+  extends:
+    - .go_template
+    - .go_cache_pull
+  stage: test
+  needs:
+    - deps:download
+    - quality:fmt
+    - quality:vet
+    - quality:tidy
+    - quality:lint
+    - quality:security
+  services:
+    - name: postgres:17-alpine
+      alias: postgres
+  variables:
+    POSTGRES_DB: kmt_test
+    POSTGRES_USER: kmt
+    POSTGRES_PASSWORD: kmt
+    POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    KMT_TEST_DATABASE_DSN: "host=postgres port=5432 dbname=kmt_test user=kmt password=kmt sslmode=disable"
+  script:
+    - echo "Running the database-backed suites, including the MCP security posture suite..."
+    # The env-gated suites share one database and migrate it, so they must not
+    # run in parallel with each other: -p 1 keeps packages sequential.
+    #
+    # -short stays on: these suites key off KMT_TEST_DATABASE_DSN alone, while
+    # the destructive suites that reset the schema key off -short plus
+    # KMT_DESTRUCTIVE_TEST_DATABASE_DSN, which this pipeline does not provide.
+    - go test -short -v -p 1 -count=1 ./...
+    - echo "All integration tests passed"
+
 test:build:
   extends:
     - .go_template
@@ -250,6 +288,8 @@ test:build:
     - go build -trimpath -buildvcs=false -mod=readonly -o bin/server ./cmd/server
     - echo "Building web server..."
     - go build -trimpath -buildvcs=false -mod=readonly -o bin/web ./cmd/web
+    - echo "Building MCP server..."
+    - go build -trimpath -buildvcs=false -mod=readonly -o bin/mcp-server ./cmd/mcp-server
     - echo "All binaries built successfully"
     - ls -lh bin/
 
@@ -296,9 +336,34 @@ security:container-scan:
     - apk add --no-cache curl
     - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v${TRIVY_VERSION}
     - trivy --version
+    # The dind service container can report ready before its daemon accepts
+    # connections, and a docker build issued in that window fails with a bare
+    # "Cannot connect to the Docker daemon", which reads like a broken
+    # DOCKER_HOST rather than a race. Wait for the daemon, and say plainly
+    # when it never arrives: a service container that is up while nothing
+    # listens on DOCKER_HOST usually means dind was denied the privileged
+    # mode it requires, which is a cluster policy question, not a CI one.
+    - |
+      echo "Waiting for the Docker daemon at ${DOCKER_HOST}..."
+      ATTEMPTS=30
+      i=1
+      while [ "$i" -le "$ATTEMPTS" ]; do
+        if docker info >/dev/null 2>&1; then
+          echo "Docker daemon ready after $(( (i - 1) * 2 ))s"
+          break
+        fi
+        if [ "$i" -eq "$ATTEMPTS" ]; then
+          echo "Docker daemon did not come up within $(( ATTEMPTS * 2 ))s."
+          echo "The dind service is running but nothing is serving ${DOCKER_HOST}."
+          echo "Check whether privileged containers are permitted for this runner."
+          exit 1
+        fi
+        sleep 2
+        i=$(( i + 1 ))
+      done
   script:
     - |
-      for svc in server web; do
+      for svc in server web mcp-server; do
         echo "Building kmt-${svc}:scan..."
         docker build --build-arg SERVICE=${svc} -t kmt-${svc}:scan -f build/Dockerfile .
         echo "Scanning kmt-${svc}:scan with Trivy (informational: CRITICAL + HIGH)..."
@@ -326,6 +391,7 @@ security:container-scan:
     paths:
       - trivy-image-server.json
       - trivy-image-web.json
+      - trivy-image-mcp-server.json
     expire_in: 30 days
   cache:
     key: ${CI_COMMIT_REF_SLUG}-trivy-db

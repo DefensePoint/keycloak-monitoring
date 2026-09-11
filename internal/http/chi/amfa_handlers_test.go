@@ -30,41 +30,53 @@ type stubAmfaService struct {
 	geoErr error
 
 	// Last-call captures for assertions about opts plumbing.
+	calls         int
 	lastListOpts  amfa.ListEventsOptions
 	lastStatsOpts amfa.StatsOptions
 	lastGeoOpts   amfa.GeoOptions
 }
 
 func (s *stubAmfaService) ListEvents(_ context.Context, _ string, opts amfa.ListEventsOptions) ([]amfa.Event, int64, error) {
+	s.calls++
 	s.lastListOpts = opts
 	return s.events, s.total, s.listErr
 }
 
 func (s *stubAmfaService) GetStats(_ context.Context, _ string, opts amfa.StatsOptions) (amfa.Stats, error) {
+	s.calls++
 	s.lastStatsOpts = opts
 	return s.stats, s.statsErr
 }
 
 func (s *stubAmfaService) GetGeoBuckets(_ context.Context, _ string, opts amfa.GeoOptions) ([]amfa.GeoBucket, error) {
+	s.calls++
 	s.lastGeoOpts = opts
 	return s.geo, s.geoErr
 }
 
-// newTestAmfaHandlers builds an AmfaHandlers wired with the given stub service
-// and no auth/RBAC middleware (handlers are called directly so middleware
-// is not exercised here — that's covered in middleware_test.go).
+// newTestAmfaHandlers builds an AmfaHandlers wired with the given stub service,
+// an unrestricted caller's RBAC checker, and no auth/RBAC middleware (handlers
+// are called directly so middleware is not exercised here — that's covered in
+// middleware_test.go).
 func newTestAmfaHandlers(svc amfa.Service) *AmfaHandlers {
-	return NewAmfaHandlers(svc, nil, nil, newTestLogger(), nil, nil, nil)
+	return newTestAmfaHandlersWithRBAC(svc, &mockRBACChecker{})
+}
+
+func newTestAmfaHandlersWithRBAC(svc amfa.Service, rbacSvc RBACChecker) *AmfaHandlers {
+	return NewAmfaHandlers(svc, nil, rbacSvc, newTestLogger(), nil, nil, nil)
 }
 
 // newAmfaRequest constructs an *http.Request with the chi route context
-// pre-populated with a tenantID URL param, mimicking what a real Chi-routed
-// request looks like inside the handler.
+// pre-populated with a tenantID URL param and an authenticated caller in the
+// context, mimicking what a real Chi-routed request looks like inside the
+// handler once the auth middleware has run.
 func newAmfaRequest(path, tenantID string) *http.Request {
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("tenantID", tenantID)
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx = context.WithValue(ctx, UserInfoKey, &UserDetails{ID: 1, Email: "test@example.com"})
+	return req.WithContext(ctx)
 }
 
 func TestAmfaHandlers_GetEvents_RequiresRealmID(t *testing.T) {
@@ -179,8 +191,9 @@ func TestAmfaHandlers_GetStats_Returns200(t *testing.T) {
 
 func TestAmfaHandlers_GetStats_AllRealmsWhenRealmIDOmitted(t *testing.T) {
 	// Unlike /amfa/events and /amfa/geo, /amfa/stats treats a missing realm_id as
-	// "all realms": it returns 200 and passes an empty RealmID to the service so
-	// the repo drops the realm filter.
+	// "all realms": for a caller whose policy does not restrict realms it returns
+	// 200 and passes an empty RealmID to the service so the repo drops the realm
+	// filter.
 	svc := &stubAmfaService{
 		stats: amfa.Stats{Total: 100, Risky: 5, UniqueUsers: 42, FlaggedIPs: 3},
 	}
@@ -248,6 +261,261 @@ func TestAmfaHandlers_GetGeo_RequiresRealmID(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestAmfaHandlers_RealmPolicy(t *testing.T) {
+	tests := []struct {
+		name       string
+		rbac       *mockRBACChecker
+		handler    func(*AmfaHandlers) http.HandlerFunc
+		path       string
+		statsErr   error
+		wantStatus int
+		wantRealm  string
+		wantCode   string
+	}{
+		{
+			name:       "events for a caller with no policy row",
+			rbac:       &mockRBACChecker{},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaEvents },
+			path:       "/amfa/events?realm_id=master",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "events for an admin with a restricting policy",
+			rbac:       &mockRBACChecker{isAdmin: true, policies: policyFor("tA", "other")},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaEvents },
+			path:       "/amfa/events?realm_id=master",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "events for the caller's own realm",
+			rbac:       &mockRBACChecker{policies: policyFor("tA", "master")},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaEvents },
+			path:       "/amfa/events?realm_id=master",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "events for a realm outside the policy",
+			rbac:       &mockRBACChecker{policies: policyFor("tA", "other")},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaEvents },
+			path:       "/amfa/events?realm_id=master",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "events for a policy with an empty realm list",
+			rbac:       &mockRBACChecker{policies: policyFor("tA")},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaEvents },
+			path:       "/amfa/events?realm_id=master",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "stats for the caller's own realm",
+			rbac:       &mockRBACChecker{policies: policyFor("tA", "master")},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaStats },
+			path:       "/amfa/stats?realm_id=master",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "stats for a realm outside the policy",
+			rbac:       &mockRBACChecker{policies: policyFor("tA", "other")},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaStats },
+			path:       "/amfa/stats?realm_id=master",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "all-realm stats for a caller with no policy row",
+			rbac:       &mockRBACChecker{},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaStats },
+			path:       "/amfa/stats",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "all-realm stats for an admin",
+			rbac:       &mockRBACChecker{isAdmin: true},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaStats },
+			path:       "/amfa/stats",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "all-realm stats narrow to a caller's single realm",
+			rbac:       &mockRBACChecker{policies: policyFor("tA", "master")},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaStats },
+			path:       "/amfa/stats",
+			wantStatus: http.StatusOK,
+			wantRealm:  "master",
+		},
+		{
+			// A permission refusal, so it must not borrow the transport's code.
+			name:       "all-realm stats for a caller left with several realms",
+			rbac:       &mockRBACChecker{policies: policyFor("tA", "master", "other")},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaStats },
+			path:       "/amfa/stats",
+			wantStatus: http.StatusForbidden,
+			wantCode:   "amfa_realm_scope_requires_realm",
+		},
+		{
+			// The other half: a transport that genuinely cannot aggregate keeps
+			// its own code.
+			name:       "all-realm stats a transport cannot aggregate",
+			rbac:       &mockRBACChecker{},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaStats },
+			path:       "/amfa/stats",
+			statsErr:   amfa.ErrAllRealmsUnsupported,
+			wantStatus: http.StatusNotImplemented,
+			wantCode:   "amfa_all_realms_unsupported",
+		},
+		{
+			// Also a permission refusal, so it uses the same code rather than
+			// the generic realm denial.
+			name:       "all-realm stats for a policy with an empty realm list",
+			rbac:       &mockRBACChecker{policies: policyFor("tA")},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaStats },
+			path:       "/amfa/stats",
+			wantStatus: http.StatusForbidden,
+			wantCode:   "amfa_realm_scope_requires_realm",
+		},
+		{
+			name:       "geo for the caller's own realm",
+			rbac:       &mockRBACChecker{policies: policyFor("tA", "master")},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaGeo },
+			path:       "/amfa/geo?realm_id=master",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "geo for a realm outside the policy",
+			rbac:       &mockRBACChecker{policies: policyFor("tA", "other")},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaGeo },
+			path:       "/amfa/geo?realm_id=master",
+			wantStatus: http.StatusForbidden,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &stubAmfaService{statsErr: tt.statsErr}
+			h := newTestAmfaHandlersWithRBAC(svc, tt.rbac)
+
+			rec := httptest.NewRecorder()
+			tt.handler(h)(rec, newAmfaRequest(tt.path, "tA"))
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			// A refusal the handler makes must never reach the service.
+			if tt.wantStatus >= http.StatusBadRequest && tt.statsErr == nil && svc.calls != 0 {
+				t.Errorf("AMFA service called %d times for a refused request, want 0", svc.calls)
+			}
+			if tt.wantRealm != "" && svc.lastStatsOpts.RealmID != tt.wantRealm {
+				t.Errorf("stats RealmID = %q, want %q", svc.lastStatsOpts.RealmID, tt.wantRealm)
+			}
+			if tt.wantCode != "" {
+				var body struct {
+					Error string `json:"error"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+					t.Fatalf("decode: %v; body = %s", err, rec.Body.String())
+				}
+				if body.Error != tt.wantCode {
+					t.Errorf("error = %q, want %q", body.Error, tt.wantCode)
+				}
+			}
+		})
+	}
+}
+
+// setupTestAmfaRouter mounts the AMFA routes exactly as the tenant router does,
+// so a test drives the handler through its real middleware chain.
+func setupTestAmfaRouter(h *AmfaHandlers) *chi.Mux {
+	r := chi.NewRouter()
+	r.Route("/api/tenants/{tenantID}", func(r chi.Router) {
+		r.Use(TenantIDMiddleware)
+		h.RegisterTenantRoutes(r)
+	})
+	return r
+}
+
+func TestAmfaHandlers_GetStats_AppliedRealmID(t *testing.T) {
+	tests := []struct {
+		name        string
+		rbac        *mockRBACChecker
+		path        string
+		wantApplied string
+	}{
+		{
+			name: "all-realm request narrowed to the caller's own realm names it",
+			rbac: &mockRBACChecker{policies: policyFor("tA", "master")},
+			path: "/amfa/stats",
+			// The caller asked for every realm and got one, so the response
+			// names it.
+			wantApplied: "master",
+		},
+		{
+			name: "all-realm request from an unrestricted caller stays unlabelled",
+			rbac: &mockRBACChecker{},
+			path: "/amfa/stats",
+		},
+		{
+			name: "explicitly requested realm is not a narrowing",
+			rbac: &mockRBACChecker{policies: policyFor("tA", "master")},
+			path: "/amfa/stats?realm_id=master",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &stubAmfaService{stats: amfa.Stats{Total: 12}}
+			router := setupTestAmfaRouter(NewAmfaHandlers(
+				svc, nil, tt.rbac, newTestLogger(),
+				testAuthMiddleware, NewRBACMiddleware(tt.rbac, newTestLogger()), nil,
+			))
+
+			req := httptest.NewRequest(http.MethodGet, "/api/tenants/tA"+tt.path, nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+			}
+
+			var resp struct {
+				Total          int64  `json:"total"`
+				AppliedRealmID string `json:"applied_realm_id"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode: %v; body = %s", err, rec.Body.String())
+			}
+			if resp.Total != 12 {
+				t.Errorf("total = %d, want 12", resp.Total)
+			}
+			if resp.AppliedRealmID != tt.wantApplied {
+				t.Errorf("applied_realm_id = %q, want %q", resp.AppliedRealmID, tt.wantApplied)
+			}
+			if tt.wantApplied == "" && strings.Contains(rec.Body.String(), "applied_realm_id") {
+				t.Errorf("applied_realm_id present for an unnarrowed answer: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestAmfaHandlers_RealmPolicy_RequiresAuthenticatedCaller(t *testing.T) {
+	svc := &stubAmfaService{}
+	h := newTestAmfaHandlers(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/amfa/events?realm_id=master", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("tenantID", "tA")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	rec := httptest.NewRecorder()
+	h.handleAmfaEvents(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+	}
+	if svc.calls != 0 {
+		t.Errorf("AMFA service called %d times without an authenticated caller, want 0", svc.calls)
 	}
 }
 

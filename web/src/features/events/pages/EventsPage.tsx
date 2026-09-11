@@ -8,6 +8,7 @@ import {
   DialogTitle,
   IconButton,
   Chip,
+  Tooltip,
   Button,
   Accordion,
   AccordionSummary,
@@ -35,6 +36,7 @@ import {
   useAmfaRealms,
   useSessionStorage,
   isAllRealmsUnsupportedError,
+  isRealmScopeRequiresRealmError,
 } from "@/shared/hooks";
 import {
   RealmSelector,
@@ -45,10 +47,12 @@ import {
   RiskBadge,
   AmfaKpiRow,
   AmfaGeoMap,
+  LocationMap,
   AlertBanner,
 } from "@/shared/components";
 import { Refresh } from "@mui/icons-material";
 import { MRT_OPTIONS_WITH_TOOLBAR } from "@/shared/constants";
+import { hasEventLocation } from "@/shared/utils";
 import type { Event as EventType } from "../types";
 
 type SeverityColor = "error" | "warning" | "info";
@@ -68,9 +72,23 @@ function getSeverityColor(severity: string): SeverityColor {
   }
 }
 
+/**
+ * Height of the location map embedded in the details dialog, in pixels.
+ *
+ * At the dialog's ~830px content width this is roughly 2.3:1. Shorter and the
+ * marker plus its 20km accuracy circle are squeezed into a letterboxed band
+ * with too little land around them to place the point; taller and the map
+ * pushes the AMFA fields below it out of the dialog's first screenful.
+ */
+const EMBEDDED_MAP_HEIGHT = 368;
+
 export function EventsPage() {
   const { selectedTenant } = useTenant();
   const [selectedEvent, setSelectedEvent] = useState<EventType | null>(null);
+  // Leaflet measures its container once, on init. Mounting the map before the
+  // dialog's scale transform finishes makes it measure the mid-animation size
+  // and render a partial map, so hold the map back until onEntered fires.
+  const [detailsDialogEntered, setDetailsDialogEntered] = useState(false);
   const [pageSize, setPageSize] = useSessionStorage<number>("pageSize", 25);
   const [limit, setLimit] = useState(pageSize);
   const [offset, setOffset] = useState(0);
@@ -130,8 +148,11 @@ export function EventsPage() {
     [handleRealmChangeFromHook],
   );
 
-  const realmSource =
-    selectedRealm !== "all" ? `keycloak:${selectedRealm}` : undefined;
+  // Sent as a realm, not as source="keycloak:<realm>". That older encoding
+  // matched only the realm's Keycloak rows, so selecting a realm emptied the
+  // table of its AMFA-mirrored events (source "amfa:<realm>") - the very
+  // events the AMFA sections above the table are about.
+  const realmFilter = selectedRealm !== "all" ? selectedRealm : undefined;
 
   const {
     data: eventsResponse,
@@ -143,7 +164,7 @@ export function EventsPage() {
     offset,
     startTime,
     endTime,
-    source: realmSource,
+    realm: realmFilter,
     refetchInterval: 30000, // 30 seconds instead of default 10 seconds
   });
 
@@ -160,8 +181,8 @@ export function EventsPage() {
 
   // AMFA KPI counters for the selected realm. AMFA stats are per-realm, so the
   // strip only populates once a specific realm is chosen (dashes for "all").
-  // Some AMFA transports can't aggregate across all realms and return a 501;
-  // surface that as an explanatory banner instead of unexplained dashes.
+  // An "all realms" request can instead be refused (501 or 403) or answered for
+  // a narrower realm, named in applied_realm_id.
   const { data: amfaStats, error: amfaStatsError } = useAmfaStats({
     tenantId: selectedTenant?.tenant_id,
     realm: selectedRealm !== "all" ? selectedRealm : undefined,
@@ -170,6 +191,10 @@ export function EventsPage() {
   });
   const amfaAllRealmsUnsupported =
     selectedRealm === "all" && isAllRealmsUnsupportedError(amfaStatsError);
+  const amfaRealmScopeRequiresRealm =
+    selectedRealm === "all" && isRealmScopeRequiresRealmError(amfaStatsError);
+  const amfaAppliedRealm =
+    selectedRealm === "all" ? amfaStats?.applied_realm_id : undefined;
 
   // AMFA geo buckets for the login map. The /amfa/geo endpoint is per-realm, and
   // the map only renders for a specific AMFA-enabled realm, so gate the query on
@@ -236,6 +261,7 @@ export function EventsPage() {
 
   const handleCloseEvent = useCallback(() => {
     setSelectedEvent(null);
+    setDetailsDialogEntered(false);
     setSearchParams((prev) => {
       const newParams = new URLSearchParams(prev);
       newParams.delete("event");
@@ -389,16 +415,21 @@ export function EventsPage() {
         header: "Actions",
         size: 80,
         Cell: ({ row }: { row: MRT_Row<EventWithFormattedDate> }) => (
-          <IconButton
-            size="small"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleEventClick(row.original);
-            }}
-            sx={{ color: "primary.main" }}
-          >
-            <VisibilityIcon fontSize="small" />
-          </IconButton>
+          <Box sx={{ display: "flex", gap: 0.5 }}>
+            <Tooltip title="View details">
+              <IconButton
+                size="small"
+                aria-label="View event details"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleEventClick(row.original);
+                }}
+                sx={{ color: "primary.main" }}
+              >
+                <VisibilityIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
         ),
       },
     ],
@@ -442,8 +473,8 @@ export function EventsPage() {
 
       {/* AMFA KPI strip: only for AMFA-enabled realms (or "all" when any realm
           uses AMFA). Empty/dashes when a specific AMFA realm has no data yet.
-          When "All Realms" is selected on a tenant whose AMFA transport can't
-          aggregate across realms, explain that instead of showing dashes. */}
+          When "All Realms" is selected and the numbers can't cover every realm,
+          say which of the two reasons applies, or which realm they do cover. */}
       {showAmfaSections &&
         (amfaAllRealmsUnsupported ? (
           <AlertBanner
@@ -451,8 +482,23 @@ export function EventsPage() {
             message="This tenant's AMFA integration doesn't support aggregating stats across all realms. Select a specific realm to see AMFA metrics."
             sx={{ mb: 3 }}
           />
+        ) : amfaRealmScopeRequiresRealm ? (
+          <AlertBanner
+            severity="info"
+            message="Your access is limited to specific realms, so AMFA metrics can't be shown across all of them. Select one of your realms."
+            sx={{ mb: 3 }}
+          />
         ) : (
-          <AmfaKpiRow stats={amfaStats} />
+          <>
+            {amfaAppliedRealm && (
+              <AlertBanner
+                severity="info"
+                message={`Your access is limited to ${amfaAppliedRealm}, so these AMFA metrics cover that realm rather than all realms.`}
+                sx={{ mb: 2 }}
+              />
+            )}
+            <AmfaKpiRow stats={amfaStats} />
+          </>
         ))}
 
       {/* Material React Table */}
@@ -563,6 +609,10 @@ export function EventsPage() {
         onClose={handleCloseEvent}
         maxWidth="md"
         fullWidth
+        // Leaflet measures its container once and a scale transform
+        // mid-animation makes it measure wrong, so the map inside AMFA Details
+        // waits for this. See LocationMap's sizing note.
+        TransitionProps={{ onEntered: () => setDetailsDialogEntered(true) }}
       >
         {selectedEvent && (
           <>
@@ -578,6 +628,9 @@ export function EventsPage() {
             >
               <Typography
                 variant="h6"
+                // DialogTitle already renders an <h2>, so an <h6> inside it is
+                // invalid nesting and React warns. Same look, valid DOM.
+                component="span"
                 sx={{
                   fontWeight: 700,
                   textTransform: "uppercase",
@@ -905,28 +958,55 @@ export function EventsPage() {
                         </Typography>
                       </Box>
                     )}
-                    {selectedEvent.lat != null &&
-                      selectedEvent.long != null &&
-                      !(selectedEvent.lat === 0 && selectedEvent.long === 0) && (
-                        <Box>
-                          <Typography
-                            variant="caption"
-                            sx={{
-                              textTransform: "uppercase",
-                              letterSpacing: "0.05em",
-                              color: "text.secondary",
-                            }}
+                    {hasEventLocation(selectedEvent) && (
+                      <Box>
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            textTransform: "uppercase",
+                            letterSpacing: "0.05em",
+                            color: "text.secondary",
+                          }}
+                        >
+                          Coordinates
+                        </Typography>
+                        <Typography
+                          variant="body2"
+                          sx={{ fontFamily: "monospace", mt: 0.5 }}
+                        >
+                          {selectedEvent.lat}, {selectedEvent.long}
+                        </Typography>
+                        <Box sx={{ mt: 1 }}>
+                          <FeatureErrorBoundary
+                            featureId="EventLocationMap"
+                            title="Event Location Map"
+                            resetKeys={[selectedEvent.event_id]}
                           >
-                            Coordinates
-                          </Typography>
-                          <Typography
-                            variant="body2"
-                            sx={{ fontFamily: "monospace", mt: 0.5 }}
-                          >
-                            {selectedEvent.lat}, {selectedEvent.long}
-                          </Typography>
+                            {detailsDialogEntered ? (
+                              <LocationMap
+                                lat={selectedEvent.lat!}
+                                long={selectedEvent.long!}
+                                label={
+                                  [selectedEvent.city, selectedEvent.country]
+                                    .filter(Boolean)
+                                    .join(", ") || undefined
+                                }
+                                detail={selectedEvent.source_ip}
+                                isProxied={selectedEvent.is_vpn}
+                                timestamp={new Date(
+                                  selectedEvent.timestamp,
+                                ).toLocaleString()}
+                                height={EMBEDDED_MAP_HEIGHT}
+                              />
+                            ) : (
+                              // Reserves the map's height so the dialog does
+                              // not resize when the map mounts a frame later.
+                              <Box sx={{ height: EMBEDDED_MAP_HEIGHT }} />
+                            )}
+                          </FeatureErrorBoundary>
                         </Box>
-                      )}
+                      </Box>
+                    )}
                     {(
                       [
                         { label: "City", value: selectedEvent.city },

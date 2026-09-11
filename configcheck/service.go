@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/lifecycle"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
 )
 
@@ -32,8 +33,9 @@ type service struct {
 	notifier     NotificationService
 	logger       *logger.Logger
 	pollInterval time.Duration
-	stopChan     chan struct{}
-	doneChan     chan struct{}
+	// workers tracks every goroutine Start launches, including the
+	// immediate first run, so Stop drains all of them.
+	workers lifecycle.Workers
 }
 
 // NewService creates a new configuration checker service.
@@ -50,8 +52,6 @@ func NewService(
 		notifier:     notifier,
 		logger:       log.WithComponent("config_checker"),
 		pollInterval: pollInterval,
-		stopChan:     make(chan struct{}),
-		doneChan:     make(chan struct{}),
 	}
 }
 
@@ -68,10 +68,14 @@ func (s *service) Start(ctx context.Context) error {
 		logger.Str("poll_interval", s.pollInterval.String()))
 
 	// Perform initial check immediately
-	go s.runChecks(ctx)
+	s.workers.Go(func() {
+		s.runChecks(ctx)
+	})
 
 	// Start polling worker
-	go s.pollChecks(ctx)
+	s.workers.Go(func() {
+		s.pollChecks(ctx)
+	})
 
 	return nil
 }
@@ -79,13 +83,9 @@ func (s *service) Start(ctx context.Context) error {
 // Stop gracefully stops the configuration checking service.
 func (s *service) Stop() error {
 	s.logger.Info("Stopping configuration checker service")
-	close(s.stopChan)
-
-	// Wait for worker to finish (with timeout)
-	select {
-	case <-s.doneChan:
+	if s.workers.Drain(10 * time.Second) {
 		s.logger.Info("Configuration checker service stopped gracefully")
-	case <-time.After(10 * time.Second):
+	} else {
 		s.logger.Warn("Configuration checker service stop timeout")
 	}
 
@@ -96,13 +96,12 @@ func (s *service) Stop() error {
 func (s *service) pollChecks(ctx context.Context) {
 	ticker := time.NewTicker(s.pollInterval)
 	defer ticker.Stop()
-	defer close(s.doneChan)
 
 	for {
 		select {
 		case <-ticker.C:
 			s.runChecks(ctx)
-		case <-s.stopChan:
+		case <-s.workers.Stopping():
 			s.logger.Info("Configuration checker polling stopped")
 			return
 		case <-ctx.Done():

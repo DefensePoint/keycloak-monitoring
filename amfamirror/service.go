@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/lifecycle"
 )
 
 // watermarkOverlap is subtracted from the watermark on each query so events
@@ -50,8 +51,9 @@ type service struct {
 	// restart by design: it is re-derived from the events table.
 	watermarks map[string]time.Time
 
-	stopChan chan struct{}
-	doneChan chan struct{}
+	// workers tracks every goroutine Start launches, including the immediate
+	// first cycle, so Stop drains all of them.
+	workers lifecycle.Workers
 }
 
 // NewService creates a per-tenant AMFA events mirror.
@@ -75,8 +77,6 @@ func NewService(
 		pollInterval: pollInterval,
 		backfill:     backfill,
 		watermarks:   make(map[string]time.Time),
-		stopChan:     make(chan struct{}),
-		doneChan:     make(chan struct{}),
 	}
 }
 
@@ -86,20 +86,25 @@ func (s *service) Start(ctx context.Context) error {
 		"poll_interval", s.pollInterval.String(),
 		"backfill", s.backfill.String())
 
-	go func() {
+	s.workers.Go(func() {
 		_ = s.runCycle(ctx) // best-effort: errors are logged; next tick retries
-	}()
-	go s.poll(ctx)
+	})
+
+	s.workers.Go(func() {
+		s.poll(ctx)
+	})
 	return nil
 }
 
 func (s *service) Stop() error {
 	s.logger.Info("Stopping amfamirror service", "tenant_id", s.tenantID)
-	close(s.stopChan)
-	select {
-	case <-s.doneChan:
+	// Drain every worker, not just the poller. The immediate cycle Start
+	// launches does not watch the stop signal, so this waits it out rather
+	// than interrupting it; a cycle still going after the timeout is
+	// abandoned, as the poller always was.
+	if s.workers.Drain(10 * time.Second) {
 		s.logger.Info("amfamirror service stopped gracefully", "tenant_id", s.tenantID)
-	case <-time.After(10 * time.Second):
+	} else {
 		s.logger.Warn("amfamirror service stop timeout", "tenant_id", s.tenantID)
 	}
 	return nil
@@ -112,13 +117,12 @@ func (s *service) RunOnce(ctx context.Context) error {
 func (s *service) poll(ctx context.Context) {
 	ticker := time.NewTicker(s.pollInterval)
 	defer ticker.Stop()
-	defer close(s.doneChan)
 
 	for {
 		select {
 		case <-ticker.C:
 			_ = s.runCycle(ctx)
-		case <-s.stopChan:
+		case <-s.workers.Stopping():
 			s.logger.Info("amfamirror polling stopped", "tenant_id", s.tenantID)
 			return
 		case <-ctx.Done():
@@ -140,8 +144,8 @@ func (s *service) poll(ctx context.Context) {
 //
 // TryLock rather than Lock so a tick that arrives mid-cycle is skipped instead
 // of queued: the poll goroutine returns straight to its select and stays
-// responsive to stopChan, which a blocking wait would delay past the drain
-// timeout in Stop.
+// responsive to the stop signal, which a blocking wait would delay past the
+// drain timeout in Stop.
 func (s *service) runCycle(ctx context.Context) error {
 	if !s.cycleMu.TryLock() {
 		// Warn, not Debug: a cycle that regularly outlives its poll interval

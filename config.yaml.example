@@ -495,6 +495,20 @@ keycloak:
     # The version checker monitors for new Keycloak releases
     # and displays warnings when updates are available.
     version_checker:
+      # Enable checking whether the monitored Keycloak is behind its latest
+      # release. OFF BY DEFAULT, and the only setting here that reaches a host
+      # outside your own infrastructure: api.github.com, for upstream Keycloak
+      # releases.
+      #
+      # Leave this false for any deployment that cannot reach the internet,
+      # including airgapped installations. There the requests fail on the HTTP
+      # timeout below with nothing on screen to explain it; the rest of the
+      # platform makes no external calls at all.
+      #
+      # With this false, no version checker is constructed and the UI simply
+      # shows no version information.
+      enabled: false
+
       # How long to cache version information before checking again
       # Valid time units: ns, us/µs, ms, s, m, h
       # Recommended: 24h to 48h
@@ -1112,10 +1126,15 @@ auth:
 
   session:
     # Session secret key for cookie encryption
+    # REQUIRED: with no secret every login answers 500 and the server logs
+    # "securecookie: hash key is not set"
     # IMPORTANT: Use a strong random string (at least 32 characters)
     # Generate with: openssl rand -base64 32
     # WARNING: In production, use environment variables or secrets management
     # Example: MONITORING_AUTH_SESSION_SECRET=your-32-chars-key
+    # Keep the key in this file when the value comes from that variable: no
+    # default is registered for it, so AutomaticEnv binds it only for a key
+    # config.yaml already carries
     secret: "change-this-to-a-random-secret-key-at-least-32-chars"
 
     # Session cookie name
@@ -1170,3 +1189,78 @@ logging:
       # When true, JSON logs are indented and formatted for readability
       # Set to false in production for compact logs
       pretty: false
+
+# =============================================================================
+# MCP SERVER CONFIGURATION
+# =============================================================================
+# Read-only Model Context Protocol server (cmd/mcp-server). Authenticates MCP
+# clients with personal access tokens (/api/tokens) and never migrates the
+# database schema.
+mcp:
+  # Master switch. The mcp-server binary exits immediately when disabled.
+  enabled: false
+
+  # Port the MCP endpoint (/mcp), /health, /ready and /metrics listen on.
+  port: 7889
+
+  # Page size applied when a tool call does not request one, and the hard cap
+  # on any page size a tool call does request. They replace the older
+  # max_page_size (the default) and absolute_max_page_size (the cap): a config
+  # still carrying absolute_max_page_size fails startup, since max_page_size
+  # now caps what it used to default.
+  default_page_size: 50
+  max_page_size: 500
+
+  # Signs the pagination cursors MCP tools hand to clients. Required, minimum
+  # 32 bytes: the server refuses to start on a shorter one rather than fall
+  # back to a per-process key whose cursors stop verifying across a restart.
+  # Generate with: openssl rand -base64 32
+  cursor_hmac_key: ""
+
+  # Exact Origin header values accepted on MCP requests. An empty list rejects
+  # every Origin-bearing request (DNS-rebinding defense; MCP clients are not
+  # browsers and send no Origin).
+  origin_allowlist: []
+
+  # Prometheus /metrics on the MCP port; same convention as http.metrics.
+  # /metrics is served outside the MCP authentication middleware, so
+  # auth_token is required whenever enabled is true: the server refuses to
+  # start on an enabled endpoint with no token.
+  metrics:
+    enabled: false
+    auth_token: ""
+
+  # Token-bucket rate limits. per_user_per_minute is one budget shared by all
+  # of a user's API tokens and applies to tool calls after authentication.
+  # per_ip_per_minute applies to every request before authentication, keyed by
+  # the connection's direct remote address (X-Forwarded-For is ignored; the
+  # MCP server is not behind a trusted proxy by default). burst is the
+  # instantaneous allowance of both buckets. 0 disables a limiter.
+  rate:
+    per_user_per_minute: 120
+    per_ip_per_minute: 300
+    burst: 30
+
+  # Maximum serialized size of any tool result in bytes; a larger result is
+  # replaced with an error telling the caller to retry with a smaller limit
+  # (page-size caps normally keep results far below this). 0 or absent means
+  # the 1 MiB default; the cap cannot be disabled.
+  max_response_bytes: 1048576
+
+  # Required: the read-only database role the MCP server connects with. Same
+  # shape as the top-level database block. There is no fallback to that block,
+  # because it names the read-write application role; the MCP server refuses
+  # to start without this one. Create the role with
+  # deployments/postgres/mcp-readonly-role.sql, and supply the password
+  # through MONITORING_MCP_DATABASE_PASSWORD while keeping the empty
+  # password key here (Viper only binds an env var for a key it already sees).
+  database:
+    host: "kmt-postgres"
+    port: 5432
+    database: "monitoring"
+    user: "monitoring_readonly"
+    password: ""
+    ssl_mode: "disable"
+    max_conns: 10
+    min_conns: 2
+    timeout: 30s

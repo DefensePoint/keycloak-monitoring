@@ -52,9 +52,10 @@ describe("useEvents hooks", () => {
         "tenant-1",
         100, // default limit
         0, // default offset
-        undefined,
-        undefined,
-        undefined,
+        undefined, // startTime
+        undefined, // endTime
+        undefined, // source
+        undefined, // realm
       );
     });
 
@@ -70,7 +71,7 @@ describe("useEvents hooks", () => {
             offset: 10,
             startTime: "2024-01-01",
             endTime: "2024-01-31",
-            source: "keycloak:master",
+            realm: "master",
           }),
         { wrapper },
       );
@@ -79,13 +80,15 @@ describe("useEvents hooks", () => {
         expect(result.current.isSuccess).toBe(true);
       });
 
+      // A realm reaches the service as a realm, not encoded into `source`.
       expect(eventsService.getEvents).toHaveBeenCalledWith(
         "tenant-1",
         50,
         10,
         "2024-01-01",
         "2024-01-31",
-        "keycloak:master",
+        undefined, // source
+        "master", // realm
       );
     });
 

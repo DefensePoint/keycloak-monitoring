@@ -76,6 +76,35 @@ func TestObservePollCycle(t *testing.T) {
 	}
 }
 
+func TestRecorderMCPToolCalls(t *testing.T) {
+	m := metrics.New()
+
+	m.IncMCPToolCall("whoami", "allowed")
+	m.IncMCPToolCall("whoami", "allowed")
+	m.IncMCPToolCall("list_alerts", "denied")
+	if got := testutil.ToFloat64(m.MCPToolCalls.WithLabelValues("whoami", "allowed")); got != 2 {
+		t.Fatalf("expected 2 allowed whoami calls, got %v", got)
+	}
+	if got := testutil.ToFloat64(m.MCPToolCalls.WithLabelValues("list_alerts", "denied")); got != 1 {
+		t.Fatalf("expected 1 denied list_alerts call, got %v", got)
+	}
+
+	m.ObserveMCPToolCall("whoami", 25*time.Millisecond)
+	if got := testutil.CollectAndCount(m.MCPToolCallDuration); got == 0 {
+		t.Fatal("expected MCP tool call duration observation to be recorded")
+	}
+
+	m.IncMCPRequest("tools/call")
+	m.IncMCPRequest("tools/call")
+	m.IncMCPRequest("other")
+	if got := testutil.ToFloat64(m.MCPRequests.WithLabelValues("tools/call")); got != 2 {
+		t.Fatalf("expected 2 tools/call requests, got %v", got)
+	}
+	if got := testutil.ToFloat64(m.MCPRequests.WithLabelValues("other")); got != 1 {
+		t.Fatalf("expected 1 other request, got %v", got)
+	}
+}
+
 func TestNopRecorderSatisfiesInterface(t *testing.T) {
 	var r metrics.Recorder = metrics.NopRecorder{}
 	r.SetTenantMonitorUp("t", "n", true)
@@ -85,6 +114,9 @@ func TestNopRecorderSatisfiesInterface(t *testing.T) {
 	r.AddEventsCollected("t", "r", 1)
 	r.IncAlert("info", "check")
 	r.IncNotification("slack", "success")
+	r.IncMCPRequest("tools/call")
+	r.IncMCPToolCall("whoami", "allowed")
+	r.ObserveMCPToolCall("whoami", time.Second)
 }
 
 func TestRegistrySatisfiesRecorder(t *testing.T) {

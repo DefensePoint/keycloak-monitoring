@@ -1477,3 +1477,22 @@ CREATE INDEX idx_operator_actions_alert ON operator_alert_actions(alert_id);
 **Risk-alert checker (`amfacheck/`):** A per-tenant poll loop, sibling to `eventscheck/`, that turns high-risk AMFA login events into `domain.Alert`s routed through the existing alerts and notifications infrastructure (same lifecycle and notification fan-out as the Keycloak event checker). It reads AMFA's database through additive `amfa.Repository` methods, never modifying the AMFA schema. The package is deliberately kept parallel to `eventscheck/` rather than refactored behind a shared abstraction; see the design spec for the rationale. The checker is gated by the `keycloak.global.amfa_checker` config block (master switch off by default) and is documented operationally in `docs/amfa-integration.md`.
 
 **Operator-facing setup guide:** [`docs/amfa-integration.md`](amfa-integration.md).
+
+### 23. MCP Server (`cmd/mcp-server`)
+
+**Purpose**: Read-only Model Context Protocol (MCP) server exposing tenants, realms, alerts, events and AMFA statistics to MCP clients such as Claude Code and Claude Desktop.
+
+**Deployment model**: A third service alongside the API server and the web server, wired by its own Fx module (`internal/fx/mcp.go`) on a database client that never calls `AutoMigrate`. The optional `mcp.database` block points it at a dedicated read-only PostgreSQL role, so the process has no write capability at the database layer either. It is disabled by default: the binary exits immediately unless `mcp.enabled` is true.
+
+**Transport**: Streamable HTTP in stateless mode on `POST /mcp`, port 7889 by default. Every request runs in its own temporary session, so no session identifier is issued and nothing accumulates server-side between calls. `/health`, `/ready` and, when `mcp.metrics.enabled` is set, a Prometheus `/metrics` endpoint share the port.
+
+**Authentication**: Every request carries `Authorization: Bearer <personal access token>`, validated by the `apitoken` service against the stored SHA-256 digest. Tokens are created and revoked through the API server's `/api/tokens` endpoints; the MCP server holds no sessions and sets no cookies.
+
+**Authorization**: Tools read through the same domain packages as the HTTP handlers (`tenant`, `keycloak`, `alerts`, `events`, `amfa`) and pass through the same `rbac.Service`. Effective scope is the intersection of the token's tenant allowlist and the acting user's RBAC roles and tenant policies, narrowed further to the realms that user's tenant policy allows, so a token can never reach further than the user it acts as.
+
+**Key Files**:
+
+- `main.go`: Entry point, configuration load, and the exit when the server is disabled
+- `internal/mcp/`: Transport, authentication, per-tool authorization, and the guardrails every tool call passes through (error mapping, parameter caps, string sanitization, rate limiting, audit logging, per-tool metrics, response size cap)
+
+**Operator guide and tool reference**: [`cmd/mcp-server/README.md`](../cmd/mcp-server/README.md).

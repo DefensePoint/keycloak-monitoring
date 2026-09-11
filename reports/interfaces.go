@@ -20,9 +20,10 @@ type AlertReader interface {
 }
 
 // OperatorMetricsReader defines the minimal interface for reading operator metrics
-// used by the report Service.
+// used by the report Service. realmNames restricts the aggregate to those
+// realms, and an empty list applies no filter.
 type OperatorMetricsReader interface {
-	GetAllOperatorsSummary(ctx context.Context, tenantID string, startDate, endDate time.Time) ([]*domain.OperatorMetricsSummary, error)
+	GetAllOperatorsSummary(ctx context.Context, tenantID string, startDate, endDate time.Time, realmNames []string) ([]*domain.OperatorMetricsSummary, error)
 }
 
 // RealmLister lists the realms configured for a tenant. It is used to scope the

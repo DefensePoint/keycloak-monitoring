@@ -1,12 +1,13 @@
 package chi
 
 import (
+	"context"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
-	_ "repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain" // swagger
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
 	httputil "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http"
 	_ "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/dto" // swagger
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
@@ -17,6 +18,7 @@ import (
 // OperatorHandlers handles HTTP requests for operator metrics operations.
 type OperatorHandlers struct {
 	service        operator.Service
+	rbacService    RBACChecker
 	log            *logger.Logger
 	authMiddleware func(http.Handler) http.Handler
 	rbacMiddleware *RBACMiddleware
@@ -25,12 +27,14 @@ type OperatorHandlers struct {
 // NewOperatorHandlers creates a new OperatorHandlers.
 func NewOperatorHandlers(
 	service operator.Service,
+	rbacService RBACChecker,
 	log *logger.Logger,
 	authMiddleware func(http.Handler) http.Handler,
 	rbacMiddleware *RBACMiddleware,
 ) *OperatorHandlers {
 	return &OperatorHandlers{
 		service:        service,
+		rbacService:    rbacService,
 		log:            log,
 		authMiddleware: authMiddleware,
 		rbacMiddleware: rbacMiddleware,
@@ -86,7 +90,16 @@ func (h *OperatorHandlers) handleGetAllOperatorsMetrics(w http.ResponseWriter, r
 		return
 	}
 
-	metrics, err := h.service.GetAllOperatorsMetrics(ctx, tenantID, startDate, endDate)
+	realmNames, hasScope, ok := h.realmScope(ctx, w, tenantID)
+	if !ok {
+		return
+	}
+	if !hasScope {
+		httputil.RespondSuccess(w, h.log, []*domain.OperatorMetricsSummary{})
+		return
+	}
+
+	metrics, err := h.service.GetAllOperatorsMetrics(ctx, tenantID, startDate, endDate, realmNames)
 	if err != nil {
 		h.log.Error("Failed to get all operators metrics",
 			logger.Str("tenant_id", tenantID),
@@ -131,7 +144,16 @@ func (h *OperatorHandlers) handleGetOperatorMetrics(w http.ResponseWriter, r *ht
 		return
 	}
 
-	metrics, err := h.service.GetMetrics(ctx, tenantID, operatorEmail, startDate, endDate)
+	realmNames, hasScope, ok := h.realmScope(ctx, w, tenantID)
+	if !ok {
+		return
+	}
+	if !hasScope {
+		httputil.RespondSuccess(w, h.log, emptyOperatorSummary(tenantID, operatorEmail, startDate, endDate))
+		return
+	}
+
+	metrics, err := h.service.GetMetrics(ctx, tenantID, operatorEmail, startDate, endDate, realmNames)
 	if err != nil {
 		h.log.Error("Failed to get operator metrics",
 			logger.Str("operator_email", operatorEmail),
@@ -142,6 +164,18 @@ func (h *OperatorHandlers) handleGetOperatorMetrics(w http.ResponseWriter, r *ht
 	}
 
 	httputil.RespondSuccess(w, h.log, metrics)
+}
+
+// emptyOperatorSummary is the summary a caller allowed no realm gets back: the
+// period they asked for and no numbers from it.
+func emptyOperatorSummary(tenantID, operatorEmail string, startDate, endDate time.Time) *domain.OperatorMetricsSummary {
+	return &domain.OperatorMetricsSummary{
+		TenantID:      tenantID,
+		OperatorEmail: operatorEmail,
+		PeriodStart:   startDate,
+		PeriodEnd:     endDate,
+		AlertsByType:  map[string]int{},
+	}
 }
 
 // handleGetOperatorActions handles GET /api/tenants/{tenant_id}/metrics/actions?operator_email=...
@@ -181,7 +215,16 @@ func (h *OperatorHandlers) handleGetOperatorActions(w http.ResponseWriter, r *ht
 		return
 	}
 
-	actions, err := h.service.GetActions(ctx, tenantID, operatorEmail, startDate, endDate, limit)
+	realmNames, hasScope, ok := h.realmScope(ctx, w, tenantID)
+	if !ok {
+		return
+	}
+	if !hasScope {
+		httputil.RespondSuccess(w, h.log, []*domain.OperatorAction{})
+		return
+	}
+
+	actions, err := h.service.GetActions(ctx, tenantID, operatorEmail, startDate, endDate, limit, realmNames)
 	if err != nil {
 		h.log.Error("Failed to get operator actions",
 			logger.Str("operator_email", operatorEmail),
@@ -192,6 +235,35 @@ func (h *OperatorHandlers) handleGetOperatorActions(w http.ResponseWriter, r *ht
 	}
 
 	httputil.RespondSuccess(w, h.log, actions)
+}
+
+// realmScope resolves the realm filter every operator query runs with,
+// responding with the failure itself and returning ok = false. hasScope = false
+// means the caller may read no realm and the query must be skipped, since an
+// empty realm filter applies no filter at all. A nil realmNames with
+// hasScope = true is an unrestricted caller.
+func (h *OperatorHandlers) realmScope(ctx context.Context, w http.ResponseWriter, tenantID string) (realmNames []string, hasScope, ok bool) {
+	user := GetUserFromContext(ctx)
+	if user == nil {
+		h.log.Warn("No user info in context for operator metrics scoping")
+		httputil.RespondUnauthorized(w, h.log, "Authentication required")
+		return nil, false, false
+	}
+
+	scope, all, err := allowedRealms(ctx, h.rbacService, user.ID, tenantID)
+	if err != nil {
+		h.log.Error("Failed to check realm access",
+			logger.Err(err),
+			logger.Uint("user_id", user.ID),
+			logger.Str("tenant_id", tenantID))
+		httputil.RespondInternalError(w, h.log, "Failed to check realm access")
+		return nil, false, false
+	}
+
+	if all {
+		return nil, true, true
+	}
+	return scope, len(scope) > 0, true
 }
 
 // parseDateRange parses start_date and end_date query parameters.

@@ -14,6 +14,7 @@ import (
 )
 
 // NewClient opens a read-only GORM connection to one tenant's AMFA database.
+// The session is opened read-only at the Postgres level (see buildDSN), and
 // AutoMigrate is NEVER called on this connection — the AMFA database schema
 // is owned by AMFA, not KMT. A nil logger is tolerated for tests.
 func NewClient(cfg config.AmfaDatabaseConfig, log *logger.Logger) (*gorm.DB, error) {
@@ -77,6 +78,12 @@ func NewClient(cfg config.AmfaDatabaseConfig, log *logger.Logger) (*gorm.DB, err
 
 // buildDSN returns the Postgres DSN, preferring the read replica when
 // configured. SSL mode defaults to "require" if not set.
+//
+// default_transaction_read_only makes the read-only intent something Postgres
+// enforces rather than something this package promises: every statement runs
+// in a read-only transaction, implicit single-statement ones included, so a
+// write is refused by the server even where the configured AMFA credentials
+// would allow it.
 func buildDSN(cfg config.AmfaDatabaseConfig) string {
 	host := hostUsed(cfg)
 	sslmode := cfg.SSLMode
@@ -84,7 +91,7 @@ func buildDSN(cfg config.AmfaDatabaseConfig) string {
 		sslmode = "require"
 	}
 	return fmt.Sprintf(
-		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s",
+		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s options='-c default_transaction_read_only=on'",
 		host, cfg.Port, cfg.Database, cfg.User, cfg.Password, sslmode,
 	)
 }

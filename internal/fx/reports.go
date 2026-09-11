@@ -61,8 +61,9 @@ func provideReportsAlertReader(service alerts.Service) reports.AlertReader {
 func (a *alertReaderAdapter) ListActiveAlerts(ctx context.Context, tenantID string, opts *reports.AlertListOptions) ([]*domain.Alert, error) {
 	// Convert reports.AlertListOptions to alerts.ListOptions
 	domainOpts := &alerts.ListOptions{
-		Limit:  opts.Limit,
-		Offset: opts.Offset,
+		Limit:      opts.Limit,
+		Offset:     opts.Offset,
+		RealmNames: opts.RealmNames,
 	}
 
 	// alerts.Alert is an alias to domain.Alert, so no conversion needed
@@ -79,8 +80,8 @@ func provideReportsOperatorReader(service operator.Service) reports.OperatorMetr
 	return &operatorReaderAdapter{service: service}
 }
 
-func (a *operatorReaderAdapter) GetAllOperatorsSummary(ctx context.Context, tenantID string, startDate, endDate time.Time) ([]*domain.OperatorMetricsSummary, error) {
-	return a.service.GetAllOperatorsMetrics(ctx, tenantID, startDate, endDate)
+func (a *operatorReaderAdapter) GetAllOperatorsSummary(ctx context.Context, tenantID string, startDate, endDate time.Time, realmNames []string) ([]*domain.OperatorMetricsSummary, error) {
+	return a.service.GetAllOperatorsMetrics(ctx, tenantID, startDate, endDate, realmNames)
 }
 
 func provideChromePDFGenerator(log *logger.Logger) reports.PDFGenerator {

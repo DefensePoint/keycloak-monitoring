@@ -40,7 +40,7 @@ A comprehensive monitoring and security compliance platform for Keycloak identit
 
 ## Architecture
 
-The platform consists of three main components:
+The platform consists of the following main components:
 
 ```bash
 ┌─────────────────┐      ┌─────────────────┐      ┌──────────────────┐
@@ -48,23 +48,28 @@ The platform consists of three main components:
 │   (React/TS)    │      │    (Go API)     │      │  (TimescaleDB)   │
 │   Port 7880     │      │   Port 7888     │      │   Port 5432      │
 └─────────────────┘      └─────────────────┘      └──────────────────┘
-                                  │
-                                  │
-                                  ▼
-                         ┌─────────────────┐
-                         │    Keycloak     │
-                         │  (Monitored)    │
-                         └─────────────────┘
+                                  │                         ▲
+                                  │                         │ read-only
+                                  ▼                         │
+                         ┌─────────────────┐      ┌──────────────────┐
+                         │    Keycloak     │      │   MCP Server     │
+                         │  (Monitored)    │      │   Port 7889      │
+                         └─────────────────┘      └──────────────────┘
 ```
 
 ### Components
 
 - **API Server** (`cmd/server`): Go-based REST API server handling authentication, data retrieval, and Keycloak monitoring
 - **Web Server** (`cmd/web`): Serves the React frontend and proxies API requests
+- **MCP Server** (`cmd/mcp-server`): Read-only Model Context Protocol (MCP) server exposing monitoring data to MCP clients, disabled by default
 - **Frontend** (`web/`): React + TypeScript dashboard with Recharts for visualization
 - **Database**: PostgreSQL 17 with TimescaleDB for time-series data
 
 For detailed architecture information, see the [architecture docs](docs/architecture.md).
+
+### MCP Server
+
+`cmd/mcp-server` exposes tenants, Keycloak realms, alerts, events and Adaptive Multi-Factor Authentication (AMFA) statistics to MCP clients such as Claude Code and Claude Desktop. Every tool is read-only, it runs as its own process alongside the API server, and it is disabled by default: set `mcp.enabled` in `config.yaml` to turn it on. Clients authenticate with personal access tokens and see only what the token and the acting user's RBAC roles allow. See [cmd/mcp-server/README.md](cmd/mcp-server/README.md) for the token lifecycle, client setup and tool reference.
 
 ## Quick Start
 
@@ -74,7 +79,7 @@ The fastest way to get started is with Docker. See the **[Quick Start Guide](doc
 
 ```bash
 # 1. Clone the repository
-git clone git@repos.defensepoint.com:ai/soc/kmt.git
+git clone git@repos.defensepoint.com:iam/oss-pmt/kmt.git
 cd kmt
 
 # 2. Copy and edit configuration
@@ -143,6 +148,7 @@ Comprehensive documentation is available in the `docs/` directory:
 ```bash
 .
 ├── cmd/
+│   ├── mcp-server/      # MCP server entry point
 │   ├── server/          # API server entry point
 │   └── web/             # Web server entry point
 ├── internal/            # Internal packages (not exported)

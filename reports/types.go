@@ -1,6 +1,7 @@
 package reports
 
 import (
+	"slices"
 	"time"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
@@ -10,6 +11,27 @@ import (
 type AlertListOptions struct {
 	Limit  int
 	Offset int
+	// RealmNames restricts the query to these realms. An empty list applies no
+	// filter at all, which reads as every realm.
+	RealmNames []string
+}
+
+// RealmScope is the set of realms a report may cover. All means unrestricted;
+// otherwise Realms lists every realm it may include, so the zero value denies
+// rather than grants.
+type RealmScope struct {
+	Realms []string
+	All    bool
+}
+
+// covers reports whether a realm is inside the scope.
+func (s RealmScope) covers(realm string) bool {
+	return s.All || slices.Contains(s.Realms, realm)
+}
+
+// empty reports a scope that names no realm at all.
+func (s RealmScope) empty() bool {
+	return !s.All && len(s.Realms) == 0
 }
 
 // Data contains all data needed for a report.
@@ -84,4 +106,6 @@ type GenerateRequest struct {
 	TenantName string
 	StartDate  time.Time
 	EndDate    time.Time
+	// Scope bounds both the alerts and the events the report may include.
+	Scope RealmScope
 }

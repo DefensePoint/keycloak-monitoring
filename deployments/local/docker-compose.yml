@@ -8,6 +8,7 @@
 # Access:
 #   - API Server:    http://localhost:7888
 #   - Web UI:        http://localhost:7880
+#   - MCP Server:    http://127.0.0.1:7889/mcp  (disabled unless mcp.enabled)
 #   - Keycloak 1:    http://localhost:8080  (admin/admin) - simulates "prod"
 #   - Keycloak 2:    http://localhost:8081  (admin/admin) - simulates "staging"
 #   - PostgreSQL:    localhost:5432
@@ -184,6 +185,32 @@ services:
     networks:
       - kmt-network
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ==========================================================================
+  # MCP SERVER - Read-only Model Context Protocol endpoint
+  # ==========================================================================
+  # Bound to loopback so a local MCP client can reach it without the endpoint
+  # being visible on the network.
+  mcp-server:
+    build:
+      context: ../..
+      dockerfile: build/Dockerfile
+      args:
+        SERVICE: mcp-server
+    image: kmt-mcp-server:latest
+    container_name: kmt-mcp-server
+    ports:
+      - "127.0.0.1:7889:7889"
+    env_file:
+      - ../../.env
+    volumes:
+      - ../../config.yaml:/app/config.yaml:ro
+    networks:
+      - kmt-network
+    restart: on-failure
     depends_on:
       postgres:
         condition: service_healthy

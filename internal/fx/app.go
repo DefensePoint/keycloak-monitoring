@@ -25,6 +25,7 @@ func NewApp(configPath string, opts ...fx.Option) *fx.App {
 		AmfaModule,
 		OperatorModule,
 		RBACModule,
+		APITokenModule,
 		NotificationsModule,
 		ReportsModule,
 		ConfigCheckModule,
@@ -60,6 +61,29 @@ func NewApp(configPath string, opts ...fx.Option) *fx.App {
 // NewStandaloneApp creates a standalone app (current mode - server with all features)
 func NewStandaloneApp(configPath string, opts ...fx.Option) *fx.App {
 	return NewApp(configPath, opts...)
+}
+
+// NewMCPApp creates the MCP server app: a read-only assembly with no
+// monitoring, no bootstrap and no schema migrations. It wires only the
+// dependencies the MCP server needs (apitoken, rbac, tenant reader, users).
+func NewMCPApp(configPath string, opts ...fx.Option) *fx.App {
+	baseOpts := []fx.Option{
+		fx.Supply(ConfigPath(configPath)),
+
+		ConfigModule,
+		LoggerModule,
+
+		APITokenModule,
+		RBACModule,
+
+		// MCPModule provides the read-only database client this whole
+		// assembly runs on, in place of DatabaseModule.
+		MCPModule,
+	}
+
+	allOpts := append(baseOpts, opts...)
+
+	return fx.New(allOpts...)
 }
 
 // NewAgentApp creates an agent app (future - only monitoring, sends to control plane)

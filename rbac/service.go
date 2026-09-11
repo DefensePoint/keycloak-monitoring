@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
@@ -185,8 +186,35 @@ func (s *service) RemoveRoleFromUser(ctx context.Context, userID, roleID uint, t
 	return nil
 }
 
+// ErrAllowedRealmBlank is returned when a tenant policy names a blank realm.
+// It is a caller mistake, not a server fault, so handlers answer 400.
+var ErrAllowedRealmBlank = errors.New("tenant policy names a blank realm")
+
+// validateAllowedRealms rejects a realm list carrying a blank entry.
+//
+// A blank realm names no realm, so it can only ever be a mistake, and stored
+// it is a fail-open one: readers that drop it end up with no realm filter and
+// widen the caller to the whole tenant. The read path in
+// allowedRealmsWithAdmin drops blanks defensively; this stops them being
+// written at all, so a policy means what it says on disk.
+//
+// A nil list is not a list: it means unrestricted, and stays valid. An empty
+// list is a real, fail-closed restriction and also stays valid.
+func validateAllowedRealms(allowedRealms []string) error {
+	for i, realm := range allowedRealms {
+		if strings.TrimSpace(realm) == "" {
+			return fmt.Errorf("%w: allowed_realms[%d] is blank, name a realm or pass no list to leave the tenant unrestricted", ErrAllowedRealmBlank, i)
+		}
+	}
+	return nil
+}
+
 // CreateTenantPolicy creates a tenant policy.
 func (s *service) CreateTenantPolicy(ctx context.Context, userID uint, tenantID string, allowedRealms []string, grantedBy string) error {
+	if err := validateAllowedRealms(allowedRealms); err != nil {
+		return err
+	}
+
 	policy := &domain.TenantPolicy{
 		UserID:        userID,
 		TenantID:      tenantID,
@@ -210,15 +238,18 @@ func (s *service) CreateTenantPolicy(ctx context.Context, userID uint, tenantID 
 
 // UpdateTenantPolicy updates a tenant policy.
 func (s *service) UpdateTenantPolicy(ctx context.Context, policyID uint, allowedRealms []string, grantedBy string) error {
-	policies, err := s.policyRepo.GetUserPolicies(ctx, policyID)
-	if err != nil {
-		return fmt.Errorf("failed to get policies: %w", err)
+	if err := validateAllowedRealms(allowedRealms); err != nil {
+		return err
 	}
-	if len(policies) == 0 {
+
+	policy, err := s.policyRepo.GetPolicyByID(ctx, policyID)
+	if err != nil {
+		return fmt.Errorf("failed to get policy: %w", err)
+	}
+	if policy == nil {
 		return fmt.Errorf("policy not found")
 	}
 
-	policy := policies[0]
 	policy.AllowedRealms = allowedRealms
 	policy.GrantedBy = grantedBy
 	policy.GrantedAt = time.Now()

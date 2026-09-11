@@ -62,7 +62,9 @@ class RealmService {
   ): Promise<EventsResponse> {
     const params: Record<string, string | number> = {
       limit,
-      source: `keycloak:${realm}`,
+      // `realm`, not source="keycloak:<realm>": the older encoding matched
+      // only the realm's Keycloak rows and dropped its AMFA-mirrored events.
+      realm,
     };
     if (startTime) params.start_time = startTime;
     if (endTime) params.end_time = endTime;

@@ -35,14 +35,15 @@ func (r *Repository) GetByID(ctx context.Context, id uint) (*domain.Alert, error
 	return convertAlert(&dbAlert), nil
 }
 
-// GetByAlertID retrieves an alert by its unique alert_id.
+// GetByAlertID retrieves an alert by its unique alert_id. A missing alert is
+// reported as a wrapped alerts.ErrNotFound.
 func (r *Repository) GetByAlertID(ctx context.Context, tenantID, alertID string) (*domain.Alert, error) {
 	var dbAlert database.ConfigurationAlert
 	if err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND alert_id = ?", tenantID, alertID).
 		First(&dbAlert).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return nil, fmt.Errorf("alert not found: %s", alertID)
+			return nil, fmt.Errorf("%w: %s", alerts.ErrNotFound, alertID)
 		}
 		return nil, fmt.Errorf("failed to get alert: %w", err)
 	}
@@ -69,10 +70,12 @@ func (r *Repository) List(ctx context.Context, tenantID string, opts *alerts.Lis
 		opts = &alerts.ListOptions{Limit: 100, Offset: 0}
 	}
 
+	// The id tiebreaker keeps pagination stable across rows sharing the same
+	// first_detected timestamp.
 	var dbAlerts []*database.ConfigurationAlert
 	query := r.db.WithContext(ctx).
 		Where("tenant_id = ?", tenantID).
-		Order("first_detected DESC")
+		Order("first_detected DESC, id DESC")
 
 	query = applyFilters(query, opts)
 
@@ -123,70 +126,63 @@ func (r *Repository) Count(ctx context.Context, tenantID string, opts *alerts.Li
 	return count, nil
 }
 
-// GetStatistics returns aggregated alert statistics.
+// GetStatistics returns aggregated alert statistics, optionally scoped to a set
+// of realms. Passing no realm counts every realm of the tenant.
 func (r *Repository) GetStatistics(ctx context.Context, tenantID string, realmName ...string) (*alerts.Statistics, error) {
 	stats := &alerts.Statistics{
 		BySeverity: make(map[string]int),
 		ByType:     make(map[string]int),
 	}
 
-	baseQuery := r.db.WithContext(ctx).
-		Model(&database.ConfigurationAlert{}).
-		Where("tenant_id = ? AND status = ?", tenantID, "active")
-
-	if len(realmName) > 0 && realmName[0] != "" {
-		baseQuery = baseQuery.Where("realm_name = ?", realmName[0])
+	realms := make([]string, 0, len(realmName))
+	for _, realm := range realmName {
+		if realm != "" {
+			realms = append(realms, realm)
+		}
 	}
 
-	// Get total active count
+	scoped := func() *gorm.DB {
+		query := r.db.WithContext(ctx).
+			Model(&database.ConfigurationAlert{}).
+			Where("tenant_id = ? AND status = ?", tenantID, "active")
+		if len(realms) > 0 {
+			query = query.Where("realm_name IN ?", realms)
+		}
+		return query
+	}
+
 	var totalActive int64
-	if err := baseQuery.Count(&totalActive).Error; err != nil {
+	if err := scoped().Count(&totalActive).Error; err != nil {
 		return nil, fmt.Errorf("failed to count active alerts: %w", err)
 	}
 	stats.TotalActive = int(totalActive)
 
-	// Query counts grouped by severity
 	type severityCount struct {
 		Severity string
 		Count    int64
 	}
 	var severityCounts []severityCount
-	severityQuery := r.db.WithContext(ctx).
-		Model(&database.ConfigurationAlert{}).
+	if err := scoped().
 		Select("severity, COUNT(*) as count").
-		Where("tenant_id = ? AND status = ?", tenantID, "active")
-
-	if len(realmName) > 0 && realmName[0] != "" {
-		severityQuery = severityQuery.Where("realm_name = ?", realmName[0])
-	}
-
-	if err := severityQuery.Group("severity").Scan(&severityCounts).Error; err != nil {
+		Group("severity").
+		Scan(&severityCounts).Error; err != nil {
 		return nil, fmt.Errorf("failed to get severity statistics: %w", err)
 	}
-
 	for _, sc := range severityCounts {
 		stats.BySeverity[sc.Severity] = int(sc.Count)
 	}
 
-	// Query counts grouped by type
 	type typeCount struct {
 		Type  string
 		Count int64
 	}
 	var typeCounts []typeCount
-	typeQuery := r.db.WithContext(ctx).
-		Model(&database.ConfigurationAlert{}).
+	if err := scoped().
 		Select("type, COUNT(*) as count").
-		Where("tenant_id = ? AND status = ?", tenantID, "active")
-
-	if len(realmName) > 0 && realmName[0] != "" {
-		typeQuery = typeQuery.Where("realm_name = ?", realmName[0])
-	}
-
-	if err := typeQuery.Group("type").Scan(&typeCounts).Error; err != nil {
+		Group("type").
+		Scan(&typeCounts).Error; err != nil {
 		return nil, fmt.Errorf("failed to get type statistics: %w", err)
 	}
-
 	for _, tc := range typeCounts {
 		stats.ByType[tc.Type] = int(tc.Count)
 	}
@@ -284,6 +280,9 @@ func applyFilters(query *gorm.DB, opts *alerts.ListOptions) *gorm.DB {
 	}
 	if opts.RealmName != "" {
 		query = query.Where("realm_name = ?", opts.RealmName)
+	}
+	if len(opts.RealmNames) > 0 {
+		query = query.Where("realm_name IN ?", opts.RealmNames)
 	}
 	if opts.ResourceType != "" {
 		query = query.Where("resource_type = ?", opts.ResourceType)

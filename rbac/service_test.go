@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"reflect"
 	"testing"
 	"time"
 
@@ -202,6 +203,7 @@ func (m *mockUserRoleRepository) CheckRoleExpiration(ctx context.Context) error 
 type mockTenantPolicyRepository struct {
 	createPolicyFn      func(ctx context.Context, policy *domain.TenantPolicy) error
 	getUserPoliciesFn   func(ctx context.Context, userID uint) ([]*domain.TenantPolicy, error)
+	getPolicyByIDFn     func(ctx context.Context, policyID uint) (*domain.TenantPolicy, error)
 	updatePolicyFn      func(ctx context.Context, policy *domain.TenantPolicy) error
 	deletePolicyFn      func(ctx context.Context, policyID uint) error
 	hasAccessToTenantFn func(ctx context.Context, userID uint, tenantID string) (bool, error)
@@ -218,6 +220,13 @@ func (m *mockTenantPolicyRepository) CreatePolicy(ctx context.Context, policy *d
 func (m *mockTenantPolicyRepository) GetUserPolicies(ctx context.Context, userID uint) ([]*domain.TenantPolicy, error) {
 	if m.getUserPoliciesFn != nil {
 		return m.getUserPoliciesFn(ctx, userID)
+	}
+	return nil, nil
+}
+
+func (m *mockTenantPolicyRepository) GetPolicyByID(ctx context.Context, policyID uint) (*domain.TenantPolicy, error) {
+	if m.getPolicyByIDFn != nil {
+		return m.getPolicyByIDFn(ctx, policyID)
 	}
 	return nil, nil
 }
@@ -1033,5 +1042,66 @@ func TestCheckRoleExpiration(t *testing.T) {
 				t.Errorf("CheckRoleExpiration() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// UpdateTenantPolicy takes a policy ID, not a user ID.
+func TestUpdateTenantPolicy_UpdatesThePolicyWithThatID(t *testing.T) {
+	policyA := &domain.TenantPolicy{ID: 5, UserID: 9, TenantID: "tenant-a", AllowedRealms: []string{"realmA"}}
+	policyB := &domain.TenantPolicy{ID: 7, UserID: 5, TenantID: "tenant-b", AllowedRealms: []string{"realmB"}}
+
+	var updated *domain.TenantPolicy
+	policyRepo := &mockTenantPolicyRepository{
+		getPolicyByIDFn: func(_ context.Context, policyID uint) (*domain.TenantPolicy, error) {
+			for _, p := range []*domain.TenantPolicy{policyA, policyB} {
+				if p.ID == policyID {
+					return p, nil
+				}
+			}
+			return nil, nil
+		},
+		getUserPoliciesFn: func(_ context.Context, userID uint) ([]*domain.TenantPolicy, error) {
+			var out []*domain.TenantPolicy
+			for _, p := range []*domain.TenantPolicy{policyA, policyB} {
+				if p.UserID == userID {
+					out = append(out, p)
+				}
+			}
+			return out, nil
+		},
+		updatePolicyFn: func(_ context.Context, policy *domain.TenantPolicy) error {
+			updated = policy
+			return nil
+		},
+	}
+	svc := newTestService(nil, nil, nil, policyRepo)
+
+	if err := svc.UpdateTenantPolicy(context.Background(), policyA.ID, []string{"realmC"}, "admin@example.com"); err != nil {
+		t.Fatalf("UpdateTenantPolicy() error = %v", err)
+	}
+
+	if updated == nil {
+		t.Fatal("no policy was updated")
+	}
+	if updated.ID != policyA.ID {
+		t.Errorf("updated policy %d, want %d", updated.ID, policyA.ID)
+	}
+	if !reflect.DeepEqual(policyB.AllowedRealms, []string{"realmB"}) {
+		t.Errorf("policy %d was rewritten to %v; it belongs to user %d, not policy %d",
+			policyB.ID, policyB.AllowedRealms, policyB.UserID, policyA.ID)
+	}
+}
+
+func TestUpdateTenantPolicy_UnknownIDIsNotFound(t *testing.T) {
+	policyRepo := &mockTenantPolicyRepository{
+		updatePolicyFn: func(context.Context, *domain.TenantPolicy) error {
+			t.Error("an unknown policy ID reached UpdatePolicy")
+			return nil
+		},
+	}
+	svc := newTestService(nil, nil, nil, policyRepo)
+
+	if err := svc.UpdateTenantPolicy(context.Background(), 404, []string{"realmC"}, "admin@example.com"); err == nil {
+		t.Fatal("UpdateTenantPolicy() error = nil, want a not-found error")
 	}
 }

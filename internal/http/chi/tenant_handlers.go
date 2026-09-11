@@ -163,41 +163,29 @@ func (h *TenantHandlers) filterTenantsByUserRoles(ctx context.Context, r *http.R
 		return []*domain.KeycloakTenant{}
 	}
 
-	isAdmin, err := h.rbacService.IsAdmin(ctx, user.ID)
-	if err == nil && isAdmin {
-		return tenants
-	}
+	return rbac.FilterTenantsByUserRoles(ctx, tenantVisibilityAdapter{h.rbacService}, user.ID, tenants, h.log)
+}
 
-	userRoles, err := h.rbacService.GetUserRoles(ctx, user.ID)
+// tenantVisibilityAdapter presents an RBACChecker as the checker
+// rbac.FilterTenantsByUserRoles expects.
+type tenantVisibilityAdapter struct {
+	svc RBACChecker
+}
+
+func (a tenantVisibilityAdapter) IsAdmin(ctx context.Context, userID uint) (bool, error) {
+	return a.svc.IsAdmin(ctx, userID)
+}
+
+func (a tenantVisibilityAdapter) GetUserRoles(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
+	roles, err := a.svc.GetUserRoles(ctx, userID)
 	if err != nil {
-		h.log.Error("Failed to get user roles for tenant filtering", logger.Err(err))
-		// Fail-safe: return empty list on error
-		return []*domain.KeycloakTenant{}
+		return nil, err
 	}
-
-	allowedTenants := make(map[string]bool)
-	hasGlobalRole := false
-
-	for _, userRole := range userRoles {
-		if userRole.TenantID == nil {
-			hasGlobalRole = true
-			break
-		}
-		allowedTenants[*userRole.TenantID] = true
+	converted := make([]*domain.UserRole, len(roles))
+	for i, role := range roles {
+		converted[i] = &domain.UserRole{RoleID: role.RoleID, TenantID: role.TenantID}
 	}
-
-	if hasGlobalRole {
-		return tenants
-	}
-
-	var filtered []*domain.KeycloakTenant
-	for _, t := range tenants {
-		if allowedTenants[t.TenantID] {
-			filtered = append(filtered, t)
-		}
-	}
-
-	return filtered
+	return converted, nil
 }
 
 // createTenant handles POST /api/tenants

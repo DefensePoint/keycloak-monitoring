@@ -17,6 +17,8 @@ export { SectionCard, type SectionCardProps } from "./SectionCard";
 export { RiskBadge } from "./RiskBadge";
 export { AmfaKpiRow } from "./AmfaKpiRow";
 export { AmfaGeoMap } from "./AmfaGeoMap";
+export { LocationMap, type LocationMapProps } from "./LocationMap";
+export { CityLabels } from "./CityLabels";
 export { FilterCard, type FilterCardProps } from "./FilterCard";
 export { FieldDisplay, type FieldDisplayProps } from "./FieldDisplay";
 export { AlertBanner, type AlertBannerProps } from "./AlertBanner";

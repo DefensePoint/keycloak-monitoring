@@ -7,6 +7,15 @@ import (
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
 )
 
+func TestBuildDSN_OpensTheSessionReadOnly(t *testing.T) {
+	dsn := buildDSN(config.AmfaDatabaseConfig{
+		Host: "primary.internal", Port: 5432, Database: "adaptive_mfa", User: "ro", Password: "pw",
+	})
+	if !strings.Contains(dsn, "options='-c default_transaction_read_only=on'") {
+		t.Errorf("expected DSN to open the session read-only, got %q", dsn)
+	}
+}
+
 func TestBuildDSN_PrefersReplicaWhenSet(t *testing.T) {
 	cfg := config.AmfaDatabaseConfig{
 		Host:            "primary.internal",

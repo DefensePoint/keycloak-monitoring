@@ -229,7 +229,10 @@ describe("useAlerts hooks", () => {
         );
       });
 
-      expect(result.current.isError).toBe(true);
+      // The rejection settles before React Query's state update, which it
+      // batches through notifyManager, so asserting isError straight after the
+      // await raced the re-render and made this flake.
+      await waitFor(() => expect(result.current.isError).toBe(true));
     });
   });
 

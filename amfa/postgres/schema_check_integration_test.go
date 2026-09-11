@@ -2,11 +2,11 @@
 
 // Build tag is intentional: TestCheckAmfaSchema_Integration runs destructive
 // SQL (DROP TABLE alembic_version) against the database pointed at by
-// AMFA_TEST_DSN. Without the tag this would run on a plain `go test ./...`
-// invocation and could wipe alembic state on a developer's AMFA dev DB. To
-// exercise it explicitly, run:
+// AMFA_DESTRUCTIVE_TEST_DSN. Without the tag this would run on a plain
+// `go test ./...` invocation and could wipe alembic state on a developer's AMFA
+// dev DB. To exercise it explicitly, run:
 //
-//	AMFA_TEST_DSN="..." go test -tags=integration ./amfa/postgres/...
+//	AMFA_DESTRUCTIVE_TEST_DSN="..." go test -tags=integration ./amfa/postgres/...
 
 package postgres
 
@@ -18,23 +18,29 @@ import (
 	"gorm.io/gorm"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/testdb"
 )
 
 // TestCheckAmfaSchema_Integration exercises the function against a real
-// PostgreSQL instance. It is skipped unless AMFA_TEST_DSN is set; the build
-// tag above is the primary safety guard.
+// PostgreSQL instance. It is skipped unless AMFA_DESTRUCTIVE_TEST_DSN is set;
+// the build tag above is the primary safety guard.
+//
+// The variable is deliberately not AMFA_TEST_DSN, which the read-only
+// repository tests use: this test drops AMFA's alembic_version bookkeeping
+// table, so it needs a database nobody minds losing.
 //
 // Example to run locally:
 //
-//	AMFA_TEST_DSN="host=localhost port=5432 dbname=amfa_test user=postgres password=postgres sslmode=disable" \
+//	AMFA_DESTRUCTIVE_TEST_DSN="host=localhost port=5432 dbname=amfa_test user=postgres password=postgres sslmode=disable" \
 //	    go test -tags=integration ./amfa/postgres/ -run TestCheckAmfaSchema_Integration -v
 //
 // The DSN must point at a database where you can CREATE TABLE.
 func TestCheckAmfaSchema_Integration(t *testing.T) {
-	dsn := os.Getenv("AMFA_TEST_DSN")
+	dsn := os.Getenv("AMFA_DESTRUCTIVE_TEST_DSN")
 	if dsn == "" {
-		t.Skip("AMFA_TEST_DSN not set; skipping integration test for CheckAmfaSchema")
+		t.Skip("AMFA_DESTRUCTIVE_TEST_DSN not set; skipping destructive integration test for CheckAmfaSchema")
 	}
+	testdb.RequireDisposable(t, dsn)
 
 	db, err := gorm.Open(gormpg.Open(dsn), &gorm.Config{})
 	if err != nil {

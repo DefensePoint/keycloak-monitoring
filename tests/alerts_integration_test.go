@@ -1,21 +1,27 @@
+//go:build integration
+
+// End-to-end coverage for the alert pipeline. Unlike the database-backed tests
+// elsewhere, this one needs a whole running deployment (see test_README.md),
+// not just a PostgreSQL instance, so it is double-gated the way the AMFA
+// integration tests are: the integration build tag keeps it out of the default
+// run, and KMT_E2E_TEST_DATABASE_DSN supplies the deployment's database.
+//
+// The variable is this test's alone. It names a live deployment database, and
+// no package test may ever read it.
+//
+//	KMT_E2E_TEST_DATABASE_DSN="host=localhost port=5432 dbname=monitoring user=monitoring password=... sslmode=disable" \
+//	    go test -tags=integration ./tests/... -timeout 15m
 package main_test
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
 	_ "github.com/lib/pq"
-)
-
-const (
-	dbHost     = "localhost"
-	dbPort     = 5432
-	dbUser     = "monitoring"
-	dbPassword = "monitoring_password"
-	dbName     = "monitoring"
 )
 
 // TestAlertsIntegration tests the full alert pipeline:
@@ -24,14 +30,21 @@ const (
 // 3. Verify alerts are created in configuration_alerts table
 // 4. Verify alerts show in UI (via API)
 // 5. Verify Slack notification was sent (check notification_logs table)
+// e2eFixtureTenantID is the tenant this test inserts into and cleans up.
+// Deliberately unguessable rather than production-shaped: cleanup removes every
+// row for this tenant inside a 15 minute window, not only the rows the test
+// created, so the id must not collide with anything real.
+const e2eFixtureTenantID = "e2e-alerts-fixture-8f42c1"
+
 func TestAlertsIntegration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	// Connect to database
-	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		dbHost, dbPort, dbUser, dbPassword, dbName)
+	connStr := os.Getenv("KMT_E2E_TEST_DATABASE_DSN")
+	if connStr == "" {
+		t.Skip("KMT_E2E_TEST_DATABASE_DSN not set; skipping integration test")
+	}
 
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
@@ -49,7 +62,15 @@ func TestAlertsIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	tenantID := "prod-keycloak"
+	// Not "prod-keycloak": that name is shipped in config.yaml.example, so a
+	// deployment built from the example really does have a tenant by that name,
+	// and cleanup below deletes rows for whatever tenant this names. The default
+	// is a fixture id nothing provisions by accident. Override it to run against
+	// a tenant you have deliberately set aside for this test.
+	tenantID := os.Getenv("KMT_E2E_TEST_TENANT_ID")
+	if tenantID == "" {
+		tenantID = e2eFixtureTenantID
+	}
 
 	// Clean up any existing test data
 	t.Log("Cleaning up existing test data...")

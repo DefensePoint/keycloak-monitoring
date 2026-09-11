@@ -2,40 +2,75 @@ package postgres
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	gormpg "gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/testdb"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
 )
 
-const purgeTestDSN = "host=localhost port=55433 user=postgres password=review dbname=reviewdb sslmode=disable"
+// testDBConfig restates a DSN as the config database.NewClient takes, so the
+// raw connections and the client address the same database.
+func testDBConfig(t *testing.T, dsn string) *config.DatabaseConfig {
+	t.Helper()
+	parsed, err := pgconn.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse KMT_DESTRUCTIVE_TEST_DATABASE_DSN: %v", err)
+	}
+	// pgconn resolves sslmode into a *tls.Config, so the original keyword is
+	// gone by here; a nil TLSConfig means the DSN asked for no TLS.
+	sslMode := "require"
+	if parsed.TLSConfig == nil {
+		sslMode = "disable"
+	}
+	return &config.DatabaseConfig{
+		Host: parsed.Host, Port: int(parsed.Port), Database: parsed.Database,
+		User: parsed.User, Password: parsed.Password, SSLMode: sslMode,
+		MaxConns: 5, MinConns: 1, Timeout: 30 * time.Second,
+	}
+}
 
+// newPurgeTestClient wipes the schema and runs the real AutoMigrate, then hands
+// back the client plus a raw connection for assertions the Repository does not
+// expose.
+//
+// Follows the project's opt-in convention for destructive database-backed
+// tests: the DSN comes from KMT_DESTRUCTIVE_TEST_DATABASE_DSN and the test is
+// skipped when it isn't set.
+//
+// Example:
+//
+//	KMT_DESTRUCTIVE_TEST_DATABASE_DSN="host=localhost port=55432 dbname=kmt_test user=kmt password=kmt sslmode=disable" \
+//	    go test ./tenant/postgres/...
 func newPurgeTestClient(t *testing.T) (*database.Client, *gorm.DB) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping database test in short mode")
 	}
-	raw, err := gorm.Open(gormpg.Open(purgeTestDSN), &gorm.Config{})
+	dsn := os.Getenv("KMT_DESTRUCTIVE_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("KMT_DESTRUCTIVE_TEST_DATABASE_DSN not set; skipping destructive integration test")
+	}
+	testdb.RequireDisposable(t, dsn)
+	raw, err := gorm.Open(gormpg.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 	if err := raw.Exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public").Error; err != nil {
 		t.Fatalf("reset schema: %v", err)
 	}
-	c, err := database.NewClient(&config.DatabaseConfig{
-		Host: "localhost", Port: 55433, Database: "reviewdb",
-		User: "postgres", Password: "review", SSLMode: "disable",
-		MaxConns: 5, MinConns: 1, Timeout: 30 * time.Second,
-	}, logger.NewNoop())
+	c, err := database.NewClient(testDBConfig(t, dsn), logger.NewNoop())
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	after, err := gorm.Open(gormpg.Open(purgeTestDSN), &gorm.Config{})
+	after, err := gorm.Open(gormpg.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("reconnect: %v", err)
 	}

@@ -53,11 +53,10 @@ func NewService(
 	}
 }
 
-// tenantEventSources returns the exact event sources that belong to a tenant
-// (keycloak:<realm> and amfa:<realm> for each of its realms). An empty result
-// means the report must include no events (deny-by-default) rather than fall
-// back to an unscoped query across every tenant.
-func (s *service) tenantEventSources(ctx context.Context, tenantID string) ([]string, error) {
+// tenantEventSources returns the event sources a report may include:
+// keycloak:<realm> and amfa:<realm> for each of the tenant's realms inside the
+// caller's realm scope. An empty result means the report includes no events.
+func (s *service) tenantEventSources(ctx context.Context, tenantID string, scope RealmScope) ([]string, error) {
 	if s.realmLister == nil || tenantID == "" {
 		return nil, nil
 	}
@@ -68,6 +67,9 @@ func (s *service) tenantEventSources(ctx context.Context, tenantID string) ([]st
 	sources := make([]string, 0, len(realms)*2)
 	for _, realm := range realms {
 		if realm == nil || realm.RealmName == "" {
+			continue
+		}
+		if !scope.covers(realm.RealmName) {
 			continue
 		}
 		sources = append(sources, events.SourcesForRealm(realm.RealmName)...)
@@ -85,6 +87,11 @@ func (s *service) AggregateData(ctx context.Context, req *GenerateRequest) (*Dat
 		GeneratedAt: time.Now(),
 	}
 
+	if req.Scope.empty() {
+		s.logger.Warn("Report scope names no realm; every section is left empty",
+			logger.Str("tenant_id", req.TenantID))
+	}
+
 	alertsByType := make(map[string]int)
 	alertsByRealm := make(map[string]int)
 	eventsByType := make(map[string]int)
@@ -92,11 +99,16 @@ func (s *service) AggregateData(ctx context.Context, req *GenerateRequest) (*Dat
 	realmAlertsBySeverity := make(map[string]map[string]int)
 
 	// Fetch alerts
-	if s.alertReader != nil {
-		alertList, err := s.alertReader.ListActiveAlerts(ctx, req.TenantID, &AlertListOptions{
+	if s.alertReader != nil && !req.Scope.empty() {
+		opts := &AlertListOptions{
 			Limit:  1000,
 			Offset: 0,
-		})
+		}
+		if !req.Scope.All {
+			opts.RealmNames = req.Scope.Realms
+		}
+
+		alertList, err := s.alertReader.ListActiveAlerts(ctx, req.TenantID, opts)
 		if err != nil {
 			s.logger.Error("Failed to fetch alerts", logger.Err(err))
 		} else {
@@ -147,10 +159,10 @@ func (s *service) AggregateData(ctx context.Context, req *GenerateRequest) (*Dat
 		}
 	}
 
-	// Fetch events, scoped to the report tenant's own sources. If the tenant has
-	// no known sources, leave the events section empty rather than run an
-	// unscoped query that would include every tenant's events.
-	sources, srcErr := s.tenantEventSources(ctx, req.TenantID)
+	// Fetch events, scoped to the report tenant's own sources and the caller's
+	// realm scope. If that leaves nothing, leave the events section empty rather
+	// than run an unscoped query that would include every tenant's events.
+	sources, srcErr := s.tenantEventSources(ctx, req.TenantID, req.Scope)
 	if srcErr != nil {
 		s.logger.Error("Failed to resolve tenant event sources for report",
 			logger.Str("tenant_id", req.TenantID), logger.Err(srcErr))
@@ -220,8 +232,13 @@ func (s *service) AggregateData(ctx context.Context, req *GenerateRequest) (*Dat
 	data.TotalRealms = len(realmMap)
 
 	// Fetch operator metrics if reader is available
-	if s.operatorReader != nil {
-		operatorMetrics, err := s.operatorReader.GetAllOperatorsSummary(ctx, req.TenantID, req.StartDate, req.EndDate)
+	if s.operatorReader != nil && !req.Scope.empty() {
+		var realmNames []string
+		if !req.Scope.All {
+			realmNames = req.Scope.Realms
+		}
+
+		operatorMetrics, err := s.operatorReader.GetAllOperatorsSummary(ctx, req.TenantID, req.StartDate, req.EndDate, realmNames)
 		if err != nil {
 			s.logger.Warn("Failed to fetch operator metrics for report", logger.Err(err))
 		} else {

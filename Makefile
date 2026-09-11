@@ -30,6 +30,12 @@ build-server: ## Build the API server binary
 	@mkdir -p bin
 	@go build -ldflags "$(LDFLAGS)" -o bin/server ./cmd/server
 
+.PHONY: build-mcp-server
+build-mcp-server: ## Build the MCP server binary
+	@echo "Building MCP server..."
+	@mkdir -p bin
+	@go build -ldflags "$(LDFLAGS)" -o bin/mcp-server ./cmd/mcp-server
+
 .PHONY: build-web
 build-web: build-frontend ## Build the web frontend server binary
 	@echo "Building web server..."
@@ -145,8 +151,18 @@ docker-build-web: ## Build web Docker image
 		-f build/Dockerfile .
 	@echo "Web image built: kmt-web:$(VERSION)"
 
+.PHONY: docker-build-mcp-server
+docker-build-mcp-server: ## Build MCP server Docker image
+	@echo "Building MCP server Docker image..."
+	@docker build \
+		--build-arg SERVICE=mcp-server \
+		-t kmt-mcp-server:$(VERSION) \
+		-t kmt-mcp-server:latest \
+		-f build/Dockerfile .
+	@echo "MCP server image built: kmt-mcp-server:$(VERSION)"
+
 .PHONY: docker-build
-docker-build: docker-build-server docker-build-web ## Build all Docker images
+docker-build: docker-build-server docker-build-web docker-build-mcp-server ## Build all Docker images
 
 .PHONY: docker-up
 docker-up: ## Start services with docker-compose
@@ -268,15 +284,17 @@ sec-semgrep: sec-preflight ## Semgrep SAST scan (auto ruleset)
 		--exclude .git || true
 
 .PHONY: sec-build-images
-sec-build-images: sec-preflight ## Build both container images with tag :scan
+sec-build-images: sec-preflight ## Build every container image with tag :scan
 	@echo "Building kmt-server:scan..."
 	@docker build --build-arg SERVICE=server -t kmt-server:scan -f build/Dockerfile .
 	@echo "Building kmt-web:scan..."
 	@docker build --build-arg SERVICE=web -t kmt-web:scan -f build/Dockerfile .
+	@echo "Building kmt-mcp-server:scan..."
+	@docker build --build-arg SERVICE=mcp-server -t kmt-mcp-server:scan -f build/Dockerfile .
 
 .PHONY: sec-trivy-images
-sec-trivy-images: sec-preflight ## Trivy image scan for both service images
-	@for svc in server web; do \
+sec-trivy-images: sec-preflight ## Trivy image scan for every service image
+	@for svc in server web mcp-server; do \
 		echo "Scanning kmt-$$svc:scan..."; \
 		trivy image \
 			--severity CRITICAL,HIGH \

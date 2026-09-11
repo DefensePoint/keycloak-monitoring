@@ -1,29 +1,45 @@
 import "leaflet/dist/leaflet.css";
 import "react-leaflet-cluster/lib/assets/MarkerCluster.css";
 import "react-leaflet-cluster/lib/assets/MarkerCluster.Default.css";
-import L from "leaflet";
-import iconRetinaUrl from "leaflet/dist/images/marker-icon-2x.png";
-import iconUrl from "leaflet/dist/images/marker-icon.png";
-import shadowUrl from "leaflet/dist/images/marker-shadow.png";
-import { MapContainer, Marker, Popup, TileLayer, Tooltip } from "react-leaflet";
+import {
+  AttributionControl,
+  GeoJSON,
+  MapContainer,
+  Marker,
+  Popup,
+  Tooltip,
+} from "react-leaflet";
 import MarkerClusterGroup from "react-leaflet-cluster";
-import { Box } from "@mui/material";
+import { Box, Typography } from "@mui/material";
 import type { AmfaGeoBucket } from "@/shared/types";
-import { cartoDarkTileUrl } from "./basemap";
+import {
+  BASEMAP_ATTRIBUTION,
+  BASEMAP_MAX_ZOOM,
+  BASEMAP_MIN_ZOOM,
+  BASEMAP_STYLE,
+} from "@/shared/lib/basemap";
+import { configureLeafletDefaultIcons } from "@/shared/lib/leafletIcons";
+import { useWorldGeo } from "@/shared/hooks";
+import { CityLabels } from "@/shared/components/CityLabels";
 
-// react-leaflet 4.x doesn't bundle marker icons correctly under Vite; merge the
-// canonical default icon URLs so markers render without manual asset handling.
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl,
-  iconUrl,
-  shadowUrl,
-});
+configureLeafletDefaultIcons();
 
 interface Props {
   buckets: AmfaGeoBucket[];
 }
 
+/**
+ * Map height in pixels.
+ *
+ * Must be a number on MapContainer's own style prop: see the note below on why
+ * a percentage cannot be used here. Sized so the whole world fits without the
+ * map dominating a page it now shares with the events table below it.
+ */
+const GEO_MAP_HEIGHT = 540;
+
 export function AmfaGeoMap({ buckets }: Props) {
+  const { data: world, isError } = useWorldGeo();
+
   return (
     <Box sx={{ width: "100%" }}>
       {/*
@@ -36,19 +52,43 @@ export function AmfaGeoMap({ buckets }: Props) {
       <MapContainer
         center={[20, 0]}
         zoom={2}
+        minZoom={BASEMAP_MIN_ZOOM}
+        maxZoom={BASEMAP_MAX_ZOOM}
         scrollWheelZoom
-        style={{ height: 600, width: "100%" }}
+        attributionControl={false}
+        style={{
+          height: GEO_MAP_HEIGHT,
+          width: "100%",
+          // The ground the boundaries sit on. With no tile layer there is
+          // nothing else painting the container, so without this the map
+          // renders on whatever is behind it and reads as broken.
+          background: BASEMAP_STYLE.background,
+        }}
       >
-        <TileLayer
-          attribution={
-            // Visible attribution is the condition of CARTO's free tier, and
-            // OpenStreetMap's licence asks for "contributors" plus a link to
-            // the copyright page. Leaflet renders this HTML in the corner.
-            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, ' +
-            '&copy; <a href="https://carto.com/attributions">CARTO</a>'
-          }
-          url={cartoDarkTileUrl(import.meta.env.VITE_CARTO_BASEMAP_KEY)}
-        />
+        {world && (
+          <GeoJSON
+            data={world}
+            // Draw into the tile pane, where a basemap belongs. Vector layers
+            // otherwise share the overlay pane with the markers and accuracy
+            // circle, and because this layer mounts only once the boundary
+            // data arrives, it lands on top of them and hides them.
+            pane="tilePane"
+            // Leaflet collects attribution from its layers, so the credit
+            // belongs to the layer that carries the data.
+            attribution={BASEMAP_ATTRIBUTION}
+            style={{
+              fillColor: BASEMAP_STYLE.land,
+              fillOpacity: 1,
+              color: BASEMAP_STYLE.border,
+              weight: 0.5,
+            }}
+            // Boundaries are scenery, not targets: clicks and hovers belong to
+            // the markers on top of them.
+            interactive={false}
+          />
+        )}
+        <AttributionControl prefix={false} />
+        <CityLabels />
         <MarkerClusterGroup>
           {buckets.map((b) => (
             <Marker
@@ -72,6 +112,18 @@ export function AmfaGeoMap({ buckets }: Props) {
           ))}
         </MarkerClusterGroup>
       </MapContainer>
+
+      {isError && (
+        <Typography
+          variant="caption"
+          color="warning.main"
+          sx={{ mt: 1, display: "block" }}
+        >
+          World boundaries could not be loaded, so markers are shown without a
+          basemap. The data ships with the application, so this points at the
+          deployment rather than the network.
+        </Typography>
+      )}
     </Box>
   );
 }

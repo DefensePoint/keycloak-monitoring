@@ -33,8 +33,9 @@ func (r *Repository) RecordAction(ctx context.Context, action *domain.OperatorAc
 	return nil
 }
 
-// GetMetricsSummary retrieves aggregated metrics for a specific operator.
-func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEmail string, startDate, endDate time.Time) (*domain.OperatorMetricsSummary, error) {
+// GetMetricsSummary retrieves aggregated metrics for a specific operator,
+// optionally restricted to a set of realms.
+func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEmail string, startDate, endDate time.Time, realmNames []string) (*domain.OperatorMetricsSummary, error) {
 	summary := &domain.OperatorMetricsSummary{
 		OperatorEmail: operatorEmail,
 		TenantID:      tenantID,
@@ -49,6 +50,16 @@ func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEm
 		summary.OperatorName = user.Username
 	}
 
+	actions := func() *gorm.DB {
+		query := r.db.DB().WithContext(ctx).
+			Model(&database.OperatorAction{}).
+			Where("tenant_id = ? AND operator_email = ? AND action_time BETWEEN ? AND ?", tenantID, operatorEmail, startDate, endDate)
+		if len(realmNames) > 0 {
+			query = query.Where("realm_name IN ?", realmNames)
+		}
+		return query
+	}
+
 	// Query for action counts
 	type ActionMetrics struct {
 		ActionType           string
@@ -59,8 +70,7 @@ func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEm
 	}
 
 	var actionMetrics []ActionMetrics
-	err := r.db.DB().WithContext(ctx).
-		Model(&database.OperatorAction{}).
+	err := actions().
 		Select(`
 			action_type,
 			COUNT(*) as count,
@@ -68,7 +78,6 @@ func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEm
 			MIN(response_time_seconds) as min_response_time,
 			MAX(response_time_seconds) as max_response_time
 		`).
-		Where("tenant_id = ? AND operator_email = ? AND action_time BETWEEN ? AND ?", tenantID, operatorEmail, startDate, endDate).
 		Group("action_type").
 		Find(&actionMetrics).Error
 
@@ -105,15 +114,13 @@ func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEm
 		AvgResolutionTime    float64
 		MedianResolutionTime float64
 	}
-	err = r.db.DB().WithContext(ctx).
-		Model(&database.OperatorAction{}).
+	err = actions().
 		Select(`
 			AVG(response_time_seconds) as avg_response_time,
 			PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY response_time_seconds) as median_response_time,
 			AVG(CASE WHEN resolution_time_seconds > 0 THEN resolution_time_seconds END) as avg_resolution_time,
 			PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY resolution_time_seconds) FILTER (WHERE resolution_time_seconds > 0) as median_resolution_time
 		`).
-		Where("tenant_id = ? AND operator_email = ? AND action_time BETWEEN ? AND ?", tenantID, operatorEmail, startDate, endDate).
 		Scan(&overallMetrics).Error
 
 	if err == nil {
@@ -129,10 +136,8 @@ func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEm
 		Count    int64
 	}
 	var severityCounts []SeverityCount
-	err = r.db.DB().WithContext(ctx).
-		Model(&database.OperatorAction{}).
+	err = actions().
 		Select("alert_severity as severity, COUNT(*) as count").
-		Where("tenant_id = ? AND operator_email = ? AND action_time BETWEEN ? AND ?", tenantID, operatorEmail, startDate, endDate).
 		Group("alert_severity").
 		Find(&severityCounts).Error
 
@@ -157,10 +162,8 @@ func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEm
 		Count int64
 	}
 	var typeCounts []TypeCount
-	err = r.db.DB().WithContext(ctx).
-		Model(&database.OperatorAction{}).
+	err = actions().
 		Select("alert_type as type, COUNT(*) as count").
-		Where("tenant_id = ? AND operator_email = ? AND action_time BETWEEN ? AND ?", tenantID, operatorEmail, startDate, endDate).
 		Group("alert_type").
 		Find(&typeCounts).Error
 
@@ -176,14 +179,12 @@ func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEm
 		AvgTimeToResolve     float64
 		AvgTimeToIgnore      float64
 	}
-	err = r.db.DB().WithContext(ctx).
-		Model(&database.OperatorAction{}).
+	err = actions().
 		Select(`
 			AVG(CASE WHEN action_type = 'acknowledged' THEN time_from_detection_seconds END) as avg_time_to_acknowledge,
 			AVG(CASE WHEN action_type = 'resolved' THEN time_from_detection_seconds END) as avg_time_to_resolve,
 			AVG(CASE WHEN action_type = 'ignored' THEN time_from_detection_seconds END) as avg_time_to_ignore
 		`).
-		Where("tenant_id = ? AND operator_email = ? AND action_time BETWEEN ? AND ?", tenantID, operatorEmail, startDate, endDate).
 		Scan(&actionTimings).Error
 
 	if err == nil {
@@ -200,8 +201,7 @@ func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEm
 		AvgActiveToResolve      float64
 		AvgActiveToIgnore       float64
 	}
-	err = r.db.DB().WithContext(ctx).
-		Model(&database.OperatorAction{}).
+	err = actions().
 		Select(`
 			AVG(CASE WHEN action_type = 'resolved' AND previous_status = 'acknowledged' THEN time_from_previous_action_seconds END) as avg_acknowledge_to_resolve,
 			AVG(CASE WHEN action_type = 'ignored' AND previous_status = 'acknowledged' THEN time_from_previous_action_seconds END) as avg_acknowledge_to_ignore,
@@ -209,7 +209,6 @@ func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEm
 			AVG(CASE WHEN action_type = 'resolved' AND previous_status = 'active' THEN time_from_previous_action_seconds END) as avg_active_to_resolve,
 			AVG(CASE WHEN action_type = 'ignored' AND previous_status = 'active' THEN time_from_previous_action_seconds END) as avg_active_to_ignore
 		`).
-		Where("tenant_id = ? AND operator_email = ? AND action_time BETWEEN ? AND ?", tenantID, operatorEmail, startDate, endDate).
 		Scan(&transitionTimings).Error
 
 	if err == nil {
@@ -222,9 +221,7 @@ func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEm
 
 	// Calculate total alerts handled
 	var totalAlerts int64
-	err = r.db.DB().WithContext(ctx).
-		Model(&database.OperatorAction{}).
-		Where("tenant_id = ? AND operator_email = ? AND action_time BETWEEN ? AND ?", tenantID, operatorEmail, startDate, endDate).
+	err = actions().
 		Distinct("alert_id").
 		Count(&totalAlerts).Error
 
@@ -237,12 +234,18 @@ func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEm
 	return summary, nil
 }
 
-// GetAllOperatorsSummary retrieves metrics summaries for all operators.
-func (r *Repository) GetAllOperatorsSummary(ctx context.Context, tenantID string, startDate, endDate time.Time) ([]*domain.OperatorMetricsSummary, error) {
-	var operatorEmails []string
-	err := r.db.DB().WithContext(ctx).
+// GetAllOperatorsSummary retrieves metrics summaries for all operators,
+// optionally restricted to a set of realms.
+func (r *Repository) GetAllOperatorsSummary(ctx context.Context, tenantID string, startDate, endDate time.Time, realmNames []string) ([]*domain.OperatorMetricsSummary, error) {
+	query := r.db.DB().WithContext(ctx).
 		Model(&database.OperatorAction{}).
-		Where("tenant_id = ? AND action_time BETWEEN ? AND ?", tenantID, startDate, endDate).
+		Where("tenant_id = ? AND action_time BETWEEN ? AND ?", tenantID, startDate, endDate)
+	if len(realmNames) > 0 {
+		query = query.Where("realm_name IN ?", realmNames)
+	}
+
+	var operatorEmails []string
+	err := query.
 		Distinct("operator_email").
 		Pluck("operator_email", &operatorEmails).Error
 
@@ -252,7 +255,7 @@ func (r *Repository) GetAllOperatorsSummary(ctx context.Context, tenantID string
 
 	summaries := make([]*domain.OperatorMetricsSummary, 0, len(operatorEmails))
 	for _, email := range operatorEmails {
-		summary, err := r.GetMetricsSummary(ctx, tenantID, email, startDate, endDate)
+		summary, err := r.GetMetricsSummary(ctx, tenantID, email, startDate, endDate, realmNames)
 		if err != nil {
 			continue
 		}
@@ -262,8 +265,9 @@ func (r *Repository) GetAllOperatorsSummary(ctx context.Context, tenantID string
 	return summaries, nil
 }
 
-// GetActions retrieves individual operator actions.
-func (r *Repository) GetActions(ctx context.Context, tenantID, operatorEmail string, startDate, endDate time.Time, limit int) ([]*domain.OperatorAction, error) {
+// GetActions retrieves individual operator actions, optionally restricted to a
+// set of realms.
+func (r *Repository) GetActions(ctx context.Context, tenantID, operatorEmail string, startDate, endDate time.Time, limit int, realmNames []string) ([]*domain.OperatorAction, error) {
 	var dbActions []database.OperatorAction
 
 	query := r.db.DB().WithContext(ctx).
@@ -273,6 +277,10 @@ func (r *Repository) GetActions(ctx context.Context, tenantID, operatorEmail str
 
 	if operatorEmail != "" {
 		query = query.Where("operator_email = ?", operatorEmail)
+	}
+
+	if len(realmNames) > 0 {
+		query = query.Where("realm_name IN ?", realmNames)
 	}
 
 	if limit > 0 {

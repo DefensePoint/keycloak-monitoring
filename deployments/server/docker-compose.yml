@@ -44,6 +44,17 @@ services:
     depends_on:
       - postgres
 
+  mcp-server:
+    image: KMT_MCP_DOCKER_IMAGE
+    container_name: kmt-mcp-server
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    networks:
+      - kmt-network
+    restart: on-failure
+    depends_on:
+      - postgres
+
   web:
     image: KMT_WEB_DOCKER_IMAGE
     container_name: kmt-web

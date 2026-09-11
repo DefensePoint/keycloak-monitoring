@@ -13,6 +13,9 @@ type Recorder interface {
 	AddEventsCollected(tenantID, realm string, n int)
 	IncAlert(severity, checkType string)
 	IncNotification(channel, result string)
+	IncMCPRequest(method string)
+	IncMCPToolCall(tool, outcome string)
+	ObserveMCPToolCall(tool string, d time.Duration)
 }
 
 // SetTenantMonitorUp records whether a tenant's monitor is running.
@@ -57,6 +60,21 @@ func (m *Registry) IncNotification(channel, result string) {
 	m.NotificationsSent.WithLabelValues(channel, result).Inc()
 }
 
+// IncMCPRequest records one inbound MCP JSON-RPC request by method.
+func (m *Registry) IncMCPRequest(method string) {
+	m.MCPRequests.WithLabelValues(method).Inc()
+}
+
+// IncMCPToolCall records one MCP tool call by tool and outcome.
+func (m *Registry) IncMCPToolCall(tool, outcome string) {
+	m.MCPToolCalls.WithLabelValues(tool, outcome).Inc()
+}
+
+// ObserveMCPToolCall records the duration of one MCP tool call.
+func (m *Registry) ObserveMCPToolCall(tool string, d time.Duration) {
+	m.MCPToolCallDuration.WithLabelValues(tool).Observe(d.Seconds())
+}
+
 // NopRecorder discards every observation. Used when metrics are disabled and in
 // tests, so call sites never need a nil check.
 type NopRecorder struct{}
@@ -68,3 +86,6 @@ func (NopRecorder) IncPollCycleError(string, string)               {}
 func (NopRecorder) AddEventsCollected(string, string, int)         {}
 func (NopRecorder) IncAlert(string, string)                        {}
 func (NopRecorder) IncNotification(string, string)                 {}
+func (NopRecorder) IncMCPRequest(string)                           {}
+func (NopRecorder) IncMCPToolCall(string, string)                  {}
+func (NopRecorder) ObserveMCPToolCall(string, time.Duration)       {}
