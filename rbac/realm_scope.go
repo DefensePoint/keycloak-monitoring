@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // ResolveRealmScope reduces a user's tenant policy rows to the realms they may

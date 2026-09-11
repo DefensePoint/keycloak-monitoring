@@ -6,7 +6,7 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // Provider defines the interface for OAuth2/OIDC authentication providers.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/amfa"
 )
 
 func TestRealmRejectBurstCheck_AlertWhenDistinctUsersAtThreshold(t *testing.T) {

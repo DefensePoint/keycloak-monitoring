@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // KeycloakEventReader defines the minimal interface for reading Keycloak events

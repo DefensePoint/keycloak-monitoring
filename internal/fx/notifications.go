@@ -3,14 +3,14 @@ package fx
 import (
 	"go.uber.org/fx"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/configcheck"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/eventscheck"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/metricscheck"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/notifications"
-	notificationspostgres "repos.defensepoint.com/iam/oss-pmt/kmt/notifications/postgres"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
+	"github.com/DefensePoint/keycloak-monitoring/configcheck"
+	"github.com/DefensePoint/keycloak-monitoring/eventscheck"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/metricscheck"
+	"github.com/DefensePoint/keycloak-monitoring/notifications"
+	notificationspostgres "github.com/DefensePoint/keycloak-monitoring/notifications/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
 // NotificationsModule provides notification domain dependencies.

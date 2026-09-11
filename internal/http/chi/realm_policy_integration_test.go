@@ -26,14 +26,14 @@ import (
 	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/alerts"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/rbac"
-	rbacpostgres "repos.defensepoint.com/iam/oss-pmt/kmt/rbac/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/alerts"
+	"github.com/DefensePoint/keycloak-monitoring/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
+	"github.com/DefensePoint/keycloak-monitoring/rbac"
+	rbacpostgres "github.com/DefensePoint/keycloak-monitoring/rbac/postgres"
 )
 
 // The two realms every caller in this file is scoped against. A restricted

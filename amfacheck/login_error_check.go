@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // LoginErrorCheck implements rule 4a: a warning alert when the count of AMFA

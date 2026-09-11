@@ -3,9 +3,9 @@ package fx
 import (
 	"go.uber.org/fx"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/operator"
-	operatorpostgres "repos.defensepoint.com/iam/oss-pmt/kmt/operator/postgres"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
+	"github.com/DefensePoint/keycloak-monitoring/operator"
+	operatorpostgres "github.com/DefensePoint/keycloak-monitoring/operator/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
 // OperatorModule provides operator domain dependencies.

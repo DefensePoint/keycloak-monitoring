@@ -12,9 +12,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/keycloak"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/keycloakadmin"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/keycloak"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
 )
 
 // stubKeycloakService is a keycloak.Service whose reads return canned per-realm

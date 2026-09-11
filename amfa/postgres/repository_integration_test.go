@@ -12,7 +12,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/amfa"
 )
 
 // openAmfaTestDB connects to the AMFA test database identified by the

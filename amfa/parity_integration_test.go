@@ -29,9 +29,9 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa/httpclient"
-	amfapg "repos.defensepoint.com/iam/oss-pmt/kmt/amfa/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/amfa/httpclient"
+	amfapg "github.com/DefensePoint/keycloak-monitoring/amfa/postgres"
 )
 
 // parityFixture holds both implementations plus the realm and window they are

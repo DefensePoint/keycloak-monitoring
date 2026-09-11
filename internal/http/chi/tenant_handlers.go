@@ -7,13 +7,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	httputil "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/dto"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/dto/requests"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/rbac"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
+	"github.com/DefensePoint/keycloak-monitoring/internal/http/dto"
+	"github.com/DefensePoint/keycloak-monitoring/internal/http/dto/requests"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/tenant"
 )
 
 var _ = dto.ErrorResponse{}     // ensure dto import for swagger
@@ -459,7 +459,7 @@ func (h *TenantHandlers) deleteTenant(w http.ResponseWriter, r *http.Request) {
 //	@Tags			tenants
 //	@Produce		json
 //	@Param			tenantID	path		string	true	"Tenant ID"
-//	@Success		200			{object}	tenant.Health
+//	@Success		200			{object}	tenant.HealthStatus
 //	@Failure		401			{object}	dto.ErrorResponse
 //	@Failure		403			{object}	dto.ErrorResponse
 //	@Failure		404			{object}	dto.ErrorResponse	"Tenant not found"

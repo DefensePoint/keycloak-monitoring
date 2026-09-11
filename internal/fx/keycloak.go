@@ -9,13 +9,13 @@ import (
 	"go.uber.org/fx"
 	"gorm.io/gorm"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	chihttp "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/chi"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/keycloak"
-	kcpostgres "repos.defensepoint.com/iam/oss-pmt/kmt/keycloak/postgres"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/keycloakadmin"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/saferequest"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	chihttp "github.com/DefensePoint/keycloak-monitoring/internal/http/chi"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/keycloak"
+	kcpostgres "github.com/DefensePoint/keycloak-monitoring/keycloak/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/saferequest"
 )
 
 // KeycloakModule provides keycloak domain components

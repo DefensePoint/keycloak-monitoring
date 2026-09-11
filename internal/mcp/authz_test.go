@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // mockTenantReader implements TenantReader for testing.

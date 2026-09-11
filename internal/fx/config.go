@@ -3,7 +3,7 @@ package fx
 import (
 	"go.uber.org/fx"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 )
 
 // ConfigModule provides configuration loading

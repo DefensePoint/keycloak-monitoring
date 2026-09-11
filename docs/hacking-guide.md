@@ -462,8 +462,8 @@ Add to relevant documentation files:
 
 ```bash
 # Fork on GitHub/GitLab
-git clone git@repos.defensepoint.com:iam/oss-pmt/kmt.git
-cd kmt
+git clone https://github.com/DefensePoint/keycloak-monitoring.git
+cd keycloak-monitoring
 git remote add upstream <original-repo-url>
 ```
 

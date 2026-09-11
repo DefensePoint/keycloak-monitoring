@@ -10,9 +10,9 @@ DOCKER_COMPOSE_LOCAL_FILE := "./deployments/local/docker-compose.yml"
 
 # Build flags
 LDFLAGS := -w -s \
-	-X 'repos.defensepoint.com/iam/oss-pmt/kmt/internal/version.Version=$(VERSION)' \
-	-X 'repos.defensepoint.com/iam/oss-pmt/kmt/internal/version.GitCommit=$(GIT_COMMIT)' \
-	-X 'repos.defensepoint.com/iam/oss-pmt/kmt/internal/version.BuildDate=$(BUILD_DATE)'
+	-X 'github.com/DefensePoint/keycloak-monitoring/internal/version.Version=$(VERSION)' \
+	-X 'github.com/DefensePoint/keycloak-monitoring/internal/version.GitCommit=$(GIT_COMMIT)' \
+	-X 'github.com/DefensePoint/keycloak-monitoring/internal/version.BuildDate=$(BUILD_DATE)'
 
 .PHONY: help
 help: ## Show this help

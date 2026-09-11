@@ -3,7 +3,7 @@ package notifications
 import (
 	"context"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // Notifier defines the interface for notification channels.

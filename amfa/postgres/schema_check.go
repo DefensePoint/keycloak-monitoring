@@ -6,7 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 
 // schemaCheckTimeout bounds the alembic_version probe so a slow or hung AMFA

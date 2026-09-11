@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // CommonErrorCheck monitors low-priority error events (REGISTER_ERROR, RESET_PASSWORD_ERROR, LOGOUT_ERROR).

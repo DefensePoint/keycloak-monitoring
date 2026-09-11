@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 
 // SAMLMetadata represents the structure of SAML metadata XML

@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/metrics"
+	"github.com/DefensePoint/keycloak-monitoring/internal/metrics"
 )
 
 // metricsResponseWriter captures the status code written by downstream handlers.

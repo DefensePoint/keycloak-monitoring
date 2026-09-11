@@ -9,7 +9,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 
 // tenantTable describes a table holding rows owned by a tenant.

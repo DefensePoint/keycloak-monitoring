@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/keycloakadmin"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
 )
 
 // testKeycloakClient implements KeycloakClient for testing

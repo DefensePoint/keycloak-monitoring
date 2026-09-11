@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/amfa"
 )
 
 // eventRowScan is the row shape for the full-EventRow queries below. It mirrors

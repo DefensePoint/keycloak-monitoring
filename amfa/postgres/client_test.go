@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 )
 
 func TestBuildDSN_OpensTheSessionReadOnly(t *testing.T) {

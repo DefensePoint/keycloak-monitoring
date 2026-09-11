@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 
 func TestRespondJSON(t *testing.T) {

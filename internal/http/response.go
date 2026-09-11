@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 
 // RespondJSON writes a JSON response with the given status code and data.

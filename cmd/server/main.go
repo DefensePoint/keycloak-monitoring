@@ -29,7 +29,7 @@ import (
 	"fmt"
 	"os"
 
-	appfx "repos.defensepoint.com/iam/oss-pmt/kmt/internal/fx"
+	appfx "github.com/DefensePoint/keycloak-monitoring/internal/fx"
 )
 
 func main() {

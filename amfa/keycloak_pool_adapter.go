@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/keycloakadmin"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
 )
 
 // KeycloakAdmin is the exported, multi-tenant counterpart of the package-

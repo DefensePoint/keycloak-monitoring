@@ -5,8 +5,8 @@ import (
 
 	"go.uber.org/fx"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/configcheck"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/configcheck"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 
 // ConfigCheckModule provides configuration check domain dependencies.

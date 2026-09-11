@@ -8,13 +8,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/alerts"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	httputil "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http"
-	_ "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/dto" // swagger
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/dto/requests"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/alerts"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
+	_ "github.com/DefensePoint/keycloak-monitoring/internal/http/dto" // swagger
+	"github.com/DefensePoint/keycloak-monitoring/internal/http/dto/requests"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/rbac"
 )
 
 // AlertsOperatorService defines the interface for operator metrics.

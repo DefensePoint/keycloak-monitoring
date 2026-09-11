@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/keycloakadmin"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
 )
 
 // keycloakAdmin is the slice of pkg/keycloakadmin this adapter actually uses.

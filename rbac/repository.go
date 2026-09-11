@@ -3,7 +3,7 @@ package rbac
 import (
 	"context"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // RoleRepository defines the interface for role persistence.

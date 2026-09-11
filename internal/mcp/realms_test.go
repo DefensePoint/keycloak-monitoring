@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/rbac"
 )
 
 // mockRealmReader implements RealmReader for testing.

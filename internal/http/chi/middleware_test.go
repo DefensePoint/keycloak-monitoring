@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 func TestAllowedRealms(t *testing.T) {

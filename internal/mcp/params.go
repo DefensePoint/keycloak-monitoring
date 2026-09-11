@@ -3,7 +3,7 @@ package mcp
 import (
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 )
 
 const (

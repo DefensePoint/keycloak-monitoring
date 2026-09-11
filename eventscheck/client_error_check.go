@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // ClientErrorCheck monitors CLIENT_LOGIN_ERROR events.

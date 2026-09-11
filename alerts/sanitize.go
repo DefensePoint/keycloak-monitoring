@@ -1,7 +1,7 @@
 package alerts
 
 import (
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // SanitizeAlert returns a copy of the alert with the internal fields stripped:

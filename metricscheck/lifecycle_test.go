@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // noopAlertStore satisfies AlertStore; the lifecycle test raises no alerts.

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // createClientTimeout bounds how long a single tenant's Keycloak client

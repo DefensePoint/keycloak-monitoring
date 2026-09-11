@@ -7,13 +7,13 @@ import (
 
 	"go.uber.org/fx"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/auth"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/rbac"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/tenant"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/users"
+	"github.com/DefensePoint/keycloak-monitoring/auth"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
+	"github.com/DefensePoint/keycloak-monitoring/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/users"
 )
 
 // BootstrapModule provides the bootstrap lifecycle hooks for seeding initial data.

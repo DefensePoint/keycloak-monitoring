@@ -79,8 +79,8 @@ The fastest way to get started is with Docker. See the **[Quick Start Guide](doc
 
 ```bash
 # 1. Clone the repository
-git clone git@repos.defensepoint.com:iam/oss-pmt/kmt.git
-cd kmt
+git clone https://github.com/DefensePoint/keycloak-monitoring.git
+cd keycloak-monitoring
 
 # 2. Copy and edit configuration
 cp config.yaml.example config.yaml

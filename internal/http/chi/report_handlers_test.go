@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/reports"
+	"github.com/DefensePoint/keycloak-monitoring/reports"
 )
 
 // stubReportService records the request it aggregated so a test can assert the

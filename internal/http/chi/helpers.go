@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	httputil "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http"
+	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
 )
 
 // Constants for pagination limits

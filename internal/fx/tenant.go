@@ -3,12 +3,12 @@ package fx
 import (
 	"go.uber.org/fx"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/secretcrypto"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/tenant"
-	tenantpostgres "repos.defensepoint.com/iam/oss-pmt/kmt/tenant/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/secretcrypto"
+	"github.com/DefensePoint/keycloak-monitoring/tenant"
+	tenantpostgres "github.com/DefensePoint/keycloak-monitoring/tenant/postgres"
 )
 
 // TenantModule provides tenant domain dependencies.

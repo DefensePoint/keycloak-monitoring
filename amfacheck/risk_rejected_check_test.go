@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/amfa"
 )
 
 // checkRepoStub is a hand-written amfa.Repository stub for check tests. Only the

@@ -17,8 +17,8 @@ import (
 	gormpg "gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/testdb"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
 )
 
 // TestCheckAmfaSchema_Integration exercises the function against a real

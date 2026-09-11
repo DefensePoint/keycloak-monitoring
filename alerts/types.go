@@ -4,7 +4,7 @@ package alerts
 import (
 	"errors"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // ErrNotFound is returned when the requested alert does not exist.

@@ -81,9 +81,9 @@ ENV CGO_ENABLED=0
 RUN GOOS=linux GOARCH=amd64 go build \
     -mod=readonly -trimpath -buildvcs=false \
     -ldflags="-w -s -extldflags '-static' \
-      -X 'repos.defensepoint.com/iam/oss-pmt/kmt/internal/version.Version=${VERSION}' \
-      -X 'repos.defensepoint.com/iam/oss-pmt/kmt/internal/version.GitCommit=${VCS_REF}' \
-      -X 'repos.defensepoint.com/iam/oss-pmt/kmt/internal/version.BuildDate=${BUILD_DATE}'" \
+      -X 'github.com/DefensePoint/keycloak-monitoring/internal/version.Version=${VERSION}' \
+      -X 'github.com/DefensePoint/keycloak-monitoring/internal/version.GitCommit=${VCS_REF}' \
+      -X 'github.com/DefensePoint/keycloak-monitoring/internal/version.BuildDate=${BUILD_DATE}'" \
     -o /build/kmt-${SERVICE} ./cmd/${SERVICE}
 
 # -------- Runtime: Conditional base image selection --------

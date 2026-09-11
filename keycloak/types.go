@@ -8,7 +8,7 @@ package keycloak
 import (
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // EventStats represents aggregated event statistics for a realm.

@@ -13,9 +13,9 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	amfapg "repos.defensepoint.com/iam/oss-pmt/kmt/amfa/postgres"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfacheck"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	amfapg "github.com/DefensePoint/keycloak-monitoring/amfa/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/amfacheck"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // memAlertStore is an in-memory amfacheck.AlertStore for the integration test.
