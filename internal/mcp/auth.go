@@ -8,8 +8,8 @@ import (
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/apitoken"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/apitoken"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 
 // TokenValidator is the slice of apitoken.Service this package needs.

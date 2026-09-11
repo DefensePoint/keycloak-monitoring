@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/lifecycle"
+	"github.com/DefensePoint/keycloak-monitoring/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/internal/lifecycle"
 )
 
 // watermarkOverlap is subtracted from the watermark on each query so events

@@ -1,4 +1,4 @@
-module repos.defensepoint.com/iam/oss-pmt/kmt
+module github.com/DefensePoint/keycloak-monitoring
 
 go 1.25.14
 

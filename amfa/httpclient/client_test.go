@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/amfa"
 )
 
 // recorder captures what the client asked for, so tests can assert on the

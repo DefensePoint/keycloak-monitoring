@@ -10,10 +10,10 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/events"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
+	"github.com/DefensePoint/keycloak-monitoring/events"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
 // Repository implements events.Repository using GORM.

@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	mcpserver "repos.defensepoint.com/iam/oss-pmt/kmt/internal/mcp"
+	"github.com/DefensePoint/keycloak-monitoring/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	mcpserver "github.com/DefensePoint/keycloak-monitoring/internal/mcp"
 )
 
 // fakeTenantReader is a minimal tenant.Reader for exercising the MCP

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/alerts"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/alerts"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // mockAlertReader implements AlertReader for testing.

@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/keycloak"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
+	"github.com/DefensePoint/keycloak-monitoring/keycloak"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
 // HealthRepository implements keycloak.HealthRepository using GORM.

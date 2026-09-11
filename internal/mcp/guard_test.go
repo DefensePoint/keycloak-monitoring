@@ -9,9 +9,9 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/metrics"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/metrics"
 )
 
 func testGuard() *toolGuard {

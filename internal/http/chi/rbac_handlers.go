@@ -8,12 +8,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	httputil "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/dto"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/dto/requests"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
+	"github.com/DefensePoint/keycloak-monitoring/internal/http/dto"
+	"github.com/DefensePoint/keycloak-monitoring/internal/http/dto/requests"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/rbac"
 )
 
 var _ = dto.ErrorResponse{} // ensure dto import for swagger
@@ -224,7 +224,7 @@ func (h *RBACHandlers) createRole(w http.ResponseWriter, r *http.Request) {
 //	@Tags			rbac
 //	@Produce		json
 //	@Param			roleID	path		int	true	"Role ID"
-//	@Success		200		{object}	domain.RoleWithPermissions
+//	@Success		200		{object}	domain.Role
 //	@Failure		400		{object}	dto.ErrorResponse	"Invalid role ID"
 //	@Failure		401		{object}	dto.ErrorResponse
 //	@Failure		403		{object}	dto.ErrorResponse
@@ -266,7 +266,7 @@ func (h *RBACHandlers) getRole(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Param			roleID	path		int					true	"Role ID"
 //	@Param			request	body		requests.UpdateRole	true	"Role update request"
-//	@Success		200		{object}	domain.RoleWithPermissions
+//	@Success		200		{object}	domain.Role
 //	@Failure		400		{object}	dto.ErrorResponse	"Invalid role ID or request"
 //	@Failure		401		{object}	dto.ErrorResponse
 //	@Failure		403		{object}	dto.ErrorResponse	"Cannot modify system roles"

@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	httplib "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	httplib "github.com/DefensePoint/keycloak-monitoring/internal/http"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 
 // SlackNotifier handles sending notifications to Slack via webhooks.

@@ -4,7 +4,7 @@ import (
 	"slices"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // AlertListOptions contains options for listing alerts.

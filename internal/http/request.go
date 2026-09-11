@@ -6,8 +6,8 @@ import (
 	"regexp"
 	"strconv"
 
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/go-playground/validator/v10"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
 )
 
 // keycloakRealmPattern matches characters that are safe to interpolate into a

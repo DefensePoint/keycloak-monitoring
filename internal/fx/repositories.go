@@ -4,11 +4,11 @@ import (
 	"go.uber.org/fx"
 	"gorm.io/gorm"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/events"
-	eventspostgres "repos.defensepoint.com/iam/oss-pmt/kmt/events/postgres"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/users"
-	userspostgres "repos.defensepoint.com/iam/oss-pmt/kmt/users/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/events"
+	eventspostgres "github.com/DefensePoint/keycloak-monitoring/events/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/users"
+	userspostgres "github.com/DefensePoint/keycloak-monitoring/users/postgres"
 )
 
 // RepositoriesModule provides all repositories

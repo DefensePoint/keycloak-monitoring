@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // ErrConfigDefinedTenantReadOnly is returned when the public API is used to

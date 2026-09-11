@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 
 // SilenceManager defines the interface for alert silence management.

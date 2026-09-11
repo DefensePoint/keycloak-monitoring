@@ -1,7 +1,7 @@
 package notifications
 
 import (
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // Channel represents a notification channel type.

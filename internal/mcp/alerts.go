@@ -9,10 +9,10 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/alerts"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/alerts"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/rbac"
 )
 
 const (

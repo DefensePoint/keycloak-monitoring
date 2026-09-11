@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/events"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/events"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 const (

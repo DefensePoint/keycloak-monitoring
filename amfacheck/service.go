@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/lifecycle"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/lifecycle"
 )
 
 // reNotifyInterval is how long an unacknowledged, still-active alert waits

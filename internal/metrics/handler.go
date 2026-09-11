@@ -6,7 +6,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 )
 
 // GuardedHandler serves the Prometheus exposition endpoint for the registry,

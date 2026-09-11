@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // The one table defining what every shape of a tenant_policies row means.

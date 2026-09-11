@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/spf13/viper"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
 )
 
 // LoadConfig loads configuration using Viper

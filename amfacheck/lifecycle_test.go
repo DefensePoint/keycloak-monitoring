@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // gatedCheck blocks inside Execute until the test releases it, so a test can

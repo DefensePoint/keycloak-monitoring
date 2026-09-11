@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/amfa"
 )
 
 // classifyHTTPError translates a transport-level failure into

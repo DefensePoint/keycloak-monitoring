@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"os"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	appfx "repos.defensepoint.com/iam/oss-pmt/kmt/internal/fx"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	appfx "github.com/DefensePoint/keycloak-monitoring/internal/fx"
 )
 
 func main() {

@@ -8,11 +8,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/apitoken"
-	httputil "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/dto"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/dto/requests"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/apitoken"
+	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
+	"github.com/DefensePoint/keycloak-monitoring/internal/http/dto"
+	"github.com/DefensePoint/keycloak-monitoring/internal/http/dto/requests"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 
 var _ = dto.MessageResponse{} // ensure dto import for swagger

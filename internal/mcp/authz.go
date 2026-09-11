@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"slices"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/rbac"
 )
 
 // PermissionService is the slice of rbac.Service this package needs.

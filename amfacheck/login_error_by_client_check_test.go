@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/amfa"
 )
 
 func TestLoginErrorByClientCheck_OneAlertPerClientAtThreshold(t *testing.T) {

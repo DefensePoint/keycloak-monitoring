@@ -8,13 +8,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/events"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	httputil "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http"
-	_ "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/dto" // swagger
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/version"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/events"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
+	_ "github.com/DefensePoint/keycloak-monitoring/internal/http/dto" // swagger
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/version"
+	"github.com/DefensePoint/keycloak-monitoring/tenant"
 )
 
 // EventRepository defines the interface for event operations needed by system handlers.

@@ -6,7 +6,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/metrics"
+	"github.com/DefensePoint/keycloak-monitoring/internal/metrics"
 )
 
 func TestNewRegistersCollectors(t *testing.T) {

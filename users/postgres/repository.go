@@ -9,10 +9,10 @@ import (
 
 	"gorm.io/gorm"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	httputil "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/users"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
+	"github.com/DefensePoint/keycloak-monitoring/users"
 )
 
 const (

@@ -12,7 +12,7 @@ import (
 	"github.com/gorilla/sessions"
 	"gorm.io/gorm"
 
-	dbmodels "repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
+	dbmodels "github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
 // Ensure Session can be serialized with gob (for gorilla/sessions).

@@ -22,11 +22,11 @@ import (
 
 	"gorm.io/gorm"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
+	"github.com/DefensePoint/keycloak-monitoring/tenant"
 )
 
 // dsnConfig turns a libpq key=value DSN into the config NewClient builds its

@@ -7,12 +7,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	httputil "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http"
-	_ "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/dto" // swagger
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/operator"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
+	_ "github.com/DefensePoint/keycloak-monitoring/internal/http/dto" // swagger
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/operator"
+	"github.com/DefensePoint/keycloak-monitoring/rbac"
 )
 
 // OperatorHandlers handles HTTP requests for operator metrics operations.

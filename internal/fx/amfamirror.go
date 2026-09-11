@@ -6,12 +6,12 @@ import (
 
 	"go.uber.org/fx"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfamirror"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/events"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/keycloak"
+	"github.com/DefensePoint/keycloak-monitoring/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/amfamirror"
+	"github.com/DefensePoint/keycloak-monitoring/events"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/keycloak"
 )
 
 // AmfaMirrorModule wires the AMFA events mirror: one per-tenant

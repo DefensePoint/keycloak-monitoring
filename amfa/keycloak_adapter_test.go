@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/keycloakadmin"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
 )
 
 // stubAdmin is an in-memory implementation of the keycloakAdmin interface

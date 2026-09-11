@@ -3,11 +3,11 @@ package fx
 import (
 	"go.uber.org/fx"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/alerts"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/metrics"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/version"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/notifications"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/alerts"
+	"github.com/DefensePoint/keycloak-monitoring/internal/metrics"
+	"github.com/DefensePoint/keycloak-monitoring/internal/version"
+	"github.com/DefensePoint/keycloak-monitoring/notifications"
+	"github.com/DefensePoint/keycloak-monitoring/tenant"
 )
 
 // MetricsModule provides the Prometheus registry and wires the /metrics endpoint.

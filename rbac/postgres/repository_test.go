@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
 func TestConvertPolicy_AllowedRealms(t *testing.T) {

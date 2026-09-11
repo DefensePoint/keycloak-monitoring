@@ -20,8 +20,8 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/alerts"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
+	"github.com/DefensePoint/keycloak-monitoring/alerts"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
 // newRealmScopeTestRepo opens a connection to KMT_TEST_DATABASE_DSN and

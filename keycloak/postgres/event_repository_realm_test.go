@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/testdb"
+	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
 )
 
 func TestGetEventsByTypeScopesToRealm(t *testing.T) {

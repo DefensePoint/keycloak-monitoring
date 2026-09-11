@@ -7,17 +7,17 @@ import (
 
 	"go.uber.org/fx"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfa/httpclient"
-	amfapg "repos.defensepoint.com/iam/oss-pmt/kmt/amfa/postgres"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/amfacheck"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	chihttp "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/chi"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/keycloakadmin"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/saferequest"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/rbac"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/amfa/httpclient"
+	amfapg "github.com/DefensePoint/keycloak-monitoring/amfa/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/amfacheck"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	chihttp "github.com/DefensePoint/keycloak-monitoring/internal/http/chi"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/saferequest"
+	"github.com/DefensePoint/keycloak-monitoring/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/tenant"
 )
 
 // AMFA enrichment cache TTLs. Successful Keycloak user lookups are cached

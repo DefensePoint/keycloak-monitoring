@@ -11,9 +11,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
 )
 
 // ChromePDFGenerator implements PDFGenerator using Chrome headless.

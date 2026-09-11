@@ -7,13 +7,13 @@ import (
 
 	"go.uber.org/fx"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/auth"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	chihttp "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/chi"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/metrics"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/tenant"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/users"
+	"github.com/DefensePoint/keycloak-monitoring/auth"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	chihttp "github.com/DefensePoint/keycloak-monitoring/internal/http/chi"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/metrics"
+	"github.com/DefensePoint/keycloak-monitoring/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/users"
 )
 
 // ServerModule provides the HTTP server

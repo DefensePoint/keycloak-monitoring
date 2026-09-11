@@ -11,19 +11,19 @@ import (
 
 	"go.uber.org/fx"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/alerts"
-	alertspostgres "repos.defensepoint.com/iam/oss-pmt/kmt/alerts/postgres"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/events"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/metrics"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/keycloak"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/notifications"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/keycloakadmin"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/saferequest"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/alerts"
+	alertspostgres "github.com/DefensePoint/keycloak-monitoring/alerts/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/events"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/metrics"
+	"github.com/DefensePoint/keycloak-monitoring/keycloak"
+	"github.com/DefensePoint/keycloak-monitoring/notifications"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/saferequest"
+	"github.com/DefensePoint/keycloak-monitoring/tenant"
 )
 
 // MonitoringModule provides the monitoring infrastructure (MonitorPoolManager, ConfigChecker, etc.)

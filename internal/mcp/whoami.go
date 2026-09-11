@@ -5,7 +5,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/version"
+	"github.com/DefensePoint/keycloak-monitoring/internal/version"
 )
 
 const identityFieldCap = 256

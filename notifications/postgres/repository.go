@@ -7,9 +7,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/notifications"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/notifications"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
 // Repository implements notifications.Repository using PostgreSQL via GORM.

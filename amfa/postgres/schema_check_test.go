@@ -3,7 +3,7 @@ package postgres
 import (
 	"testing"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 
 // TestCheckAmfaSchema_EmptyExpectedNoLogger verifies the early-return path when

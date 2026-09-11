@@ -3,10 +3,10 @@ package fx
 import (
 	"go.uber.org/fx"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/alerts"
-	alertspostgres "repos.defensepoint.com/iam/oss-pmt/kmt/alerts/postgres"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
+	"github.com/DefensePoint/keycloak-monitoring/alerts"
+	alertspostgres "github.com/DefensePoint/keycloak-monitoring/alerts/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
 // AlertsModule provides alerts domain dependencies.

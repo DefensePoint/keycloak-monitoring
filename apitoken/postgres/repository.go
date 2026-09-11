@@ -10,8 +10,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/apitoken"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/database"
+	"github.com/DefensePoint/keycloak-monitoring/apitoken"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
 // Repository implements apitoken.Repository using PostgreSQL via GORM.

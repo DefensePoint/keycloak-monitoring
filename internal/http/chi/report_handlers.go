@@ -7,10 +7,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	httputil "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http"
-	_ "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/dto" // swagger
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/reports"
+	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
+	_ "github.com/DefensePoint/keycloak-monitoring/internal/http/dto" // swagger
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/reports"
 )
 
 // ReportTenantService provides tenant information for reports.

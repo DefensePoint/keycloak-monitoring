@@ -10,12 +10,12 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	httpSwagger "github.com/swaggo/http-swagger"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/metrics"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/metrics"
 
 	// Import generated swagger docs
-	_ "repos.defensepoint.com/iam/oss-pmt/kmt/docs/swagger"
+	_ "github.com/DefensePoint/keycloak-monitoring/docs/swagger"
 )
 
 // RouteRegistrar is the interface for handlers that can register their routes.

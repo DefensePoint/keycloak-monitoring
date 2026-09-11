@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
-	chihttp "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http/chi"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/metrics"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	chihttp "github.com/DefensePoint/keycloak-monitoring/internal/http/chi"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/metrics"
 )
 
 func newRouter(t *testing.T, cfg config.MetricsConfig) *chihttp.Router {

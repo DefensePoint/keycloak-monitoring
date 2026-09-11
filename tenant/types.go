@@ -2,7 +2,7 @@
 // Tenants represent Keycloak instances being monitored.
 package tenant
 
-import "repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+import "github.com/DefensePoint/keycloak-monitoring/internal/domain"
 
 // Event represents a change event for a tenant.
 type Event string

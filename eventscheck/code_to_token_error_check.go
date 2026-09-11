@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // CodeToTokenErrorCheck monitors CODE_TO_TOKEN_ERROR events.

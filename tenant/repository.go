@@ -3,7 +3,7 @@ package tenant
 import (
 	"context"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 // Repository defines the interface for tenant persistence.

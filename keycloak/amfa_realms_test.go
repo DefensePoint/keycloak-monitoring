@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"repos.defensepoint.com/iam/oss-pmt/kmt/pkg/keycloakadmin"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
 )
 
 // fakeClientProvider hands out a fixed AdminAPI for any tenant.
