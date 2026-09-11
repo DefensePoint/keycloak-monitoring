@@ -2,21 +2,35 @@ package database
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/testdb"
 )
 
-const testDSN = "host=localhost port=55433 user=postgres password=review dbname=reviewdb sslmode=disable"
-
-func testDBConfig() *config.DatabaseConfig {
+// testDBConfig restates a DSN as the config NewClient takes, so the raw
+// connection and the client address the same database.
+func testDBConfig(t *testing.T, dsn string) *config.DatabaseConfig {
+	t.Helper()
+	parsed, err := pgconn.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse KMT_DESTRUCTIVE_TEST_DATABASE_DSN: %v", err)
+	}
+	// pgconn resolves sslmode into a *tls.Config, so the original keyword is
+	// gone by here; a nil TLSConfig means the DSN asked for no TLS.
+	sslMode := "require"
+	if parsed.TLSConfig == nil {
+		sslMode = "disable"
+	}
 	return &config.DatabaseConfig{
-		Host: "localhost", Port: 55433, Database: "reviewdb",
-		User: "postgres", Password: "review", SSLMode: "disable",
+		Host: parsed.Host, Port: int(parsed.Port), Database: parsed.Database,
+		User: parsed.User, Password: parsed.Password, SSLMode: sslMode,
 		MaxConns: 5, MinConns: 1, Timeout: 30 * time.Second,
 	}
 }
@@ -24,22 +38,33 @@ func testDBConfig() *config.DatabaseConfig {
 // newPurgeTestClient wipes the schema and runs the real AutoMigrate, giving
 // each test a database shaped exactly like a fresh install.
 //
-// Named distinctly from client_test.go's newTestClient (which is gated on
-// KMT_TEST_DATABASE_DSN and only migrates the RBAC tables) to avoid a
-// redeclaration in this package.
+// Follows the same opt-in convention as client_test.go's newTestClient: the DSN
+// comes from KMT_DESTRUCTIVE_TEST_DATABASE_DSN and the test is skipped when
+// it isn't set. Named distinctly from newTestClient (which only migrates the
+// RBAC tables) to avoid a redeclaration in this package.
+//
+// Example:
+//
+//	KMT_DESTRUCTIVE_TEST_DATABASE_DSN="host=localhost port=55432 dbname=pmp_test user=pmp password=pmp sslmode=disable" \
+//	    go test ./pkg/database/...
 func newPurgeTestClient(t *testing.T) *Client {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping database test in short mode")
 	}
-	raw, err := gorm.Open(postgres.Open(testDSN), &gorm.Config{})
+	dsn := os.Getenv("KMT_DESTRUCTIVE_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("KMT_DESTRUCTIVE_TEST_DATABASE_DSN not set; skipping destructive integration test")
+	}
+	testdb.RequireDisposable(t, dsn)
+	raw, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 	if err := raw.Exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public").Error; err != nil {
 		t.Fatalf("reset schema: %v", err)
 	}
-	c, err := NewClient(testDBConfig(), logger.NewNoop())
+	c, err := NewClient(testDBConfig(t, dsn), logger.NewNoop())
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

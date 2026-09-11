@@ -78,7 +78,26 @@ func (r *Repository) GetByID(ctx context.Context, eventID string) (*domain.Event
 	result := r.db.WithContext(ctx).Where("event_id = ?", eventID).First(&event)
 
 	if result.Error == gorm.ErrRecordNotFound {
-		return nil, fmt.Errorf("event not found: %s", eventID)
+		return nil, fmt.Errorf("%w: %s", events.ErrNotFound, eventID)
+	}
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get event: %w", result.Error)
+	}
+
+	return toDomainEvent(&event), nil
+}
+
+// GetByTenantAndEventID retrieves one tenant's event by its event ID. event_id
+// is only unique per tenant, so both columns must be filtered or a lookup could
+// return another tenant's row for the same id.
+func (r *Repository) GetByTenantAndEventID(ctx context.Context, tenantID, eventID string) (*domain.Event, error) {
+	var event database.Event
+	result := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND event_id = ?", tenantID, eventID).
+		First(&event)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("%w: %s", events.ErrNotFound, eventID)
 	}
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get event: %w", result.Error)
@@ -95,25 +114,7 @@ func (r *Repository) List(ctx context.Context, opts *events.ListOptions) ([]*dom
 
 	var dbEvents []*database.Event
 	query := r.db.WithContext(ctx).Order("timestamp DESC")
-	query = applySourceFilter(query, opts)
-
-	// Add time range filters if provided
-	if opts.StartTime != nil && *opts.StartTime != "" {
-		startTime, err := time.Parse(time.RFC3339, *opts.StartTime)
-		if err == nil {
-			query = query.Where("timestamp >= ?", startTime)
-		} else {
-			r.logger.Warn("Invalid start_time format", logger.Str("start_time", *opts.StartTime))
-		}
-	}
-	if opts.EndTime != nil && *opts.EndTime != "" {
-		endTime, err := time.Parse(time.RFC3339, *opts.EndTime)
-		if err == nil {
-			query = query.Where("timestamp <= ?", endTime)
-		} else {
-			r.logger.Warn("Invalid end_time format", logger.Str("end_time", *opts.EndTime))
-		}
-	}
+	query = r.applyFilters(query, opts)
 
 	result := query.
 		Limit(opts.Limit).
@@ -131,6 +132,44 @@ func (r *Repository) List(ctx context.Context, opts *events.ListOptions) ([]*dom
 	}
 
 	return domainEvents, nil
+}
+
+// ListKeyset retrieves one page of events in keyset order (timestamp DESC,
+// id DESC), continuing strictly after the given position, or from the newest
+// row when after is nil. Applies the same filters as List; opts.Offset is
+// ignored, the position replaces it.
+func (r *Repository) ListKeyset(ctx context.Context, opts *events.ListOptions, after *events.KeysetPosition) (*events.KeysetPage, error) {
+	if opts == nil {
+		opts = &events.ListOptions{Limit: 100}
+	}
+
+	query := r.db.WithContext(ctx).Order("timestamp DESC, id DESC")
+	query = r.applyFilters(query, opts)
+	if after != nil {
+		// Postgres timestamps resolve to microseconds, so a cursor carrying
+		// nanoseconds never satisfies the equality arm and rows sharing the
+		// cursor's timestamp would be skipped or repeated (same trap as the
+		// purge cursor in pkg/database/tenant_purge.go).
+		ts := after.Timestamp.UTC().Truncate(time.Microsecond)
+		query = query.Where("timestamp < ? OR (timestamp = ? AND id < ?)", ts, ts, after.ID)
+	}
+
+	var dbEvents []*database.Event
+	if err := query.Limit(opts.Limit).Find(&dbEvents).Error; err != nil {
+		return nil, fmt.Errorf("failed to query events keyset page: %w", err)
+	}
+
+	page := &events.KeysetPage{Events: make([]*domain.Event, len(dbEvents))}
+	for i, event := range dbEvents {
+		page.Events[i] = toDomainEvent(event)
+	}
+	if n := len(dbEvents); n > 0 {
+		page.Last = &events.KeysetPosition{
+			Timestamp: dbEvents[n-1].Timestamp,
+			ID:        dbEvents[n-1].ID,
+		}
+	}
+	return page, nil
 }
 
 // Count returns the total number of events using GORM.
@@ -153,9 +192,74 @@ func (r *Repository) CountWithFilter(ctx context.Context, opts *events.ListOptio
 
 	var count int64
 	query := r.db.WithContext(ctx).Model(&database.Event{})
+	query = r.applyFilters(query, opts)
+
+	result := query.Count(&count)
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to count events with filter: %w", result.Error)
+	}
+
+	return count, nil
+}
+
+// Stats returns event counts grouped by type, severity and source, all under
+// the same filter scope as List.
+func (r *Repository) Stats(ctx context.Context, opts *events.ListOptions) (*events.Stats, error) {
+	if opts == nil {
+		opts = &events.ListOptions{}
+	}
+
+	stats := &events.Stats{
+		ByType:     map[string]int64{},
+		BySeverity: map[string]int64{},
+		BySource:   map[string]int64{},
+	}
+	for _, group := range []struct {
+		column string
+		counts map[string]int64
+	}{
+		{"type", stats.ByType},
+		{"severity", stats.BySeverity},
+		{"source", stats.BySource},
+	} {
+		var rows []struct {
+			Key   string
+			Count int64
+		}
+		query := r.applyFilters(r.db.WithContext(ctx).Model(&database.Event{}), opts)
+		if err := query.
+			Select(group.column + ` AS key, count(*) AS count`).
+			Group(group.column).
+			Find(&rows).Error; err != nil {
+			return nil, fmt.Errorf("failed to aggregate events by %s: %w", group.column, err)
+		}
+		for _, row := range rows {
+			group.counts[row.Key] = row.Count
+		}
+	}
+	return stats, nil
+}
+
+// applyFilters adds every ListOptions predicate except pagination: tenant and
+// source scoping, the classification filters, and the time window. Shared by
+// every read path (List, ListKeyset, CountWithFilter, Stats) so a page, its
+// total and its aggregates always describe the same row set.
+//
+// A malformed time bound is warned about and skipped rather than rejected,
+// which existing HTTP callers rely on.
+func (r *Repository) applyFilters(query *gorm.DB, opts *events.ListOptions) *gorm.DB {
 	query = applySourceFilter(query, opts)
 
-	// Add time range filters if provided
+	if opts.Type != "" {
+		query = query.Where("type = ?", opts.Type)
+	}
+	if opts.Severity != "" {
+		query = query.Where("severity = ?", opts.Severity)
+	}
+	if opts.MinRisk != nil {
+		query = query.Where("risk_level >= ?", *opts.MinRisk)
+	}
+
 	if opts.StartTime != nil && *opts.StartTime != "" {
 		startTime, err := time.Parse(time.RFC3339, *opts.StartTime)
 		if err == nil {
@@ -172,13 +276,7 @@ func (r *Repository) CountWithFilter(ctx context.Context, opts *events.ListOptio
 			r.logger.Warn("Invalid end_time format", logger.Str("end_time", *opts.EndTime))
 		}
 	}
-
-	result := query.Count(&count)
-	if result.Error != nil {
-		return 0, fmt.Errorf("failed to count events with filter: %w", result.Error)
-	}
-
-	return count, nil
+	return query
 }
 
 // applySourceFilter adds the source predicate from opts to the query.

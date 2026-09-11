@@ -9,7 +9,7 @@
 // KMT_TEST_DATABASE_DSN environment variable; the test is skipped when
 // unset. Run with:
 //
-//	KMT_TEST_DATABASE_DSN="host=localhost port=5432 dbname=kmt_test user=kmt password=kmt sslmode=disable" \
+//	KMT_TEST_DATABASE_DSN="host=localhost port=55432 dbname=pmp_test user=pmp password=pmp sslmode=disable" \
 //	    go test ./events/postgres/...
 package postgres
 

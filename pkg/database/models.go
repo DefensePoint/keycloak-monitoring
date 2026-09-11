@@ -9,7 +9,7 @@ import (
 // Event represents a generic monitoring event in the system.
 // This can be used for Keycloak events or any other monitoring data.
 type Event struct {
-	ID        uint      `gorm:"primaryKey"`
+	ID        uint      `gorm:"primaryKey;index:idx_events_tenant_timestamp_id,priority:3,sort:desc"`
 	CreatedAt time.Time `gorm:"index"`
 	UpdatedAt time.Time
 	DeletedAt gorm.DeletedAt `gorm:"index"`
@@ -23,7 +23,7 @@ type Event struct {
 	// query, because equality against a real tenant id never matches ''. They
 	// are also the reason tenant deletion could not previously remove a
 	// tenant's events: there was nothing to delete by.
-	TenantID string `gorm:"index;uniqueIndex:idx_events_tenant_event,priority:1;default:''"`
+	TenantID string `gorm:"index;uniqueIndex:idx_events_tenant_event,priority:1;index:idx_events_tenant_timestamp_id,priority:1;default:''"`
 
 	// Event identification
 	//
@@ -31,7 +31,7 @@ type Event struct {
 	// same Keycloak see the same event ids, and a global unique index made them
 	// silently overwrite each other's rows.
 	EventID   string    `gorm:"not null;uniqueIndex:idx_events_tenant_event,priority:2"`
-	Timestamp time.Time `gorm:"index;not null"`
+	Timestamp time.Time `gorm:"index;not null;index:idx_events_tenant_timestamp_id,priority:2,sort:desc"`
 
 	// Event classification
 	Type        string `gorm:"index"`
@@ -782,8 +782,9 @@ type TenantPolicy struct {
 	TenantID string `gorm:"not null;index:idx_tenant_policies_tenant;size:100"`
 
 	// Realm restrictions (JSON array of realm names)
-	// If null or empty, user has access to all realms in the tenant
 	// If specified, user only has access to listed realms
+	// An empty list `[]` grants no realm; a SQL NULL column and the stored `null`
+	// literal both grant every realm
 	AllowedRealms []byte `gorm:"type:jsonb"` // JSON array: ["realm1", "realm2"]
 
 	// Policy metadata
@@ -794,6 +795,36 @@ type TenantPolicy struct {
 // TableName specifies the table name for TenantPolicy.
 func (TenantPolicy) TableName() string {
 	return "tenant_policies"
+}
+
+// APIToken represents a personal access token for programmatic API access.
+// Only the SHA-256 hex digest of the token is stored; the plaintext is shown
+// once at creation and never persisted. Last-use tracking is deferred; there
+// is no last_used_at column yet.
+type APIToken struct {
+	ID        uint      `gorm:"primaryKey"`
+	CreatedAt time.Time `gorm:"index"`
+
+	// User reference
+	UserID uint  `gorm:"not null;index:idx_api_tokens_user"`
+	User   *User `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
+
+	// Token identification
+	Name        string `gorm:"not null;size:255"`
+	TokenDigest string `gorm:"uniqueIndex;not null;size:64"` // SHA-256 hex of the plaintext token
+
+	// Tenant restrictions (JSON array of tenant IDs)
+	// If null or empty, the token inherits the user's RBAC scope
+	TenantIDs []byte `gorm:"type:jsonb"` // JSON array: ["tenant1", "tenant2"]
+
+	// Lifecycle
+	ExpiresAt *time.Time `gorm:"index"`
+	RevokedAt *time.Time `gorm:"index"`
+}
+
+// TableName specifies the table name for APIToken.
+func (APIToken) TableName() string {
+	return "api_tokens"
 }
 
 // PendingTenantPurge is a work queue entry for telemetry belonging to a deleted

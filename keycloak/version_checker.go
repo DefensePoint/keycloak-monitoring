@@ -40,6 +40,9 @@ type VersionChecker struct {
 
 // VersionCheckerConfig contains configuration for the version checker
 type VersionCheckerConfig struct {
+	// Enabled must be true for NewVersionChecker to build a checker at all.
+	// See that function for why the default is off.
+	Enabled          bool
 	CacheTTL         time.Duration
 	HTTPTimeout      time.Duration
 	GitHubAPIBaseURL string
@@ -47,7 +50,11 @@ type VersionCheckerConfig struct {
 	KeycloakRepo     string
 }
 
-// DefaultVersionCheckerConfig returns default configuration
+// DefaultVersionCheckerConfig returns default configuration.
+//
+// Enabled is deliberately absent, so it is false: the defaults must not
+// produce a checker that contacts GitHub. A caller that wants version
+// checking sets Enabled itself, which is the opt-in.
 func DefaultVersionCheckerConfig() VersionCheckerConfig {
 	return VersionCheckerConfig{
 		CacheTTL:         1 * time.Hour,
@@ -58,8 +65,22 @@ func DefaultVersionCheckerConfig() VersionCheckerConfig {
 	}
 }
 
-// NewVersionChecker creates a new version checker with the given configuration
+// NewVersionChecker creates a version checker, or returns nil when version
+// checking is disabled.
+//
+// The nil return is the point rather than a shortcut. This checker is the only
+// component that contacts hosts we do not operate, and third-party calls are
+// prohibited because deployments can be airgapped. Refusing to build the
+// object means no caller can enable that traffic by wiring the checker without
+// reading the config; a flag consulted only at the call site would be little
+// better than a comment. Callers already handle a nil checker: the service
+// guards on it and GetVersionInfo returns (nil, nil), which the UI renders as
+// no version information rather than an error.
 func NewVersionChecker(cfg VersionCheckerConfig) *VersionChecker {
+	if !cfg.Enabled {
+		return nil
+	}
+
 	return &VersionChecker{
 		httpClient: &http.Client{
 			Timeout: cfg.HTTPTimeout,

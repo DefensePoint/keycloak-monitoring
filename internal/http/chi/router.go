@@ -4,12 +4,10 @@
 package chi
 
 import (
-	"crypto/subtle"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	httpSwagger "github.com/swaggo/http-swagger"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/config"
@@ -65,7 +63,16 @@ func NewRouter(
 
 	// Add Chi's built-in middleware (optional, can be customized)
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// chi v5.3.0 deprecated RealIP without changing its behavior: it still
+	// overwrites RemoteAddr from True-Client-IP / X-Real-IP / the leftmost
+	// X-Forwarded-For whether or not a proxy set them, so the client IP here
+	// remains attacker-controlled. Kept as-is for now because the documented
+	// deployment does front this with nginx/traefik, and the safe replacements
+	// (ClientIPFromXFFTrustedProxies + GetClientIP) need a trusted-proxy CIDR
+	// setting this repo does not have yet. The only consumer on this router is
+	// the remote_addr field in the request log, so the exposure is spoofable
+	// log entries, not an authorization or rate-limit decision.
+	r.Use(middleware.RealIP) //nolint:staticcheck // SA1019: see the comment above
 
 	return &Router{
 		chi:            r,
@@ -134,18 +141,7 @@ func (r *Router) handleReady(w http.ResponseWriter, req *http.Request) {
 // handleMetrics serves the Prometheus exposition endpoint, optionally behind a
 // bearer token.
 func (r *Router) handleMetrics() http.HandlerFunc {
-	handler := promhttp.HandlerFor(r.metrics.Gatherer(), promhttp.HandlerOpts{})
-
-	return func(w http.ResponseWriter, req *http.Request) {
-		if token := r.metricsConfig.AuthToken; token != "" {
-			provided := req.Header.Get("Authorization")
-			if subtle.ConstantTimeCompare([]byte(provided), []byte("Bearer "+token)) != 1 {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-		}
-		handler.ServeHTTP(w, req)
-	}
+	return metrics.GuardedHandler(r.metrics, r.metricsConfig).ServeHTTP
 }
 
 // AddHandler adds a handler to be registered.

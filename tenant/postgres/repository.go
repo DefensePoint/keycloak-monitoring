@@ -97,13 +97,39 @@ func (r *Repository) GetDefault(ctx context.Context) (*domain.KeycloakTenant, er
 }
 
 // Create creates a new tenant.
+//
+// enabled is written a second time, in the same transaction, because GORM
+// substitutes a column's default for any zero-valued field carrying one: a
+// tenant created with Enabled=false would otherwise be stored enabled while
+// the in-memory tenant stayed correctly disabled, so nothing monitored it
+// until the next restart, when LoadTenants read the row back as enabled and
+// repopulated the cache with it. Writing it unconditionally keeps the
+// requested value authoritative whichever way the default points.
 func (r *Repository) Create(ctx context.Context, t *domain.KeycloakTenant) error {
 	dbTenant, err := r.convertToDBTenant(t)
 	if err != nil {
 		return err
 	}
-	if err := r.db.DB().WithContext(ctx).Create(&dbTenant).Error; err != nil {
-		return fmt.Errorf("failed to create tenant: %w", err)
+	if err := r.db.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&dbTenant).Error; err != nil {
+			return fmt.Errorf("failed to create tenant: %w", err)
+		}
+		// UpdateColumn, not Update: the row was inserted a statement ago and
+		// updated_at must still match created_at. The value comes from t, not
+		// dbTenant, because GORM's insert callback has already overwritten
+		// dbTenant.Enabled with the column default it substituted.
+		res := tx.Model(&database.KeycloakTenant{}).
+			Where("id = ?", dbTenant.ID).
+			UpdateColumn("enabled", t.Enabled)
+		if res.Error != nil {
+			return fmt.Errorf("failed to set enabled on new tenant: %w", res.Error)
+		}
+		if res.RowsAffected != 1 {
+			return fmt.Errorf("failed to set enabled on new tenant: %d rows affected, want 1", res.RowsAffected)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	t.ID = dbTenant.ID
 	t.CreatedAt = dbTenant.CreatedAt

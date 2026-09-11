@@ -13,7 +13,7 @@ func (l *Logger) With() *Context {
 
 // WithComponent returns a logger with a component field
 func (l *Logger) WithComponent(component string) *Logger {
-	return &Logger{zl: l.zl.With().Str("component", component).Logger()}
+	return &Logger{zl: l.zl.With().Str("component", component).Logger(), pinned: l.pinned, pin: l.pin}
 }
 
 // Context allows building a logger with context fields

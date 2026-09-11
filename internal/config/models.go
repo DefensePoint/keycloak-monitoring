@@ -417,6 +417,16 @@ type HealthCheckConfig struct {
 
 // VersionCheckerConfig represents version checking configuration
 type VersionCheckerConfig struct {
+	// Enabled turns the version checker on. It defaults to false because the
+	// checker is the only part of this tool that reaches a host we do not
+	// operate: GitHub's API for upstream Keycloak releases.
+	//
+	// Third-party calls are prohibited here, since deployments can be
+	// airgapped, where these would fail on an HTTP timeout with nothing on
+	// screen to explain why. Off by default means a deployment has to opt in
+	// deliberately, and NewVersionChecker returns nil when it is false, so no
+	// wiring mistake can enable the traffic by accident.
+	Enabled          bool          `mapstructure:"enabled"`
 	CacheTTL         time.Duration `mapstructure:"cache_ttl"`
 	HTTPTimeout      time.Duration `mapstructure:"http_timeout"`
 	GitHubAPIBaseURL string        `mapstructure:"github_api_base_url"`

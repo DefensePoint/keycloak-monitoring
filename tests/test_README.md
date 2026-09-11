@@ -17,18 +17,48 @@ This directory contains end-to-end integration tests for the Keycloak Monitoring
    ```
 
 3. **Config**: Make sure `config.yaml` has:
-   - `prod-keycloak` tenant configured and enabled
+   - A tenant set aside for this test, configured and enabled. The test
+     defaults to `e2e-alerts-fixture-8f42c1`; set `KMT_E2E_TEST_TENANT_ID`
+     to use a different one. Do not point it at a tenant carrying data you
+     need, for the reason in the warning below.
    - Event checker enabled with reasonable poll intervals
    - Slack notifications enabled (or check notification_logs table instead)
 
 ## Running the Tests
 
+The test is double-gated so it stays out of default runs: it needs the
+`integration` build tag, and it reads the deployment's database from
+`KMT_E2E_TEST_DATABASE_DSN`, skipping when that is unset.
+
+> **This test deletes recent rows from the database you point it at.** Its
+> `cleanup` helper removes, for the tenant under test, every `keycloak_events`
+> row from the last 15 minutes (not only the ones it created, because the
+> predicate is `event_id LIKE 'test-%' OR time > NOW() - INTERVAL '15 minutes'`),
+> and every `configuration_alerts` and `keycloak_health` row from the same
+> window with no test-marker filter at all. On a monitored deployment that is
+> exactly the window you care about. The tenant id defaults to a fixture
+> value nothing provisions by accident, which is the main thing keeping this
+> off real rows; if you override `KMT_E2E_TEST_TENANT_ID`, pick a tenant
+> whose last 15 minutes are expendable.
+>
+> Never export `KMT_E2E_TEST_DATABASE_DSN` into a shell that later runs the
+> package tests: `KMT_TEST_DATABASE_DSN` and
+> `KMT_DESTRUCTIVE_TEST_DATABASE_DSN` are separate variables precisely so
+> that a deployment DSN cannot reach a helper that drops the schema. Set it
+> inline on the one command below, not with `export`.
+
+The DSN below is the local stack from step 1, which publishes PostgreSQL on
+host port 5433 (`deployments/local/docker-compose.yml`). A server deployment
+publishes the same database on 5432.
+
 ```bash
 # From project root
-go test -v ./test/... -timeout 15m
+KMT_E2E_TEST_DATABASE_DSN="host=localhost port=5433 dbname=monitoring user=monitoring password=<password> sslmode=disable" \
+  go test -v -tags=integration ./tests/... -timeout 15m
 
 # Or with coverage
-go test -v ./test/... -timeout 15m -cover
+KMT_E2E_TEST_DATABASE_DSN="host=localhost port=5433 dbname=monitoring user=monitoring password=<password> sslmode=disable" \
+  go test -v -tags=integration ./tests/... -timeout 15m -cover
 ```
 
 ## What the Tests Do
@@ -104,7 +134,8 @@ PASS
 
 **Fix**:
 1. Check `config.yaml` - ensure event_checker and config_checker are enabled
-2. Verify tenant `prod-keycloak` is enabled
+2. Verify the fixture tenant (`KMT_E2E_TEST_TENANT_ID`, default
+   `e2e-alerts-fixture-8f42c1`) is enabled
 3. Check server logs for errors
 
 ### Notifications not sent
@@ -124,7 +155,7 @@ You can also manually insert data and check the results:
 # 1. Insert test events
 docker compose -f deployments/local/docker-compose.yml exec postgres psql -U monitoring -d monitoring -c "
 INSERT INTO keycloak_events (tenant_id, event_id, time, realm_id, realm_name, event_type, success, ip_address, user_id, username, client_id)
-SELECT 'prod-keycloak', 'manual-test-' || generate_series, NOW() - interval '1 minute', 'master', 'master', 'LOGIN_ERROR', false, '192.168.1.100', 'user-' || generate_series, 'user' || generate_series, 'test-client'
+SELECT 'e2e-alerts-fixture-8f42c1', 'manual-test-' || generate_series, NOW() - interval '1 minute', 'master', 'master', 'LOGIN_ERROR', false, '192.168.1.100', 'user-' || generate_series, 'user' || generate_series, 'test-client'
 FROM generate_series(1, 15);
 "
 
@@ -134,7 +165,7 @@ FROM generate_series(1, 15);
 docker compose -f deployments/local/docker-compose.yml exec postgres psql -U monitoring -d monitoring -c "
 SELECT title, severity, check_type, first_detected
 FROM configuration_alerts
-WHERE tenant_id = 'prod-keycloak'
+WHERE tenant_id = 'e2e-alerts-fixture-8f42c1'
 ORDER BY first_detected DESC
 LIMIT 5;
 "

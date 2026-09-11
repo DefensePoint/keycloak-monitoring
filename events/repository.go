@@ -3,10 +3,14 @@ package events
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
 )
+
+// ErrNotFound is returned when the requested event does not exist.
+var ErrNotFound = errors.New("event not found")
 
 // ListOptions defines filtering and pagination options for event queries.
 type ListOptions struct {
@@ -26,6 +30,38 @@ type ListOptions struct {
 	Sources   []string
 	StartTime *string
 	EndTime   *string
+	// Type filters rows by exact event type (e.g. "LOGIN").
+	Type     string
+	Severity string
+	// MinRisk filters rows whose risk_level is at least this value. Rows with
+	// a NULL risk_level (no AMFA counterpart) never match.
+	MinRisk *int
+}
+
+// KeysetPosition identifies a row in the keyset ordering (timestamp DESC,
+// id DESC). ID is the surrogate primary key, not the event_id string: event
+// ids are only unique per tenant and carry no order, while the uint key gives
+// rows with equal timestamps a stable tiebreak.
+type KeysetPosition struct {
+	Timestamp time.Time
+	ID        uint
+}
+
+// KeysetPage is one page of a keyset-paginated listing. Last is the position
+// of the final row (nil for an empty page); callers pass it back as the next
+// call's after position to continue where this page ended.
+type KeysetPage struct {
+	Events []*domain.Event
+	Last   *KeysetPosition
+}
+
+// Stats holds event counts grouped by classification column, all computed
+// under one ListOptions filter scope. Keys are the raw column values,
+// including "" for rows that never had the column set.
+type Stats struct {
+	ByType     map[string]int64
+	BySeverity map[string]int64
+	BySource   map[string]int64
 }
 
 // Repository defines the interface for event persistence operations.
@@ -36,8 +72,24 @@ type Repository interface {
 	// GetByID retrieves an event by its event ID.
 	GetByID(ctx context.Context, eventID string) (*domain.Event, error)
 
+	// GetByTenantAndEventID retrieves one tenant's event by its event ID.
+	// Unlike GetByID it filters on both columns, so two tenants monitoring the
+	// same Keycloak (and therefore seeing the same event ids) each get only
+	// their own row.
+	GetByTenantAndEventID(ctx context.Context, tenantID, eventID string) (*domain.Event, error)
+
 	// List retrieves events with pagination and filtering.
 	List(ctx context.Context, opts *ListOptions) ([]*domain.Event, error)
+
+	// ListKeyset retrieves events ordered by (timestamp DESC, id DESC) using
+	// keyset pagination: only rows strictly after the given position are
+	// returned, or the newest rows when after is nil. Uses opts.Limit and the
+	// same filters as List; opts.Offset is ignored.
+	ListKeyset(ctx context.Context, opts *ListOptions, after *KeysetPosition) (*KeysetPage, error)
+
+	// Stats returns event counts grouped by type, severity and source, all
+	// under the same filter scope as List.
+	Stats(ctx context.Context, opts *ListOptions) (*Stats, error)
 
 	// Count returns the total number of events.
 	Count(ctx context.Context) (int64, error)

@@ -11,26 +11,35 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/testdb"
 )
 
 // newTestClient opens a postgres-backed GORM connection for migration tests.
 //
-// The connection DSN is taken from the KMT_TEST_DATABASE_DSN environment
-// variable. If unset, the test is skipped. The test connects to a real
-// PostgreSQL instance (sqlite is not a dependency of this project), so these
-// tests are integration-style and only run when an operator opts in.
+// The DSN comes from KMT_DESTRUCTIVE_TEST_DATABASE_DSN, not from
+// KMT_TEST_DATABASE_DSN: the helper deletes the admin, operator and viewer
+// rows globally rather than only the fixtures it created, so it needs a
+// database nobody minds losing. If unset, the test is skipped. The test
+// connects to a real PostgreSQL instance (sqlite is not a dependency of this
+// project), so these tests are integration-style and only run when an operator
+// opts in.
 //
 // Example:
 //
-//	KMT_TEST_DATABASE_DSN="host=localhost port=5432 dbname=kmt_test user=kmt password=kmt sslmode=disable" \
+//	KMT_DESTRUCTIVE_TEST_DATABASE_DSN="host=localhost port=55432 dbname=pmp_test user=pmp password=pmp sslmode=disable" \
 //	    go test ./pkg/database/...
 func newTestClient(t *testing.T) *Client {
 	t.Helper()
 
-	dsn := os.Getenv("KMT_TEST_DATABASE_DSN")
-	if dsn == "" {
-		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
+	if testing.Short() {
+		t.Skip("skipping database test in short mode")
 	}
+
+	dsn := os.Getenv("KMT_DESTRUCTIVE_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("KMT_DESTRUCTIVE_TEST_DATABASE_DSN not set; skipping destructive integration test")
+	}
+	testdb.RequireDisposable(t, dsn)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger:                 gormlogger.Default.LogMode(gormlogger.Silent),

@@ -32,7 +32,7 @@ Developer guide for working with the Keycloak Monitoring Tool codebase.
 
 ```bash
 # Clone repository
-git clone git@repos.defensepoint.com:ai/soc/kmt.git
+git clone git@repos.defensepoint.com:iam/oss-pmt/kmt.git
 cd kmt
 
 # Install dependencies
@@ -249,8 +249,10 @@ Create a pull request on GitHub/GitLab.
 |---|---|---|---|
 | **Unit tests** (Go) | Logic in isolation. No DB, no network. Stdlib `testing` only — no `testify`. | `go test -short ./...` | Always run |
 | **Unit tests** (frontend) | React components + service URL/param construction. JSDOM, mocked deps. | `cd web && npm test -- --run` | Always run |
-| **DB-backed tests** (env-gated) | KMT's own migrations / RBAC seeders against a real PostgreSQL. | Skip when `KMT_TEST_DATABASE_DSN` unset. | Export `KMT_TEST_DATABASE_DSN`. |
-| **AMFA integration tests** (build-tag + env-gated) | AMFA repository SQL queries against a real AMFA Postgres. Tagged `//go:build integration`. | Skip in default run. | `go test -tags=integration ./amfa/postgres/...` with `AMFA_TEST_DSN` set. |
+| **DB-backed tests** (env-gated) | Repository queries against a real PostgreSQL, using only fixtures they clean up, plus the MCP security posture suite. | Skip when `KMT_TEST_DATABASE_DSN` unset. | Export `KMT_TEST_DATABASE_DSN`. |
+| **Destructive DB tests** (env-gated) | KMT's own migrations / RBAC seeders and the tenant purge path. Drop the schema or delete role rows globally. | Skip when `KMT_DESTRUCTIVE_TEST_DATABASE_DSN` unset; CI deliberately does not set it. | Point `KMT_DESTRUCTIVE_TEST_DATABASE_DSN` at a throwaway database. |
+| **AMFA integration tests** (build-tag + env-gated) | AMFA repository SQL queries against a real AMFA Postgres. Tagged `//go:build integration`. | Skip in default run. | `go test -tags=integration ./amfa/postgres/...` with `AMFA_TEST_DSN` set. The schema check in the same package drops `alembic_version` and reads `AMFA_DESTRUCTIVE_TEST_DSN` instead. |
+| **Alert pipeline e2e** (build-tag + env-gated) | The alert pipeline against a whole running deployment. Tagged `//go:build integration`. | Skip in default run. | `go test -tags=integration ./tests/...` with `KMT_E2E_TEST_DATABASE_DSN` set. See `tests/test_README.md`. |
 | **Full e2e smoke** (manual) | UI walkthrough against running stacks. Not automated. | N/A | See `docs/amfa-integration.md` § Verification. |
 
 > **No testify in this project.** All Go tests use stdlib `testing` (`if got != want { t.Errorf(...) }` style). Don't add `github.com/stretchr/testify` as a dependency.
@@ -303,20 +305,44 @@ go test -v ./internal/http/chi/...
 
 ### Backend — DB-backed unit tests
 
-A small number of tests want a real PostgreSQL (e.g., the RBAC permission migration in `pkg/database/client_test.go`). They `t.Skip(...)` cleanly when the env var is absent:
+A small number of tests want a real PostgreSQL. The two below are read by the package tests and are separated by how much damage they do, each `t.Skip(...)`ing cleanly when its own variable is absent. Two more exist outside this table: `KMT_E2E_TEST_DATABASE_DSN` for the alert pipeline e2e, and `AMFA_TEST_DSN` / `AMFA_DESTRUCTIVE_TEST_DSN` for the AMFA integration tests. Four variables in total, and no test reads more than one of them.
+
+| Variable | Read by | Point it at |
+|---|---|---|
+| `KMT_TEST_DATABASE_DSN` | The events repository tests in `events/postgres`, and the client-secret migration test in `pkg/database`. | Any dev database. These remove only the fixtures they create. |
+| `KMT_DESTRUCTIVE_TEST_DATABASE_DSN` | The RBAC permission migration in `pkg/database/client_test.go`, and the tenant purge tests in `pkg/database` and `tenant/postgres`. | A throwaway database only. These run `DROP SCHEMA public CASCADE` and delete the admin, operator and viewer rows globally. |
+
+Keep them separate. The destructive helpers also refuse to start unless the database name carries a `test`, `tmp` or `scratch` component, so a DSN aimed at `monitoring` fails loudly instead of wiping it, but that is a backstop and not a licence to reuse one variable for both.
+
+Omitting `-p 1` below does not fail with a message about parallelism: one
+package drops the schema while the other is mid-migration, and what you see is
+`relation "user_roles" does not exist`. If a destructive run fails that way,
+check `-p 1` before believing the schema is at fault.
+
+Host port 55432 below is deliberate. The local stack publishes its `monitoring`
+database on 5433 and a server deployment publishes one on 5432, so binding the
+throwaway container on either would either fail to start or leave a DSN that
+reaches a real database.
 
 ```bash
 # Spin up a disposable Postgres (or use any existing dev DB):
-docker run -d --name pmp-test-db --rm \
-  -e POSTGRES_DB=pmp_test -e POSTGRES_USER=pmp -e POSTGRES_PASSWORD=pmp \
-  -p 5433:5432 postgres:17-alpine
+docker run -d --name kmt-test-db --rm \
+  -e POSTGRES_DB=kmt_test -e POSTGRES_USER=kmt -e POSTGRES_PASSWORD=kmt \
+  -p 55432:5432 postgres:17-alpine
 
 # Run with the DSN set:
-KMT_TEST_DATABASE_DSN="host=localhost port=5433 dbname=pmp_test user=pmp password=pmp sslmode=disable" \
+KMT_DESTRUCTIVE_TEST_DATABASE_DSN="host=localhost port=55432 dbname=kmt_test user=kmt password=kmt sslmode=disable" \
   go test -v ./pkg/database/...
 
 # Tear down:
-docker stop pmp-test-db
+docker stop kmt-test-db
+```
+
+`pkg/database` and `tenant/postgres` both run `DROP SCHEMA public CASCADE` against `KMT_DESTRUCTIVE_TEST_DATABASE_DSN`, so they cannot share a database with a concurrently running package. Pass `-p 1` whenever more than one of them is in the same invocation:
+
+```bash
+KMT_DESTRUCTIVE_TEST_DATABASE_DSN="host=localhost port=55432 dbname=kmt_test user=kmt password=kmt sslmode=disable" \
+  go test -p 1 ./pkg/database/... ./tenant/postgres/...
 ```
 
 ### Backend — AMFA integration tests

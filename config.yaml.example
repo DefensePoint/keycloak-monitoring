@@ -495,6 +495,20 @@ keycloak:
     # The version checker monitors for new Keycloak releases
     # and displays warnings when updates are available.
     version_checker:
+      # Enable checking whether the monitored Keycloak is behind its latest
+      # release. OFF BY DEFAULT, and the only setting here that reaches a host
+      # outside your own infrastructure: api.github.com, for upstream Keycloak
+      # releases.
+      #
+      # Leave this false for any deployment that cannot reach the internet,
+      # including airgapped installations. There the requests fail on the HTTP
+      # timeout below with nothing on screen to explain it; the rest of the
+      # platform makes no external calls at all.
+      #
+      # With this false, no version checker is constructed and the UI simply
+      # shows no version information.
+      enabled: false
+
       # How long to cache version information before checking again
       # Valid time units: ns, us/µs, ms, s, m, h
       # Recommended: 24h to 48h
@@ -1112,10 +1126,15 @@ auth:
 
   session:
     # Session secret key for cookie encryption
+    # REQUIRED: with no secret every login answers 500 and the server logs
+    # "securecookie: hash key is not set"
     # IMPORTANT: Use a strong random string (at least 32 characters)
     # Generate with: openssl rand -base64 32
     # WARNING: In production, use environment variables or secrets management
     # Example: MONITORING_AUTH_SESSION_SECRET=your-32-chars-key
+    # Keep the key in this file when the value comes from that variable: no
+    # default is registered for it, so AutomaticEnv binds it only for a key
+    # config.yaml already carries
     secret: "change-this-to-a-random-secret-key-at-least-32-chars"
 
     # Session cookie name

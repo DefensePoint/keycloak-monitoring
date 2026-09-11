@@ -462,7 +462,7 @@ Add to relevant documentation files:
 
 ```bash
 # Fork on GitHub/GitLab
-git clone git@repos.defensepoint.com:ai/soc/kmt.git
+git clone git@repos.defensepoint.com:iam/oss-pmt/kmt.git
 cd kmt
 git remote add upstream <original-repo-url>
 ```

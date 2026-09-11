@@ -123,7 +123,7 @@ The Keycloak Monitoring Tool can be deployed in various environments. This guide
 
 ```bash
 # Clone repository
-git clone git@repos.defensepoint.com:ai/soc/kmt.git
+git clone git@repos.defensepoint.com:iam/oss-pmt/kmt.git
 cd kmt
 
 # Create configuration

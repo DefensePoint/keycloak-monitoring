@@ -255,13 +255,24 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 			_ = resp.Body.Close()
 		}
 
-		// Wait before retry
+		// Wait before retry, but abandon the wait if the caller has gone away.
+		// A plain time.Sleep here is invisible to context cancellation, so a
+		// shutdown had to sit out the full backoff (5s by default, growing per
+		// attempt) even though the request it was retrying had already been
+		// abandoned. That was enough to park a monitor's events poller past
+		// the 10s drain in Monitor.Stop.
 		if attempt < maxRetries-1 {
 			backoff := c.config.RetryBackoff
 			if backoff <= 0 {
 				backoff = 5 * time.Second
 			}
-			time.Sleep(backoff * time.Duration(attempt+1))
+			timer := time.NewTimer(backoff * time.Duration(attempt+1))
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			}
 		}
 	}
 
