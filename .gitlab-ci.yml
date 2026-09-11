@@ -232,6 +232,38 @@ test:backend:
     - go tool cover -html=coverage.out -o coverage.html
   coverage: '/total:.*\s+(\d+\.\d+)%/'
 
+test:integration:
+  extends:
+    - .go_template
+    - .go_cache_pull
+  stage: test
+  needs:
+    - deps:download
+    - quality:fmt
+    - quality:vet
+    - quality:tidy
+    - quality:lint
+    - quality:security
+  services:
+    - name: postgres:17-alpine
+      alias: postgres
+  variables:
+    POSTGRES_DB: kmt_test
+    POSTGRES_USER: kmt
+    POSTGRES_PASSWORD: kmt
+    POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    KMT_TEST_DATABASE_DSN: "host=postgres port=5432 dbname=kmt_test user=kmt password=kmt sslmode=disable"
+  script:
+    - echo "Running the database-backed suites, including the MCP security posture suite..."
+    # The env-gated suites share one database and migrate it, so they must not
+    # run in parallel with each other: -p 1 keeps packages sequential.
+    #
+    # -short stays on: these suites key off KMT_TEST_DATABASE_DSN alone, while
+    # the destructive suites that reset the schema key off -short plus
+    # KMT_DESTRUCTIVE_TEST_DATABASE_DSN, which this pipeline does not provide.
+    - go test -short -v -p 1 -count=1 ./...
+    - echo "All integration tests passed"
+
 test:build:
   extends:
     - .go_template
