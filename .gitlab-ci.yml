@@ -6,12 +6,12 @@
 # This pipeline deliberately stops at "the code is good". It does not build or
 # publish release images and it does not deploy anywhere: those steps belong to
 # whoever operates an instance. Build your own images from build/Dockerfile,
-# which takes a SERVICE build arg of either `server` or `web`.
+# which takes a SERVICE build arg of `server`, `web` or `mcp-server`.
 
 include:
   # DefensePoint reusable security components. Secrets and SAST are warn-only
   # (findings surface but do not block). The dependency scan blocks on
-  # Critical CVEs only, per Mihir's 2026-08-26 escalation rule.
+  # Critical CVEs only.
   - component: $CI_SERVER_FQDN/cloud/ci-components/security/secrets@~latest
     inputs:
       stage: security
@@ -250,6 +250,8 @@ test:build:
     - go build -trimpath -buildvcs=false -mod=readonly -o bin/server ./cmd/server
     - echo "Building web server..."
     - go build -trimpath -buildvcs=false -mod=readonly -o bin/web ./cmd/web
+    - echo "Building MCP server..."
+    - go build -trimpath -buildvcs=false -mod=readonly -o bin/mcp-server ./cmd/mcp-server
     - echo "All binaries built successfully"
     - ls -lh bin/
 
@@ -298,7 +300,7 @@ security:container-scan:
     - trivy --version
   script:
     - |
-      for svc in server web; do
+      for svc in server web mcp-server; do
         echo "Building kmt-${svc}:scan..."
         docker build --build-arg SERVICE=${svc} -t kmt-${svc}:scan -f build/Dockerfile .
         echo "Scanning kmt-${svc}:scan with Trivy (informational: CRITICAL + HIGH)..."
@@ -326,6 +328,7 @@ security:container-scan:
     paths:
       - trivy-image-server.json
       - trivy-image-web.json
+      - trivy-image-mcp-server.json
     expire_in: 30 days
   cache:
     key: ${CI_COMMIT_REF_SLUG}-trivy-db

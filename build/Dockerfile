@@ -1,5 +1,5 @@
 # -------- Global ARGs (must be before any FROM) --------
-# Service selection: server or web
+# Service selection: server, web or mcp-server
 ARG SERVICE=server
 
 # -------- Frontend Builder: Node.js for web assets --------
@@ -152,6 +152,24 @@ USER nonroot:nonroot
 WORKDIR /app
 
 EXPOSE 7880
+
+ENTRYPOINT ["/app/kmt"]
+CMD ["-config", "/app/config.yaml"]
+
+# MCP server runtime with distroless
+FROM gcr.io/distroless/static-debian12:nonroot AS runtime-mcp-server
+
+WORKDIR /app
+
+# Copy the MCP server binary
+COPY --chown=nonroot:nonroot --chmod=0555 --from=backend-builder /build/kmt-mcp-server /app/kmt
+
+ENV GODEBUG=madvdontneed=1
+
+STOPSIGNAL SIGTERM
+USER nonroot:nonroot
+
+EXPOSE 7889
 
 ENTRYPOINT ["/app/kmt"]
 CMD ["-config", "/app/config.yaml"]
