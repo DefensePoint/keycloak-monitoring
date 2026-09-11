@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -101,7 +102,13 @@ func (m *mockAlertsService) SaveAlert(ctx context.Context, alert *domain.Alert) 
 
 // Mock RBAC checker - always allows access
 type mockRBACChecker struct {
-	hasPermissionFn func(ctx context.Context, userID uint, permission string, tenantID *string) (bool, error)
+	hasPermissionFn    func(ctx context.Context, userID uint, permission string, tenantID *string) (bool, error)
+	hasAccessToRealmFn func(ctx context.Context, userID uint, tenantID, realmName string) (bool, error)
+
+	isAdmin      bool
+	isAdminCalls int
+	policies     []*domain.TenantPolicy
+	policiesErr  error
 }
 
 func (m *mockRBACChecker) HasPermission(ctx context.Context, userID uint, permission string, tenantID *string) (bool, error) {
@@ -116,7 +123,8 @@ func (m *mockRBACChecker) GetUserPermissions(ctx context.Context, userID uint, t
 }
 
 func (m *mockRBACChecker) IsAdmin(ctx context.Context, userID uint) (bool, error) {
-	return false, nil
+	m.isAdminCalls++
+	return m.isAdmin, nil
 }
 
 func (m *mockRBACChecker) GetUserRoles(ctx context.Context, userID uint) ([]*UserRoleInfo, error) {
@@ -128,7 +136,14 @@ func (m *mockRBACChecker) HasAccessToTenant(ctx context.Context, userID uint, te
 }
 
 func (m *mockRBACChecker) HasAccessToRealm(ctx context.Context, userID uint, tenantID, realmName string) (bool, error) {
+	if m.hasAccessToRealmFn != nil {
+		return m.hasAccessToRealmFn(ctx, userID, tenantID, realmName)
+	}
 	return true, nil
+}
+
+func (m *mockRBACChecker) GetUserPolicies(ctx context.Context, userID uint) ([]*domain.TenantPolicy, error) {
+	return m.policies, m.policiesErr
 }
 
 // Mock operator service
@@ -175,6 +190,21 @@ func newTestAlertsHandler(svc *mockAlertsService) *AlertsHandlers {
 		newTestLogger(),
 		testAuthMiddleware,
 		rbacMw,
+	)
+}
+
+func newTestAlertsHandlerWithRBAC(svc *mockAlertsService, rbacSvc RBACChecker) *AlertsHandlers {
+	if svc == nil {
+		svc = &mockAlertsService{}
+	}
+	return NewAlertsHandlers(
+		svc,
+		rbacSvc,
+		&mockOperatorService{},
+		&mockNotificationService{},
+		newTestLogger(),
+		testAuthMiddleware,
+		NewRBACMiddleware(rbacSvc, newTestLogger()),
 	)
 }
 
@@ -276,6 +306,102 @@ func TestHandleListAlerts(t *testing.T) {
 						t.Errorf("handleListAlerts() count = %d, want %d", len(alerts), tt.wantCount)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestHandleListAlerts_RealmPolicy(t *testing.T) {
+	tests := []struct {
+		name       string
+		rbac       *mockRBACChecker
+		query      string
+		wantStatus int
+		wantRealm  string
+		wantRealms []string
+		wantCalled bool
+	}{
+		{
+			name:       "caller with no policy row queries every realm",
+			rbac:       &mockRBACChecker{},
+			wantStatus: http.StatusOK,
+			wantCalled: true,
+		},
+		{
+			name:       "admin queries every realm despite a restricting policy",
+			rbac:       &mockRBACChecker{isAdmin: true, policies: policyFor("tenant-1", "realmB")},
+			wantStatus: http.StatusOK,
+			wantCalled: true,
+		},
+		{
+			name:       "policy restricted to one realm narrows an unfiltered query",
+			rbac:       &mockRBACChecker{policies: policyFor("tenant-1", "realmB")},
+			wantStatus: http.StatusOK,
+			wantRealms: []string{"realmB"},
+			wantCalled: true,
+		},
+		{
+			name:       "policy restricted to several realms narrows to all of them",
+			rbac:       &mockRBACChecker{policies: policyFor("tenant-1", "realmB", "realmC")},
+			wantStatus: http.StatusOK,
+			wantRealms: []string{"realmB", "realmC"},
+			wantCalled: true,
+		},
+		{
+			name:       "realm outside the policy is refused",
+			rbac:       &mockRBACChecker{policies: policyFor("tenant-1", "realmB")},
+			query:      "?realm=realmA",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "realm inside the policy still filters on it",
+			rbac:       &mockRBACChecker{policies: policyFor("tenant-1", "realmB")},
+			query:      "?realm=realmB",
+			wantStatus: http.StatusOK,
+			wantRealm:  "realmB",
+			wantCalled: true,
+		},
+		{
+			name:       "policy with an empty realm list returns nothing",
+			rbac:       &mockRBACChecker{policies: policyFor("tenant-1")},
+			wantStatus: http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotOpts *alerts.ListOptions
+			calls := 0
+			svc := &mockAlertsService{
+				listAlertsFn: func(_ context.Context, tenantID string, opts *alerts.ListOptions) ([]*domain.Alert, int64, error) {
+					calls++
+					gotOpts = opts
+					return []*domain.Alert{{AlertID: "alert-1", TenantID: tenantID}}, 1, nil
+				},
+			}
+			router := setupTestRouter(newTestAlertsHandlerWithRBAC(svc, tt.rbac))
+
+			req := httptest.NewRequest(http.MethodGet, "/api/tenants/tenant-1/alerts"+tt.query, nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if !tt.wantCalled {
+				if calls != 0 {
+					t.Fatalf("alerts service queried %d times for a refused caller, want 0 (opts = %+v)", calls, gotOpts)
+				}
+				return
+			}
+			if gotOpts == nil {
+				t.Fatalf("alerts service was never queried, want realms %v", tt.wantRealms)
+			}
+			if gotOpts.RealmName != tt.wantRealm {
+				t.Errorf("RealmName = %q, want %q", gotOpts.RealmName, tt.wantRealm)
+			}
+			if !reflect.DeepEqual(gotOpts.RealmNames, tt.wantRealms) {
+				t.Errorf("RealmNames = %v, want %v", gotOpts.RealmNames, tt.wantRealms)
 			}
 		})
 	}
@@ -413,6 +539,107 @@ func TestHandleAlertStats(t *testing.T) {
 
 			if rec.Code != tt.wantStatusCode {
 				t.Errorf("handleAlertStats() status = %d, want %d", rec.Code, tt.wantStatusCode)
+			}
+		})
+	}
+}
+
+func TestHandleAlertStats_RealmPolicy(t *testing.T) {
+	tests := []struct {
+		name       string
+		rbac       *mockRBACChecker
+		query      string
+		wantStatus int
+		wantRealms []string
+		wantCalled bool
+	}{
+		{
+			name:       "caller with no policy row counts every realm",
+			rbac:       &mockRBACChecker{},
+			wantStatus: http.StatusOK,
+			wantCalled: true,
+		},
+		{
+			name:       "admin counts every realm despite a restricting policy",
+			rbac:       &mockRBACChecker{isAdmin: true, policies: policyFor("tenant-1", "realmB")},
+			wantStatus: http.StatusOK,
+			wantCalled: true,
+		},
+		{
+			name:       "policy restricted to one realm narrows an unfiltered count",
+			rbac:       &mockRBACChecker{policies: policyFor("tenant-1", "realmB")},
+			wantStatus: http.StatusOK,
+			wantRealms: []string{"realmB"},
+			wantCalled: true,
+		},
+		{
+			name:       "policy restricted to several realms counts all of them",
+			rbac:       &mockRBACChecker{policies: policyFor("tenant-1", "realmB", "realmC")},
+			wantStatus: http.StatusOK,
+			wantRealms: []string{"realmB", "realmC"},
+			wantCalled: true,
+		},
+		{
+			name:       "realm outside the policy is refused",
+			rbac:       &mockRBACChecker{policies: policyFor("tenant-1", "realmB")},
+			query:      "?realm_name=realmA",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "realm inside the policy still counts only it",
+			rbac:       &mockRBACChecker{policies: policyFor("tenant-1", "realmB")},
+			query:      "?realm_name=realmB",
+			wantStatus: http.StatusOK,
+			wantRealms: []string{"realmB"},
+			wantCalled: true,
+		},
+		{
+			name:       "policy with an empty realm list counts nothing",
+			rbac:       &mockRBACChecker{policies: policyFor("tenant-1")},
+			wantStatus: http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotRealms []string
+			calls := 0
+			svc := &mockAlertsService{
+				getStatisticsFn: func(_ context.Context, _ string, realmName ...string) (*alerts.Statistics, error) {
+					calls++
+					gotRealms = realmName
+					return &alerts.Statistics{TotalActive: 3}, nil
+				},
+			}
+			router := setupTestRouter(newTestAlertsHandlerWithRBAC(svc, tt.rbac))
+
+			req := httptest.NewRequest(http.MethodGet, "/api/tenants/tenant-1/alerts/stats"+tt.query, nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if !tt.wantCalled {
+				if calls != 0 {
+					t.Fatalf("statistics queried %d times for a refused caller, want 0 (realms = %v)", calls, gotRealms)
+				}
+				if tt.wantStatus == http.StatusOK {
+					var stats alerts.Statistics
+					if err := json.Unmarshal(rec.Body.Bytes(), &stats); err != nil {
+						t.Fatalf("decode: %v; body = %s", err, rec.Body.String())
+					}
+					if stats.TotalActive != 0 {
+						t.Errorf("total_active = %d, want 0", stats.TotalActive)
+					}
+				}
+				return
+			}
+			if calls == 0 {
+				t.Fatalf("statistics were never queried, want realms %v", tt.wantRealms)
+			}
+			if !reflect.DeepEqual(gotRealms, tt.wantRealms) {
+				t.Errorf("realms = %v, want %v", gotRealms, tt.wantRealms)
 			}
 		})
 	}
@@ -660,7 +887,13 @@ func TestHandleDeleteAlert(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := &mockAlertsService{deleteAlertFn: tt.mockFn}
+			// Delete resolves the alert first so its realm can be checked.
+			svc := &mockAlertsService{
+				deleteAlertFn: tt.mockFn,
+				getAlertFn: func(_ context.Context, tenantID, alertID string) (*domain.Alert, error) {
+					return &domain.Alert{AlertID: alertID, TenantID: tenantID, RealmName: "master"}, nil
+				},
+			}
 			h := newTestAlertsHandler(svc)
 			router := setupTestRouter(h)
 
@@ -732,6 +965,97 @@ func TestHandleListAlertsByRealm(t *testing.T) {
 	}
 }
 
+func TestHandleListAlertsByRealm_RealmPolicy(t *testing.T) {
+	tests := []struct {
+		name       string
+		rbac       *mockRBACChecker
+		wantStatus int
+	}{
+		{
+			name:       "caller with no policy row may read the realm",
+			rbac:       &mockRBACChecker{},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "admin may read the realm despite a restricting policy",
+			rbac:       &mockRBACChecker{isAdmin: true, policies: policyFor("tenant-1", "realmB")},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "caller restricted to the realm may read it",
+			rbac:       &mockRBACChecker{policies: policyFor("tenant-1", "realmA")},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "realm outside the policy is refused",
+			rbac:       &mockRBACChecker{policies: policyFor("tenant-1", "realmB")},
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "policy with an empty realm list is refused",
+			rbac:       &mockRBACChecker{policies: policyFor("tenant-1")},
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "a failed policy lookup is refused rather than waved through",
+			rbac:       &mockRBACChecker{policiesErr: errors.New("policy lookup failed")},
+			wantStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			svc := &mockAlertsService{
+				listByRealmFn: func(_ context.Context, _, realmName string, _ *alerts.ListOptions) ([]*domain.Alert, error) {
+					calls++
+					return []*domain.Alert{{AlertID: "alert-1", RealmName: realmName}}, nil
+				},
+			}
+			router := setupTestRouter(newTestAlertsHandlerWithRBAC(svc, tt.rbac))
+
+			req := httptest.NewRequest(http.MethodGet, "/api/tenants/tenant-1/alerts/by-realm?realm=realmA", nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if tt.wantStatus != http.StatusOK && calls != 0 {
+				t.Errorf("alerts service queried %d times for a refused caller, want 0", calls)
+			}
+		})
+	}
+}
+
+func TestHandleListAlertsByRealm_RequiresAuthenticatedCaller(t *testing.T) {
+	// The route's own auth middleware always seeds a caller, so the handler is
+	// driven directly with a context that carries none.
+	calls := 0
+	svc := &mockAlertsService{
+		listByRealmFn: func(_ context.Context, _, _ string, _ *alerts.ListOptions) ([]*domain.Alert, error) {
+			calls++
+			return nil, nil
+		},
+	}
+	h := newTestAlertsHandlerWithRBAC(svc, &mockRBACChecker{})
+
+	req := httptest.NewRequest(http.MethodGet, "/alerts/by-realm?realm=realmA", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("tenantID", "tenant-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	rec := httptest.NewRecorder()
+	h.handleListAlertsByRealm(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+	}
+	if calls != 0 {
+		t.Errorf("alerts service queried %d times without an authenticated caller, want 0", calls)
+	}
+}
+
 func TestRBACPermissionDenied(t *testing.T) {
 	// Test that RBAC permission denial returns 403
 	svc := &mockAlertsService{
@@ -764,5 +1088,174 @@ func TestRBACPermissionDenied(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("Expected 403 Forbidden when RBAC denies permission, got %d", rec.Code)
+	}
+}
+
+// alertMutationRecorder counts the service calls that change an alert.
+type alertMutationRecorder struct {
+	updates  int
+	resolves int
+	deletes  int
+}
+
+func (m *alertMutationRecorder) total() int { return m.updates + m.resolves + m.deletes }
+
+// byIDAlertsService answers GetAlert with alert when the requested ID matches
+// it and with nothing otherwise.
+func byIDAlertsService(alert *domain.Alert, rec *alertMutationRecorder) *mockAlertsService {
+	return &mockAlertsService{
+		getAlertFn: func(_ context.Context, _, alertID string) (*domain.Alert, error) {
+			if alert == nil || alertID != alert.AlertID {
+				return nil, nil
+			}
+			return alert, nil
+		},
+		updateStatusFn: func(context.Context, string, string, domain.AlertStatus, string) (*domain.Alert, error) {
+			rec.updates++
+			return alert, nil
+		},
+		resolveAlertFn: func(context.Context, string, string) (*domain.Alert, error) {
+			rec.resolves++
+			return alert, nil
+		},
+		deleteAlertFn: func(context.Context, string, string) error {
+			rec.deletes++
+			return nil
+		},
+	}
+}
+
+func doByIDAlertRequest(svc *mockAlertsService, rbacSvc RBACChecker, route byIDRoute, alertID string) *httptest.ResponseRecorder {
+	router := setupTestRouter(newTestAlertsHandlerWithRBAC(svc, rbacSvc))
+	req := httptest.NewRequest(route.method, "/api/tenants/tenant-a"+route.path(alertID),
+		bytes.NewBufferString(`{"status":"acknowledged"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+// Drives all seven by-ID routes through the real router against stubs, so the
+// realm gate has coverage that runs under -short.
+func TestAlertsHandlers_ByIDRoutesRefuseAnAlertOutsideTheCallersRealms(t *testing.T) {
+	const (
+		deniedID  = "alert-in-realmA"
+		missingID = "alert-that-does-not-exist"
+	)
+	crossRealmAlert := &domain.Alert{
+		ID:        7,
+		AlertID:   deniedID,
+		TenantID:  "tenant-a",
+		RealmName: "realmA",
+		Title:     "another realm's alert",
+	}
+
+	for _, route := range byIDRoutes() {
+		t.Run(route.name, func(t *testing.T) {
+			restricted := &mockRBACChecker{policies: policyFor("tenant-a", "realmB")}
+
+			deniedRec := &alertMutationRecorder{}
+			denied := doByIDAlertRequest(byIDAlertsService(crossRealmAlert, deniedRec), restricted, route, deniedID)
+			if denied.Code != http.StatusNotFound {
+				t.Errorf("status = %d, want %d; body = %s", denied.Code, http.StatusNotFound, denied.Body.String())
+			}
+			if deniedRec.total() != 0 {
+				t.Errorf("alert in realmA was mutated by a caller restricted to realmB: %+v", *deniedRec)
+			}
+
+			missingRec := &alertMutationRecorder{}
+			missing := doByIDAlertRequest(byIDAlertsService(nil, missingRec), restricted, route, missingID)
+			if missing.Code != denied.Code || missing.Body.String() != denied.Body.String() {
+				t.Errorf("an alert in another realm answers %d %s but a missing one answers %d %s; the difference is an oracle for which alert IDs exist",
+					denied.Code, denied.Body.String(), missing.Code, missing.Body.String())
+			}
+
+			controlRec := &alertMutationRecorder{}
+			allowed := doByIDAlertRequest(byIDAlertsService(crossRealmAlert, controlRec), &mockRBACChecker{}, route, deniedID)
+			if allowed.Code != http.StatusOK {
+				t.Fatalf("unrestricted caller: status = %d, want %d; body = %s", allowed.Code, http.StatusOK, allowed.Body.String())
+			}
+			if route.mutates && controlRec.total() == 0 {
+				t.Error("unrestricted caller's mutation never reached the service; the 404 above proves nothing")
+			}
+		})
+	}
+}
+
+func TestAlertsHandlers_ByIDRead_ResolvesAdminOnce(t *testing.T) {
+	tests := []struct {
+		name         string
+		rbac         *mockRBACChecker
+		wantMetadata string
+	}{
+		{
+			name:         "an administrator keeps the internal fields",
+			rbac:         &mockRBACChecker{isAdmin: true},
+			wantMetadata: `{"rule":"internal"}`,
+		},
+		{
+			name: "anyone else does not",
+			rbac: &mockRBACChecker{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			alert := &domain.Alert{
+				ID:        3,
+				AlertID:   "alert-1",
+				TenantID:  "tenant-a",
+				RealmName: "realmB",
+				Metadata:  `{"rule":"internal"}`,
+				CheckType: "keycloak-config",
+			}
+			svc := byIDAlertsService(alert, &alertMutationRecorder{})
+			router := setupTestRouter(newTestAlertsHandlerWithRBAC(svc, tt.rbac))
+
+			req := httptest.NewRequest(http.MethodGet, "/api/tenants/tenant-a/alerts/alert-1", nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+			}
+
+			var got domain.Alert
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode: %v; body = %s", err, rec.Body.String())
+			}
+			if got.Metadata != tt.wantMetadata {
+				t.Errorf("metadata = %q, want %q", got.Metadata, tt.wantMetadata)
+			}
+			if tt.rbac.isAdminCalls != 1 {
+				t.Errorf("IsAdmin called %d times, want 1", tt.rbac.isAdminCalls)
+			}
+		})
+	}
+}
+
+func TestSanitizeAlertStripsInternalFieldsForNonAdmin(t *testing.T) {
+	ruleID := "rule-42"
+	eventID := "event-99"
+	alert := &domain.Alert{
+		AlertID:        "alert-1",
+		Title:          "Brute force detected",
+		Description:    "Repeated login failures",
+		Recommendation: "Lock the account",
+		RealmName:      "prod",
+		Metadata:       `{"internal":"detail"}`,
+		CheckType:      "internal-check",
+		RuleID:         &ruleID,
+		EventID:        &eventID,
+	}
+	h := &AlertsHandlers{log: newTestLogger()}
+
+	got := h.sanitizeAlert(alert, false)
+	if got.Metadata != "" || got.CheckType != "" || got.RuleID != nil || got.EventID != nil {
+		t.Fatalf("sanitized alert retains internal fields: %+v", got)
+	}
+
+	if h.sanitizeAlert(alert, true) != alert {
+		t.Fatal("admin path must return the alert unchanged")
 	}
 }

@@ -2,8 +2,13 @@
 package alerts
 
 import (
+	"errors"
+
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
 )
+
+// ErrNotFound is returned when the requested alert does not exist.
+var ErrNotFound = errors.New("alert not found")
 
 // Statistics provides aggregated statistics about alerts.
 type Statistics struct {
@@ -14,12 +19,15 @@ type Statistics struct {
 
 // ListOptions defines filtering and pagination options for alert queries.
 type ListOptions struct {
-	Limit        int
-	Offset       int
-	Severity     domain.AlertSeverity
-	Status       domain.AlertStatus
-	Type         domain.AlertType
-	RealmName    string
+	Limit     int
+	Offset    int
+	Severity  domain.AlertSeverity
+	Status    domain.AlertStatus
+	Type      domain.AlertType
+	RealmName string
+	// RealmNames restricts the query to a set of realms. An empty set applies no
+	// filter at all, which reads as every realm.
+	RealmNames   []string
 	ResourceType string
 }
 

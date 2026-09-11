@@ -95,6 +95,10 @@ type TenantPolicyRepository interface {
 	// GetUserPolicies retrieves all policies for a user.
 	GetUserPolicies(ctx context.Context, userID uint) ([]*domain.TenantPolicy, error)
 
+	// GetPolicyByID retrieves a single policy by its own ID, returning nil when
+	// there is none.
+	GetPolicyByID(ctx context.Context, policyID uint) (*domain.TenantPolicy, error)
+
 	// GetUserPolicyForTenant retrieves a user's policy for a specific tenant.
 	GetUserPolicyForTenant(ctx context.Context, userID uint, tenantID string) (*domain.TenantPolicy, error)
 

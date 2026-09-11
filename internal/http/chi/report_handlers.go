@@ -22,6 +22,7 @@ type ReportTenantService interface {
 type ReportHandlers struct {
 	service        reports.Service
 	tenantService  ReportTenantService
+	rbacService    RBACChecker
 	log            *logger.Logger
 	authMiddleware func(http.Handler) http.Handler
 	rbacMiddleware *RBACMiddleware
@@ -31,6 +32,7 @@ type ReportHandlers struct {
 func NewReportHandlers(
 	service reports.Service,
 	tenantService ReportTenantService,
+	rbacService RBACChecker,
 	log *logger.Logger,
 	authMiddleware func(http.Handler) http.Handler,
 	rbacMiddleware *RBACMiddleware,
@@ -38,6 +40,7 @@ func NewReportHandlers(
 	return &ReportHandlers{
 		service:        service,
 		tenantService:  tenantService,
+		rbacService:    rbacService,
 		log:            log,
 		authMiddleware: authMiddleware,
 		rbacMiddleware: rbacMiddleware,
@@ -133,12 +136,30 @@ func (h *ReportHandlers) handleGenerateReport(w http.ResponseWriter, r *http.Req
 		logger.Str("start_date", startDateStr),
 		logger.Str("end_date", endDateStr))
 
+	user := GetUserFromContext(ctx)
+	if user == nil {
+		h.log.Warn("No user info in context for report scoping")
+		httputil.RespondUnauthorized(w, h.log, "Authentication required")
+		return
+	}
+
+	scope, all, err := allowedRealms(ctx, h.rbacService, user.ID, tenantID)
+	if err != nil {
+		h.log.Error("Failed to check realm access",
+			logger.Err(err),
+			logger.Uint("user_id", user.ID),
+			logger.Str("tenant_id", tenantID))
+		httputil.RespondInternalError(w, h.log, "Failed to check realm access")
+		return
+	}
+
 	// Create report request
 	req := &reports.GenerateRequest{
 		TenantID:   tenantID,
 		TenantName: tenantName,
 		StartDate:  startDate,
 		EndDate:    endDate,
+		Scope:      reports.RealmScope{Realms: scope, All: all},
 	}
 
 	// Aggregate data

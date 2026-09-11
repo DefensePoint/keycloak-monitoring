@@ -35,7 +35,8 @@ type Reader interface {
 	// Count returns the number of alerts matching the given filter options.
 	Count(ctx context.Context, tenantID string, opts *ListOptions) (int64, error)
 
-	// GetStatistics returns aggregated alert statistics.
+	// GetStatistics returns aggregated alert statistics, optionally scoped to a
+	// set of realms.
 	GetStatistics(ctx context.Context, tenantID string, realmName ...string) (*Statistics, error)
 }
 

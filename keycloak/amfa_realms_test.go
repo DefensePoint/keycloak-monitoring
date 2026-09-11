@@ -18,9 +18,10 @@ func TestFlowUsesAdaptiveAuth(t *testing.T) {
 		in   []keycloakadmin.AuthenticationExecutionInfoRepresentation
 		want bool
 	}{
-		{"adaptive required", []keycloakadmin.AuthenticationExecutionInfoRepresentation{{ProviderID: providerIDAdaptiveAuth, Requirement: "REQUIRED"}}, true},
-		{"conditional alternative", []keycloakadmin.AuthenticationExecutionInfoRepresentation{{ProviderID: providerIDConditionalAdaptiveAuth, Requirement: "ALTERNATIVE"}}, true},
-		{"adaptive disabled", []keycloakadmin.AuthenticationExecutionInfoRepresentation{{ProviderID: providerIDAdaptiveAuth, Requirement: "DISABLED"}}, false},
+		{"adaptive required", []keycloakadmin.AuthenticationExecutionInfoRepresentation{{ProviderID: "adaptive-auth", Requirement: "REQUIRED"}}, true},
+		{"conditional alternative", []keycloakadmin.AuthenticationExecutionInfoRepresentation{{ProviderID: "conditional-adaptive-auth", Requirement: "ALTERNATIVE"}}, true},
+		{"adaptive disabled", []keycloakadmin.AuthenticationExecutionInfoRepresentation{{ProviderID: "adaptive-auth", Requirement: "DISABLED"}}, false},
+		{"unrelated authenticator", []keycloakadmin.AuthenticationExecutionInfoRepresentation{{ProviderID: "auth-otp-form", Requirement: "REQUIRED"}}, false},
 		{"non-adaptive only", []keycloakadmin.AuthenticationExecutionInfoRepresentation{{ProviderID: "auth-username-password-form", Requirement: "REQUIRED"}}, false},
 		{"empty", nil, false},
 	}
@@ -56,7 +57,7 @@ func TestListAmfaEnabledRealms(t *testing.T) {
 	mock.GetFlowExecutionsFunc = func(_ context.Context, realmName, flowAlias string) ([]keycloakadmin.AuthenticationExecutionInfoRepresentation, error) {
 		if realmName == "AdaptiveAuth" && flowAlias == "hybrid-flow" {
 			return []keycloakadmin.AuthenticationExecutionInfoRepresentation{
-				{ProviderID: providerIDAdaptiveAuth, Requirement: "REQUIRED"},
+				{ProviderID: "adaptive-auth", Requirement: "REQUIRED"},
 			}, nil
 		}
 		return []keycloakadmin.AuthenticationExecutionInfoRepresentation{

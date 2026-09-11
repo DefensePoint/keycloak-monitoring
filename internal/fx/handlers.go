@@ -103,6 +103,7 @@ type OperatorHandlersParams struct {
 	fx.In
 
 	Service        operator.Service
+	RBACService    rbac.Service
 	Logger         *logger.Logger
 	AuthMiddleware *chihttp.AuthMiddleware
 	RBACMiddleware *chihttp.RBACMiddleware
@@ -111,6 +112,7 @@ type OperatorHandlersParams struct {
 func provideOperatorHandlers(p OperatorHandlersParams) *chihttp.OperatorHandlers {
 	return chihttp.NewOperatorHandlers(
 		p.Service,
+		&rbacCheckerAdapter{p.RBACService},
 		p.Logger,
 		p.AuthMiddleware.Authenticate,
 		p.RBACMiddleware,
@@ -201,6 +203,7 @@ type ReportHandlersParams struct {
 
 	Service        reports.Service
 	TenantService  tenant.Service
+	RBACService    rbac.Service
 	Logger         *logger.Logger
 	AuthMiddleware *chihttp.AuthMiddleware
 	RBACMiddleware *chihttp.RBACMiddleware
@@ -210,6 +213,7 @@ func provideReportHandlers(p ReportHandlersParams) *chihttp.ReportHandlers {
 	return chihttp.NewReportHandlers(
 		p.Service,
 		&reportTenantAdapter{p.TenantService},
+		&rbacCheckerAdapter{p.RBACService},
 		p.Logger,
 		p.AuthMiddleware.Authenticate,
 		p.RBACMiddleware,
@@ -388,6 +392,10 @@ func (a *rbacCheckerAdapter) HasAccessToTenant(ctx context.Context, userID uint,
 
 func (a *rbacCheckerAdapter) HasAccessToRealm(ctx context.Context, userID uint, tenantID, realmName string) (bool, error) {
 	return a.service.HasAccessToRealm(ctx, userID, tenantID, realmName)
+}
+
+func (a *rbacCheckerAdapter) GetUserPolicies(ctx context.Context, userID uint) ([]*domain.TenantPolicy, error) {
+	return a.service.GetUserPolicies(ctx, userID)
 }
 
 // reportTenantAdapter adapts tenant.Service to chihttp.ReportTenantService.

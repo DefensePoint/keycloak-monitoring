@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -306,17 +307,37 @@ func (h *KeycloakHandlers) handleKeycloakMetrics(w http.ResponseWriter, r *http.
 		return
 	}
 
+	scope, all, ok := h.callerRealmScope(ctx, w, tenantID)
+	if !ok {
+		return
+	}
+
 	allMetrics, err := h.service.GetAllRealmMetrics(ctx, tenantID)
 	if err != nil {
 		h.log.Error("Failed to get all realm metrics", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Failed to retrieve metrics")
 		return
 	}
+	if !all {
+		allMetrics = narrowRealmMetrics(allMetrics, scope)
+	}
 
 	httputil.RespondSuccess(w, h.log, map[string]interface{}{
 		"metrics": allMetrics,
 		"count":   len(allMetrics),
 	})
+}
+
+// narrowRealmMetrics keeps only the realms the caller's scope names. The result
+// is driven from scope, so an empty scope yields no realm, never every realm.
+func narrowRealmMetrics(metrics map[string]*domain.KeycloakMetrics, scope []string) map[string]*domain.KeycloakMetrics {
+	narrowed := make(map[string]*domain.KeycloakMetrics, len(scope))
+	for _, realm := range scope {
+		if m, ok := metrics[realm]; ok {
+			narrowed[realm] = m
+		}
+	}
+	return narrowed
 }
 
 // handleKeycloakMetricsHistory returns metrics history for a realm.
@@ -418,7 +439,7 @@ func (h *KeycloakHandlers) handleKeycloakEvents(w http.ResponseWriter, r *http.R
 	var err error
 
 	if eventType != "" {
-		events, err = h.service.ListEventsByType(ctx, tenantID, eventType, from, to, limit, 0)
+		events, err = h.service.ListEventsByType(ctx, tenantID, realmName, eventType, from, to, limit, 0)
 	} else {
 		events, err = h.service.ListEventsByRealm(ctx, tenantID, realmName, from, to, limit, 0)
 	}
@@ -499,11 +520,25 @@ func (h *KeycloakHandlers) handleKeycloakRealms(w http.ResponseWriter, r *http.R
 	ctx := r.Context()
 	tenantID := chi.URLParam(r, "tenantID")
 
+	scope, all, ok := h.callerRealmScope(ctx, w, tenantID)
+	if !ok {
+		return
+	}
+
 	realms, err := h.service.ListRealms(ctx, tenantID)
 	if err != nil {
 		h.log.Error("Failed to list realms", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Failed to retrieve realms")
 		return
+	}
+	if !all {
+		narrowed := make([]*domain.KeycloakRealmInfo, 0, len(scope))
+		for _, realm := range realms {
+			if realm != nil && slices.Contains(scope, realm.RealmName) {
+				narrowed = append(narrowed, realm)
+			}
+		}
+		realms = narrowed
 	}
 
 	httputil.RespondSuccess(w, h.log, map[string]interface{}{
@@ -531,6 +566,11 @@ func (h *KeycloakHandlers) handleKeycloakAmfaRealms(w http.ResponseWriter, r *ht
 	ctx := r.Context()
 	tenantID := chi.URLParam(r, "tenantID")
 
+	scope, all, ok := h.callerRealmScope(ctx, w, tenantID)
+	if !ok {
+		return
+	}
+
 	realms, err := h.service.ListAmfaEnabledRealms(ctx, tenantID)
 	if err != nil {
 		// Without a live Keycloak client we cannot determine AMFA config; return
@@ -547,6 +587,15 @@ func (h *KeycloakHandlers) handleKeycloakAmfaRealms(w http.ResponseWriter, r *ht
 		h.log.Error("Failed to list AMFA-enabled realms", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Failed to determine AMFA-enabled realms")
 		return
+	}
+	if !all {
+		narrowed := make([]string, 0, len(scope))
+		for _, realm := range realms {
+			if slices.Contains(scope, realm) {
+				narrowed = append(narrowed, realm)
+			}
+		}
+		realms = narrowed
 	}
 
 	httputil.RespondSuccess(w, h.log, map[string]interface{}{
@@ -662,6 +711,11 @@ func (h *KeycloakHandlers) handleKeycloakDashboard(w http.ResponseWriter, r *htt
 		return
 	}
 
+	scope, all, ok := h.callerRealmScope(ctx, w, tenantID)
+	if !ok {
+		return
+	}
+
 	dashboard, err := h.service.GetDashboard(ctx, tenantID, realmName)
 	if err != nil {
 		h.log.Error("Failed to get dashboard",
@@ -671,8 +725,28 @@ func (h *KeycloakHandlers) handleKeycloakDashboard(w http.ResponseWriter, r *htt
 		httputil.RespondInternalError(w, h.log, "Failed to retrieve dashboard data")
 		return
 	}
+	if realmName == "" && !all {
+		narrowDashboardRealms(dashboard, scope)
+	}
 
 	httputil.RespondSuccess(w, h.log, dashboard)
+}
+
+// narrowDashboardRealms keeps only the per-realm rows the caller's scope names
+// and restates the realm count over what is left, so the total does not disclose
+// the tenant's true realm count.
+func narrowDashboardRealms(dashboard *keycloak.Dashboard, scope []string) {
+	if dashboard == nil {
+		return
+	}
+	narrowed := make([]*keycloak.RealmSummary, 0, len(scope))
+	for _, summary := range dashboard.Realms {
+		if summary != nil && slices.Contains(scope, summary.RealmName) {
+			narrowed = append(narrowed, summary)
+		}
+	}
+	dashboard.Realms = narrowed
+	dashboard.TotalRealms = len(narrowed)
 }
 
 // handleKeycloakUsers returns users for a specific realm.
@@ -891,15 +965,17 @@ func (h *KeycloakHandlers) handleRealmUserByPath(w http.ResponseWriter, r *http.
 }
 
 // checkRealmAccess verifies that the user has access to the specified realm.
+// An empty realm name names no realm to authorize, so it is denied.
 func (h *KeycloakHandlers) checkRealmAccess(ctx context.Context, w http.ResponseWriter, tenantID, realmName string) bool {
-	if realmName == "" {
-		return true
-	}
-
 	user := GetUserFromContext(ctx)
 	if user == nil {
 		h.log.Warn("No user info in context for realm access check")
 		httputil.RespondUnauthorized(w, h.log, "Authentication required")
+		return false
+	}
+
+	if realmName == "" {
+		httputil.RespondForbidden(w, h.log, "Access to realm denied")
 		return false
 	}
 
@@ -925,6 +1001,30 @@ func (h *KeycloakHandlers) checkRealmAccess(ctx context.Context, w http.Response
 	}
 
 	return true
+}
+
+// callerRealmScope resolves the realms the caller may read within a tenant,
+// responding with the failure itself and returning ok = false. all = true means
+// unrestricted, and scope is then empty rather than every realm.
+func (h *KeycloakHandlers) callerRealmScope(ctx context.Context, w http.ResponseWriter, tenantID string) (scope []string, all, ok bool) {
+	user := GetUserFromContext(ctx)
+	if user == nil {
+		h.log.Warn("No user info in context for realm access check")
+		httputil.RespondUnauthorized(w, h.log, "Authentication required")
+		return nil, false, false
+	}
+
+	scope, all, err := allowedRealms(ctx, h.rbacService, user.ID, tenantID)
+	if err != nil {
+		h.log.Error("Failed to check realm access",
+			logger.Err(err),
+			logger.Uint("user_id", user.ID),
+			logger.Str("tenant_id", tenantID))
+		httputil.RespondInternalError(w, h.log, "Failed to check realm access")
+		return nil, false, false
+	}
+
+	return scope, all, true
 }
 
 // CanHandle returns true if this handler can handle keycloak routes (for TenantSubRouter compatibility).

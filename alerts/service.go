@@ -23,7 +23,8 @@ type Service interface {
 	// ListAlertsByRealm retrieves alerts for a specific realm.
 	ListAlertsByRealm(ctx context.Context, tenantID, realmName string, opts *ListOptions) ([]*domain.Alert, error)
 
-	// GetStatistics returns aggregated alert statistics.
+	// GetStatistics returns aggregated alert statistics, optionally scoped to a
+	// set of realms.
 	GetStatistics(ctx context.Context, tenantID string, realmName ...string) (*Statistics, error)
 
 	// UpdateStatus updates the status of an alert.
@@ -107,7 +108,8 @@ func (s *service) ListAlertsByRealm(ctx context.Context, tenantID, realmName str
 	return s.repo.ListByRealm(ctx, tenantID, realmName, opts)
 }
 
-// GetStatistics returns aggregated alert statistics.
+// GetStatistics returns aggregated alert statistics, optionally scoped to a set
+// of realms.
 func (s *service) GetStatistics(ctx context.Context, tenantID string, realmName ...string) (*Statistics, error) {
 	return s.repo.GetStatistics(ctx, tenantID, realmName...)
 }

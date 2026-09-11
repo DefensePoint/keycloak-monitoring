@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -101,6 +102,10 @@ func (h *AmfaHandlers) handleAmfaEvents(w http.ResponseWriter, r *http.Request) 
 	realm := q.Get("realm_id")
 	if realm == "" {
 		httputil.RespondBadRequest(w, h.log, "realm_id query param is required")
+		return
+	}
+
+	if !h.checkRealmAccess(ctx, w, tenantID, realm) {
 		return
 	}
 
@@ -198,7 +203,10 @@ func (h *AmfaHandlers) handleAmfaStats(w http.ResponseWriter, r *http.Request) {
 	// realm_id is optional here: an empty value means "all realms" and the KPI
 	// query drops the realm filter (unlike /amfa/events and /amfa/geo, which
 	// stay per-realm). This backs the "All Realms" selection on the Events page.
-	realm := q.Get("realm_id")
+	realm, narrowed, ok := h.statsRealm(ctx, w, tenantID, q.Get("realm_id"))
+	if !ok {
+		return
+	}
 
 	start, end, err := parseTimeRange(q.Get("start_time"), q.Get("end_time"))
 	if err != nil {
@@ -212,10 +220,8 @@ func (h *AmfaHandlers) handleAmfaStats(w http.ResponseWriter, r *http.Request) {
 		EndTime:   end,
 	})
 	if errors.Is(err, amfa.ErrAllRealmsUnsupported) {
-		httputil.RespondJSON(w, h.log, http.StatusNotImplemented, map[string]interface{}{
-			"error":   "amfa_all_realms_unsupported",
-			"message": "This tenant's AMFA integration doesn't support aggregating stats across all realms; select a single realm instead",
-		})
+		respondAllRealmsUnsupported(w, h.log,
+			"This tenant's AMFA integration doesn't support aggregating stats across all realms; select a single realm instead")
 		return
 	}
 	if errors.Is(err, amfa.ErrAmfaNotConfigured) {
@@ -239,7 +245,19 @@ func (h *AmfaHandlers) handleAmfaStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httputil.RespondJSON(w, h.log, http.StatusOK, stats)
+	applied := ""
+	if narrowed {
+		applied = realm
+	}
+	httputil.RespondJSON(w, h.log, http.StatusOK, amfaStatsResponse{Stats: stats, AppliedRealmID: applied})
+}
+
+// amfaStatsResponse is the KPI payload. AppliedRealmID names the realm the
+// query was answered for when that is narrower than the request, and is omitted
+// otherwise.
+type amfaStatsResponse struct {
+	amfa.Stats
+	AppliedRealmID string `json:"applied_realm_id,omitempty"`
 }
 
 // handleAmfaGeo handles GET /api/tenants/{tenantID}/amfa/geo.
@@ -261,6 +279,10 @@ func (h *AmfaHandlers) handleAmfaGeo(w http.ResponseWriter, r *http.Request) {
 	realm := q.Get("realm_id")
 	if realm == "" {
 		httputil.RespondBadRequest(w, h.log, "realm_id query param is required")
+		return
+	}
+
+	if !h.checkRealmAccess(ctx, w, tenantID, realm) {
 		return
 	}
 
@@ -342,6 +364,113 @@ func (h *AmfaHandlers) handleAmfaCheckerRun(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	httputil.RespondJSON(w, h.log, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+// checkRealmAccess verifies that the caller may read AMFA data for a realm of
+// this tenant, responding with the denial itself when they may not. An empty
+// realm asks for every realm, which only an unrestricted caller may do.
+func (h *AmfaHandlers) checkRealmAccess(ctx context.Context, w http.ResponseWriter, tenantID, realm string) bool {
+	user, scope, all, ok := h.callerRealmScope(ctx, w, tenantID, realm)
+	if !ok {
+		return false
+	}
+	if all {
+		return true
+	}
+
+	if realm == "" || !slices.Contains(scope, realm) {
+		h.denyRealm(w, user, tenantID, realm)
+		return false
+	}
+
+	return true
+}
+
+// statsRealm resolves the realm the KPI query runs against, responding with the
+// refusal itself and returning ok = false. An omitted realm asks for every realm
+// at once: a caller restricted to exactly one realm is narrowed to it and
+// narrowed reports that, while any other restricted scope is refused.
+func (h *AmfaHandlers) statsRealm(ctx context.Context, w http.ResponseWriter, tenantID, realm string) (resolved string, narrowed, ok bool) {
+	user, scope, all, ok := h.callerRealmScope(ctx, w, tenantID, realm)
+	if !ok {
+		return "", false, false
+	}
+	if all {
+		return realm, false, true
+	}
+
+	if realm != "" {
+		if !slices.Contains(scope, realm) {
+			h.denyRealm(w, user, tenantID, realm)
+			return "", false, false
+		}
+		return realm, false, true
+	}
+
+	if len(scope) == 1 {
+		return scope[0], true, true
+	}
+
+	h.log.Warn("All-realms stats refused by realm scope",
+		logger.Uint("user_id", user.ID),
+		logger.Str("tenant_id", tenantID),
+		logger.Int("allowed_realms", len(scope)))
+	respondRealmScopeRequiresRealm(w, h.log)
+	return "", false, false
+}
+
+// callerRealmScope resolves the realms the caller may read within a tenant,
+// responding with the failure itself and returning ok = false. all = true means
+// unrestricted, and scope is then empty rather than every realm.
+func (h *AmfaHandlers) callerRealmScope(ctx context.Context, w http.ResponseWriter, tenantID, realm string) (user *UserDetails, scope []string, all, ok bool) {
+	user = GetUserFromContext(ctx)
+	if user == nil {
+		h.log.Warn("No user info in context for realm access check")
+		httputil.RespondUnauthorized(w, h.log, "Authentication required")
+		return nil, nil, false, false
+	}
+
+	scope, all, err := allowedRealms(ctx, h.rbacService, user.ID, tenantID)
+	if err != nil {
+		h.log.Error("Failed to check realm access",
+			logger.Err(err),
+			logger.Uint("user_id", user.ID),
+			logger.Str("tenant_id", tenantID),
+			logger.Str("realm", realm))
+		httputil.RespondInternalError(w, h.log, "Failed to check realm access")
+		return nil, nil, false, false
+	}
+
+	return user, scope, all, true
+}
+
+func (h *AmfaHandlers) denyRealm(w http.ResponseWriter, user *UserDetails, tenantID, realm string) {
+	h.log.Warn("Realm access denied",
+		logger.Uint("user_id", user.ID),
+		logger.Str("email", user.Email),
+		logger.Str("tenant_id", tenantID),
+		logger.Str("realm", realm))
+	httputil.RespondForbidden(w, h.log, "Access to realm denied")
+}
+
+// respondAllRealmsUnsupported reports that this tenant's AMFA transport cannot
+// aggregate across realms. A property of the integration, not of the caller's
+// permissions, so it must not answer a permission refusal.
+func respondAllRealmsUnsupported(w http.ResponseWriter, log *logger.Logger, message string) {
+	httputil.RespondJSON(w, log, http.StatusNotImplemented, map[string]interface{}{
+		"error":   "amfa_all_realms_unsupported",
+		"message": message,
+	})
+}
+
+// respondRealmScopeRequiresRealm refuses an all-realms request whose aggregate
+// would cross the caller's realm scope. A property of the caller's permissions,
+// not of the integration, so it stays distinct from amfa_all_realms_unsupported.
+func respondRealmScopeRequiresRealm(w http.ResponseWriter, log *logger.Logger) {
+	httputil.RespondJSON(w, log, http.StatusForbidden, map[string]interface{}{
+		"error":   "amfa_realm_scope_requires_realm",
+		"message": "Your access is limited to specific realms, so these metrics cannot be shown across all of them. Select one of your realms.",
+	})
 }
 
 // parseTimeRange parses optional RFC3339 start/end query values into pointers.

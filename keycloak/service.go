@@ -23,7 +23,7 @@ type Service interface {
 	// Events
 	ListEvents(ctx context.Context, tenantID string, limit, offset int) ([]*domain.KeycloakEvent, error)
 	ListEventsByRealm(ctx context.Context, tenantID, realmName string, from, to time.Time, limit, offset int) ([]*domain.KeycloakEvent, error)
-	ListEventsByType(ctx context.Context, tenantID, eventType string, from, to time.Time, limit, offset int) ([]*domain.KeycloakEvent, error)
+	ListEventsByType(ctx context.Context, tenantID, realmName, eventType string, from, to time.Time, limit, offset int) ([]*domain.KeycloakEvent, error)
 	ListEventsByTimeRange(ctx context.Context, tenantID string, from, to time.Time, limit, offset int) ([]*domain.KeycloakEvent, error)
 	CountEvents(ctx context.Context, tenantID string) (int64, error)
 	CountEventsByType(ctx context.Context, tenantID, realmName, eventType string, from, to time.Time) (int64, error)
@@ -71,13 +71,23 @@ type ClientProvider interface {
 	GetClient(tenantID string) AdminAPI
 }
 
-// Provider IDs of the Adaptive MFA authenticators, as registered by the
-// Adaptive MFA Keycloak SPI. A realm "uses AMFA" when its browser login flow
-// contains one of these executions (and it is not DISABLED).
-const (
-	providerIDAdaptiveAuth            = "adaptive-auth"
-	providerIDConditionalAdaptiveAuth = "conditional-adaptive-auth"
-)
+// Provider IDs of the Adaptive MFA (AMFA) authenticators, as registered by the
+// Adaptive MFA Keycloak SPI in AdaptiveAuthAuthenticatorFactory.PROVIDER_ID
+// and ConditionalUserConfiguredAdaptiveAuthAuthenticatorFactory.PROVIDER_ID. A
+// realm "uses AMFA" when any of its top-level flows contains one of these
+// executions and it is not DISABLED.
+//
+// Note "any top-level flow", not just the bound browser flow, which is what
+// realmUsesAdaptiveAuth actually walks. That is deliberately the permissive
+// reading: AMFA can be bound to bindings other than browser, and a realm with
+// the flow configured but not yet bound is better shown with its AMFA
+// sections than silently treated as a plain realm. False negatives here are
+// the costlier failure, since the UI fail-closes on this endpoint and gives
+// no indication that a realm was misjudged.
+var amfaAuthenticatorProviderIDs = map[string]struct{}{
+	"adaptive-auth":             {},
+	"conditional-adaptive-auth": {},
+}
 
 // amfaRealmsCacheTTL bounds how often we walk each realm's Keycloak flow.
 const amfaRealmsCacheTTL = 5 * time.Minute
@@ -141,9 +151,9 @@ func (s *service) ListEventsByRealm(ctx context.Context, tenantID, realmName str
 	return s.eventRepo.GetEventsByRealm(ctx, tenantID, realmName, from, to, limit, offset)
 }
 
-// ListEventsByType returns events of a specific type.
-func (s *service) ListEventsByType(ctx context.Context, tenantID, eventType string, from, to time.Time, limit, offset int) ([]*domain.KeycloakEvent, error) {
-	return s.eventRepo.GetEventsByType(ctx, tenantID, eventType, from, to, limit, offset)
+// ListEventsByType returns events of a specific type within one realm.
+func (s *service) ListEventsByType(ctx context.Context, tenantID, realmName, eventType string, from, to time.Time, limit, offset int) ([]*domain.KeycloakEvent, error) {
+	return s.eventRepo.GetEventsByType(ctx, tenantID, realmName, eventType, from, to, limit, offset)
 }
 
 // ListEventsByTimeRange returns events within a time range.
@@ -335,7 +345,7 @@ func flowUsesAdaptiveAuth(execs []keycloakadmin.AuthenticationExecutionInfoRepre
 		if e.Requirement == "DISABLED" {
 			continue
 		}
-		if e.ProviderID == providerIDAdaptiveAuth || e.ProviderID == providerIDConditionalAdaptiveAuth {
+		if _, ok := amfaAuthenticatorProviderIDs[e.ProviderID]; ok {
 			return true
 		}
 	}

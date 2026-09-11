@@ -2,7 +2,9 @@ package chi
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/gorilla/sessions"
 
 	"repos.defensepoint.com/iam/oss-pmt/kmt/auth"
+	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/domain"
 	httputil "repos.defensepoint.com/iam/oss-pmt/kmt/internal/http"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/internal/logger"
 	"repos.defensepoint.com/iam/oss-pmt/kmt/rbac"
@@ -435,6 +438,7 @@ type RBACChecker interface {
 	GetUserRoles(ctx context.Context, userID uint) ([]*UserRoleInfo, error)
 	HasAccessToTenant(ctx context.Context, userID uint, tenantID string) (bool, error)
 	HasAccessToRealm(ctx context.Context, userID uint, tenantID, realmName string) (bool, error)
+	GetUserPolicies(ctx context.Context, userID uint) ([]*domain.TenantPolicy, error)
 }
 
 // RBACService is an alias for RBACChecker for backward compatibility.
@@ -446,6 +450,59 @@ type UserRoleInfo struct {
 	RoleID   uint
 	RoleName string
 	TenantID *string
+}
+
+// allowedRealms resolves the realms a caller may read within a tenant. A
+// platform administrator, and a caller with no policy row for the tenant, are
+// unrestricted and get all = true. Callers must treat all = false with an empty
+// slice as "no realm", never as "no restriction".
+func allowedRealms(ctx context.Context, svc RBACChecker, userID uint, tenantID string) (realms []string, all bool, err error) {
+	realms, all, _, err = allowedRealmsWithAdmin(ctx, svc, userID, tenantID)
+	return realms, all, err
+}
+
+// allowedRealmsWithAdmin is allowedRealms plus the administrator check it
+// already ran. isAdmin is not the same answer as all: an unrestricted policy is
+// not administrator rights.
+func allowedRealmsWithAdmin(ctx context.Context, svc RBACChecker, userID uint, tenantID string) (realms []string, all, isAdmin bool, err error) {
+	if svc == nil {
+		return nil, false, false, errors.New("rbac service not configured")
+	}
+
+	isAdmin, err = svc.IsAdmin(ctx, userID)
+	if err != nil {
+		return nil, false, false, err
+	}
+	if isAdmin {
+		return nil, true, true, nil
+	}
+
+	policies, err := svc.GetUserPolicies(ctx, userID)
+	if err != nil {
+		return nil, false, false, err
+	}
+
+	// (user_id, tenant_id) is not unique, so every matching row counts.
+	matched := false
+	for _, policy := range policies {
+		if policy == nil || policy.TenantID != tenantID {
+			continue
+		}
+		if policy.RealmsUnrestricted {
+			return nil, true, false, nil
+		}
+		matched = true
+		for _, realm := range policy.AllowedRealms {
+			if !slices.Contains(realms, realm) {
+				realms = append(realms, realm)
+			}
+		}
+	}
+	if !matched {
+		return nil, true, false, nil
+	}
+
+	return realms, false, false, nil
 }
 
 // RBACMiddleware provides HTTP middleware for RBAC authorization.

@@ -337,9 +337,8 @@ func NewTenantPolicyRepository(db *database.Client) rbac.TenantPolicyRepository 
 }
 
 func (r *TenantPolicyRepository) CreatePolicy(ctx context.Context, policy *domain.TenantPolicy) error {
-	realmsJSON, _ := json.Marshal(policy.AllowedRealms)
 	dbPolicy := &database.TenantPolicy{
-		UserID: policy.UserID, TenantID: policy.TenantID, AllowedRealms: realmsJSON,
+		UserID: policy.UserID, TenantID: policy.TenantID, AllowedRealms: marshalAllowedRealms(policy.AllowedRealms),
 		GrantedBy: policy.GrantedBy, GrantedAt: policy.GrantedAt,
 	}
 	if err := r.db.DB().WithContext(ctx).Create(dbPolicy).Error; err != nil {
@@ -359,6 +358,17 @@ func (r *TenantPolicyRepository) GetUserPolicies(ctx context.Context, userID uin
 	return convertPolicyList(dbPolicies), nil
 }
 
+func (r *TenantPolicyRepository) GetPolicyByID(ctx context.Context, policyID uint) (*domain.TenantPolicy, error) {
+	var dbPolicy database.TenantPolicy
+	if err := r.db.DB().WithContext(ctx).Where("id = ?", policyID).First(&dbPolicy).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return convertPolicy(&dbPolicy), nil
+}
+
 func (r *TenantPolicyRepository) GetUserPolicyForTenant(ctx context.Context, userID uint, tenantID string) (*domain.TenantPolicy, error) {
 	var dbPolicy database.TenantPolicy
 	if err := r.db.DB().WithContext(ctx).Where("user_id = ? AND tenant_id = ?", userID, tenantID).First(&dbPolicy).Error; err != nil {
@@ -371,9 +381,8 @@ func (r *TenantPolicyRepository) GetUserPolicyForTenant(ctx context.Context, use
 }
 
 func (r *TenantPolicyRepository) UpdatePolicy(ctx context.Context, policy *domain.TenantPolicy) error {
-	realmsJSON, _ := json.Marshal(policy.AllowedRealms)
 	return r.db.DB().WithContext(ctx).Model(&database.TenantPolicy{}).Where("id = ?", policy.ID).Updates(map[string]interface{}{
-		"allowed_realms": realmsJSON,
+		"allowed_realms": marshalAllowedRealms(policy.AllowedRealms),
 		"granted_by":     policy.GrantedBy,
 		"granted_at":     policy.GrantedAt,
 	}).Error
@@ -403,7 +412,7 @@ func (r *TenantPolicyRepository) HasAccessToRealm(ctx context.Context, userID ui
 		}
 		return false, err
 	}
-	if len(dbPolicy.AllowedRealms) == 0 {
+	if realmsUnrestricted(dbPolicy.AllowedRealms) {
 		return true, nil
 	}
 	var allowedRealms []string
@@ -416,6 +425,33 @@ func (r *TenantPolicyRepository) HasAccessToRealm(ctx context.Context, userID ui
 		}
 	}
 	return false, nil
+}
+
+// realmsUnrestricted reports an allowed_realms column holding no list, which
+// grants every realm. Two shapes mean that: a SQL NULL column, and the legacy
+// `null` literal json.Marshal produces for a nil slice. A stored `[]` is an
+// empty list and stays fail-closed.
+//
+// tenant_policies is an opt-in restriction, not a grant.
+func realmsUnrestricted(column []byte) bool {
+	if len(column) == 0 {
+		return true
+	}
+	var realms []string
+	if err := json.Unmarshal(column, &realms); err != nil {
+		return false
+	}
+	return realms == nil
+}
+
+// marshalAllowedRealms encodes a realm list for storage, keeping a nil slice as
+// a SQL NULL column rather than the `null` literal.
+func marshalAllowedRealms(realms []string) []byte {
+	if realms == nil {
+		return nil
+	}
+	encoded, _ := json.Marshal(realms)
+	return encoded
 }
 
 // Conversion functions
@@ -477,7 +513,8 @@ func convertPolicy(db *database.TenantPolicy) *domain.TenantPolicy {
 	}
 	return &domain.TenantPolicy{
 		ID: db.ID, UserID: db.UserID, TenantID: db.TenantID, AllowedRealms: realms,
-		GrantedBy: db.GrantedBy, GrantedAt: db.GrantedAt,
+		RealmsUnrestricted: realmsUnrestricted(db.AllowedRealms),
+		GrantedBy:          db.GrantedBy, GrantedAt: db.GrantedAt,
 		CreatedAt: db.CreatedAt, UpdatedAt: db.UpdatedAt,
 	}
 }

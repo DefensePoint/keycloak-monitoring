@@ -3,6 +3,7 @@ package chi
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -61,15 +62,30 @@ func NewSystemHandlers(
 	}
 }
 
-// tenantEventSources returns the exact event sources that belong to a tenant:
-// keycloak:<realm> and amfa:<realm> for each of the tenant's realms. When
-// requestedSource is non-empty the set is narrowed to matching sources, so a
-// caller may filter within their own tenant but can never broaden beyond it. An
-// empty result means the query must return nothing (deny-by-default): the caller
-// asked for a source outside their tenant, or the tenant has no known realms.
-func (h *SystemHandlers) tenantEventSources(ctx context.Context, tenantID, requestedSource string) ([]string, error) {
+// requireCaller returns the authenticated caller, responding with the 401 itself
+// when there is none.
+func (h *SystemHandlers) requireCaller(ctx context.Context, w http.ResponseWriter) (*UserDetails, bool) {
+	user := GetUserFromContext(ctx)
+	if user == nil {
+		h.log.Warn("No user info in context for event scoping")
+		httputil.RespondUnauthorized(w, h.log, "Authentication required")
+		return nil, false
+	}
+	return user, true
+}
+
+// tenantEventSources returns the event sources a caller may read within a
+// tenant: keycloak:<realm> and amfa:<realm> for each of the tenant's realms
+// inside the caller's allowed realm set. requestedSource and requestedRealm only
+// ever narrow that set, and an empty result means the query must return nothing.
+func (h *SystemHandlers) tenantEventSources(ctx context.Context, userID uint, tenantID, requestedSource, requestedRealm string) ([]string, error) {
 	if h.realmLister == nil {
 		return nil, nil
+	}
+
+	scope, all, err := allowedRealms(ctx, h.rbacService, userID, tenantID)
+	if err != nil {
+		return nil, err
 	}
 
 	realms, err := h.realmLister.ListRealms(ctx, tenantID)
@@ -82,7 +98,30 @@ func (h *SystemHandlers) tenantEventSources(ctx context.Context, tenantID, reque
 		if realm == nil || realm.RealmName == "" {
 			continue
 		}
+		if !all && !slices.Contains(scope, realm.RealmName) {
+			continue
+		}
 		allowed = append(allowed, events.SourcesForRealm(realm.RealmName)...)
+	}
+
+	// Intersected with `allowed`, which is already narrowed to the caller's
+	// realm scope, so a realm outside that scope contributes nothing.
+	if requestedRealm != "" {
+		allowedSet := make(map[string]struct{}, len(allowed))
+		for _, a := range allowed {
+			allowedSet[a] = struct{}{}
+		}
+		filtered := make([]string, 0, 2)
+		for _, want := range events.SourcesForRealm(requestedRealm) {
+			if _, ok := allowedSet[want]; !ok {
+				continue
+			}
+			if requestedSource != "" && !strings.Contains(want, requestedSource) {
+				continue
+			}
+			filtered = append(filtered, want)
+		}
+		return filtered, nil
 	}
 
 	if requestedSource == "" {
@@ -180,7 +219,8 @@ func (h *SystemHandlers) validateTenantMiddleware(next http.Handler) http.Handle
 //	@Param			tenantID	path		string	true	"Tenant ID"
 //	@Param			limit		query		int		false	"Limit results (default 100)"
 //	@Param			offset		query		int		false	"Offset for pagination"
-//	@Param			source		query		string	false	"Filter by event source"
+//	@Param			source		query		string	false	"Filter by event source, e.g. \"amfa\" or \"keycloak:MyRealm\" (substring match)"
+//	@Param			realm		query		string	false	"Filter to one realm, matching every source system it produces"
 //	@Param			start_time	query		string	false	"Start time filter"
 //	@Param			end_time	query		string	false	"End time filter"
 //	@Success		200			{object}	map[string]interface{}
@@ -203,10 +243,16 @@ func (h *SystemHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := parseIntParam(r, "offset", 0)
 	source := r.URL.Query().Get("source")
+	realm := r.URL.Query().Get("realm")
 	startTime := r.URL.Query().Get("start_time")
 	endTime := r.URL.Query().Get("end_time")
 
-	sources, err := h.tenantEventSources(ctx, tenantID, source)
+	user, ok := h.requireCaller(ctx, w)
+	if !ok {
+		return
+	}
+
+	sources, err := h.tenantEventSources(ctx, user.ID, tenantID, source, realm)
 	if err != nil {
 		h.log.Error("Failed to resolve tenant event sources",
 			logger.Str("tenant_id", tenantID),
@@ -215,8 +261,6 @@ func (h *SystemHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(sources) == 0 {
-		// No source belongs to this tenant (or none matches the requested
-		// source): return an empty result rather than an unscoped query.
 		httputil.RespondJSON(w, h.log, http.StatusOK, map[string]interface{}{
 			"events": []*domain.Event{},
 			"count":  0,
@@ -277,7 +321,8 @@ func (h *SystemHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 //	@Tags			system
 //	@Produce		json
 //	@Param			tenantID	path		string	true	"Tenant ID"
-//	@Param			source		query		string	false	"Filter by event source"
+//	@Param			source		query		string	false	"Filter by event source, e.g. \"amfa\" or \"keycloak:MyRealm\" (substring match)"
+//	@Param			realm		query		string	false	"Filter to one realm, matching every source system it produces"
 //	@Param			start_time	query		string	false	"Start time filter"
 //	@Param			end_time	query		string	false	"End time filter"
 //	@Success		200			{object}	map[string]interface{}
@@ -292,10 +337,16 @@ func (h *SystemHandlers) handleStats(w http.ResponseWriter, r *http.Request) {
 
 	// Parse query parameters for filtering
 	source := r.URL.Query().Get("source")
+	realm := r.URL.Query().Get("realm")
 	startTime := r.URL.Query().Get("start_time")
 	endTime := r.URL.Query().Get("end_time")
 
-	sources, err := h.tenantEventSources(ctx, tenantID, source)
+	user, ok := h.requireCaller(ctx, w)
+	if !ok {
+		return
+	}
+
+	sources, err := h.tenantEventSources(ctx, user.ID, tenantID, source, realm)
 	if err != nil {
 		h.log.Error("Failed to resolve tenant event sources",
 			logger.Str("tenant_id", tenantID),

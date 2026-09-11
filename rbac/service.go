@@ -210,15 +210,14 @@ func (s *service) CreateTenantPolicy(ctx context.Context, userID uint, tenantID 
 
 // UpdateTenantPolicy updates a tenant policy.
 func (s *service) UpdateTenantPolicy(ctx context.Context, policyID uint, allowedRealms []string, grantedBy string) error {
-	policies, err := s.policyRepo.GetUserPolicies(ctx, policyID)
+	policy, err := s.policyRepo.GetPolicyByID(ctx, policyID)
 	if err != nil {
-		return fmt.Errorf("failed to get policies: %w", err)
+		return fmt.Errorf("failed to get policy: %w", err)
 	}
-	if len(policies) == 0 {
+	if policy == nil {
 		return fmt.Errorf("policy not found")
 	}
 
-	policy := policies[0]
 	policy.AllowedRealms = allowedRealms
 	policy.GrantedBy = grantedBy
 	policy.GrantedAt = time.Now()

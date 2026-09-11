@@ -11,7 +11,7 @@ import (
 type EventReader interface {
 	GetEvents(ctx context.Context, tenantID string, limit, offset int) ([]*domain.KeycloakEvent, error)
 	GetEventsByRealm(ctx context.Context, tenantID, realmName string, from, to time.Time, limit, offset int) ([]*domain.KeycloakEvent, error)
-	GetEventsByType(ctx context.Context, tenantID, eventType string, from, to time.Time, limit, offset int) ([]*domain.KeycloakEvent, error)
+	GetEventsByType(ctx context.Context, tenantID, realmName, eventType string, from, to time.Time, limit, offset int) ([]*domain.KeycloakEvent, error)
 	GetEventsByTimeRange(ctx context.Context, tenantID string, from, to time.Time, limit, offset int) ([]*domain.KeycloakEvent, error)
 	CountEvents(ctx context.Context, tenantID string) (int64, error)
 	CountEventsByType(ctx context.Context, tenantID, realmName, eventType string, from, to time.Time) (int64, error)

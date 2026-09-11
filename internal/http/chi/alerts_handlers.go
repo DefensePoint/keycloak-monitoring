@@ -3,6 +3,7 @@ package chi
 import (
 	"context"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -225,15 +226,37 @@ func (h *AlertsHandlers) handleListAlerts(w http.ResponseWriter, r *http.Request
 		ResourceType: resourceType,
 	}
 
+	caller, scope, all, isAdmin, ok := h.callerRealmScope(ctx, w, tenantID)
+	if !ok {
+		return
+	}
+	if !all {
+		switch {
+		case realmName != "":
+			if !slices.Contains(scope, realmName) {
+				h.denyRealm(w, caller, tenantID, realmName)
+				return
+			}
+		case len(scope) == 0:
+			httputil.RespondSuccess(w, h.log, map[string]interface{}{
+				"alerts": []*domain.Alert{},
+				"count":  0,
+				"total":  int64(0),
+				"limit":  limit,
+				"offset": offset,
+			})
+			return
+		default:
+			opts.RealmNames = scope
+		}
+	}
+
 	alertList, totalCount, err := h.service.ListAlerts(ctx, tenantID, opts)
 	if err != nil {
 		h.log.Error("Failed to list alerts", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Failed to retrieve alerts")
 		return
 	}
-
-	user := GetUserFromContext(ctx)
-	isAdmin := user != nil && h.isAdminUser(ctx, user.ID)
 
 	httputil.RespondSuccess(w, h.log, map[string]interface{}{
 		"alerts": h.sanitizeAlerts(alertList, isAdmin),
@@ -298,18 +321,45 @@ func (h *AlertsHandlers) getAlertByID(w http.ResponseWriter, r *http.Request, te
 		return
 	}
 
-	ctx := r.Context()
-	alert, err := h.service.GetAlert(ctx, tenantID, alertID)
-	if err != nil {
-		h.log.Error("Failed to get alert", logger.Str("alert_id", alertID), logger.Err(err))
-		httputil.RespondNotFound(w, h.log, "Alert not found")
+	alert, isAdmin, ok := h.alertInScope(w, r, tenantID, alertID)
+	if !ok {
 		return
 	}
 
-	user := GetUserFromContext(ctx)
-	isAdmin := user != nil && h.isAdminUser(ctx, user.ID)
-
 	httputil.RespondSuccess(w, h.log, h.sanitizeAlert(alert, isAdmin))
+}
+
+// alertInScope loads an alert and refuses it when its realm falls outside the
+// caller's, responding itself and returning ok = false. An out-of-scope alert
+// answers exactly as a missing one, so the route is not an oracle for the alert
+// IDs in realms the caller cannot see.
+func (h *AlertsHandlers) alertInScope(w http.ResponseWriter, r *http.Request, tenantID, alertID string) (alert *domain.Alert, isAdmin, ok bool) {
+	ctx := r.Context()
+
+	caller, scope, all, isAdmin, ok := h.callerRealmScope(ctx, w, tenantID)
+	if !ok {
+		return nil, false, false
+	}
+
+	alert, err := h.service.GetAlert(ctx, tenantID, alertID)
+	if err != nil || alert == nil {
+		h.log.Error("Failed to get alert", logger.Str("alert_id", alertID), logger.Err(err))
+		httputil.RespondNotFound(w, h.log, "Alert not found")
+		return nil, false, false
+	}
+
+	if !all && !slices.Contains(scope, alert.RealmName) {
+		h.log.Warn("Alert outside the caller's realms",
+			logger.Uint("user_id", caller.ID),
+			logger.Str("email", caller.Email),
+			logger.Str("tenant_id", tenantID),
+			logger.Str("alert_id", alertID),
+			logger.Str("realm", alert.RealmName))
+		httputil.RespondNotFound(w, h.log, "Alert not found")
+		return nil, false, false
+	}
+
+	return alert, isAdmin, true
 }
 
 // handleUpdateAlertStatus handles POST /api/tenants/{tenant_id}/alerts/update-status?id={id}
@@ -373,6 +423,11 @@ func (h *AlertsHandlers) updateAlertStatusByID(w http.ResponseWriter, r *http.Re
 
 	ctx := r.Context()
 
+	_, isAdmin, ok := h.alertInScope(w, r, tenantID, alertID)
+	if !ok {
+		return
+	}
+
 	req, ok := httputil.ValidateAndParse[requests.UpdateAlertStatus](w, r, h.log)
 	if !ok {
 		return
@@ -402,7 +457,6 @@ func (h *AlertsHandlers) updateAlertStatusByID(w http.ResponseWriter, r *http.Re
 		h.recordOperatorAction(ctx, updatedAlert, actionType, user.Email, user.ID, "")
 	}
 
-	isAdmin := user != nil && h.isAdminUser(ctx, user.ID)
 	httputil.RespondSuccess(w, h.log, h.sanitizeAlert(updatedAlert, isAdmin))
 }
 
@@ -465,12 +519,8 @@ func (h *AlertsHandlers) resolveAlertByID(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 
 	// Get the alert before resolving to send notifications
-	alertBefore, err := h.service.GetAlert(ctx, tenantID, alertID)
-	if err != nil {
-		h.log.Error("Failed to get alert",
-			logger.Str("alert_id", alertID),
-			logger.Err(err))
-		httputil.RespondNotFound(w, h.log, "Alert not found")
+	alertBefore, isAdmin, ok := h.alertInScope(w, r, tenantID, alertID)
+	if !ok {
 		return
 	}
 
@@ -519,7 +569,6 @@ func (h *AlertsHandlers) resolveAlertByID(w http.ResponseWriter, r *http.Request
 		}()
 	}
 
-	isAdmin := user != nil && h.isAdminUser(ctx, user.ID)
 	httputil.RespondSuccess(w, h.log, h.sanitizeAlert(resolvedAlert, isAdmin))
 }
 
@@ -552,6 +601,10 @@ func (h *AlertsHandlers) handleDeleteAlert(w http.ResponseWriter, r *http.Reques
 	}
 
 	ctx := r.Context()
+	if _, _, ok := h.alertInScope(w, r, tenantID, alertID); !ok {
+		return
+	}
+
 	if err := h.service.DeleteAlert(ctx, tenantID, alertID); err != nil {
 		h.log.Error("Failed to delete alert",
 			logger.Str("alert_id", alertID),
@@ -587,15 +640,33 @@ func (h *AlertsHandlers) handleAlertStats(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	realmName := r.URL.Query().Get("realm_name")
 
-	var stats *alerts.Statistics
-	var err error
-
-	if realmName != "" {
-		stats, err = h.service.GetStatistics(ctx, tenantID, realmName)
-	} else {
-		stats, err = h.service.GetStatistics(ctx, tenantID)
+	caller, scope, all, _, ok := h.callerRealmScope(ctx, w, tenantID)
+	if !ok {
+		return
 	}
 
+	var realms []string
+	switch {
+	case realmName != "":
+		if !all && !slices.Contains(scope, realmName) {
+			h.denyRealm(w, caller, tenantID, realmName)
+			return
+		}
+		realms = []string{realmName}
+	case !all:
+		// An empty scope must not reach the service: no realm argument counts
+		// every realm of the tenant.
+		if len(scope) == 0 {
+			httputil.RespondSuccess(w, h.log, &alerts.Statistics{
+				BySeverity: map[string]int{},
+				ByType:     map[string]int{},
+			})
+			return
+		}
+		realms = scope
+	}
+
+	stats, err := h.service.GetStatistics(ctx, tenantID, realms...)
 	if err != nil {
 		h.log.Error("Failed to get alert statistics", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Failed to retrieve alert statistics")
@@ -637,20 +708,13 @@ func (h *AlertsHandlers) handleListAlertsByRealm(w http.ResponseWriter, r *http.
 
 	ctx := r.Context()
 
-	// Check realm access if RBAC is enabled
-	if h.rbacService != nil {
-		user := GetUserFromContext(ctx)
-		if user != nil {
-			hasAccess, err := h.rbacService.HasAccessToRealm(ctx, user.ID, tenantID, realmName)
-			if err != nil || !hasAccess {
-				h.log.Warn("Realm access denied",
-					logger.Uint("user_id", user.ID),
-					logger.Str("tenant_id", tenantID),
-					logger.Str("realm", realmName))
-				httputil.RespondForbidden(w, h.log, "Access to realm denied")
-				return
-			}
-		}
+	caller, scope, all, isAdmin, ok := h.callerRealmScope(ctx, w, tenantID)
+	if !ok {
+		return
+	}
+	if !all && !slices.Contains(scope, realmName) {
+		h.denyRealm(w, caller, tenantID, realmName)
+		return
 	}
 
 	limit := parseIntParam(r, "limit", 100)
@@ -679,9 +743,6 @@ func (h *AlertsHandlers) handleListAlertsByRealm(w http.ResponseWriter, r *http.
 		return
 	}
 
-	user := GetUserFromContext(ctx)
-	isAdmin := user != nil && h.isAdminUser(ctx, user.ID)
-
 	httputil.RespondSuccess(w, h.log, map[string]interface{}{
 		"realm":  realmName,
 		"alerts": h.sanitizeAlerts(alertList, isAdmin),
@@ -689,13 +750,38 @@ func (h *AlertsHandlers) handleListAlertsByRealm(w http.ResponseWriter, r *http.
 	})
 }
 
-// isAdminUser checks if the current user has admin role.
-func (h *AlertsHandlers) isAdminUser(ctx context.Context, userID uint) bool {
-	if h.rbacService == nil {
-		return false
+// callerRealmScope resolves the realms the caller may read within a tenant,
+// responding with the failure itself and returning ok = false. all = true means
+// unrestricted, and scope is then empty rather than every realm. isAdmin is
+// narrower than all: an unrestricted policy is not administrator rights.
+func (h *AlertsHandlers) callerRealmScope(ctx context.Context, w http.ResponseWriter, tenantID string) (user *UserDetails, scope []string, all, isAdmin, ok bool) {
+	user = GetUserFromContext(ctx)
+	if user == nil {
+		h.log.Warn("No user context found, denying access")
+		httputil.RespondUnauthorized(w, h.log, "Authentication required")
+		return nil, nil, false, false, false
 	}
-	isAdmin, err := h.rbacService.IsAdmin(ctx, userID)
-	return err == nil && isAdmin
+
+	scope, all, isAdmin, err := allowedRealmsWithAdmin(ctx, h.rbacService, user.ID, tenantID)
+	if err != nil {
+		h.log.Error("Failed to check realm access",
+			logger.Err(err),
+			logger.Uint("user_id", user.ID),
+			logger.Str("tenant_id", tenantID))
+		httputil.RespondInternalError(w, h.log, "Failed to check realm access")
+		return nil, nil, false, false, false
+	}
+
+	return user, scope, all, isAdmin, true
+}
+
+func (h *AlertsHandlers) denyRealm(w http.ResponseWriter, user *UserDetails, tenantID, realmName string) {
+	h.log.Warn("Realm access denied",
+		logger.Uint("user_id", user.ID),
+		logger.Str("email", user.Email),
+		logger.Str("tenant_id", tenantID),
+		logger.Str("realm", realmName))
+	httputil.RespondForbidden(w, h.log, "Access to realm denied")
 }
 
 // sanitizeAlert removes sensitive internal fields from an alert for non-admin users.
@@ -703,12 +789,7 @@ func (h *AlertsHandlers) sanitizeAlert(alert *domain.Alert, isAdmin bool) *domai
 	if isAdmin {
 		return alert
 	}
-	sanitized := *alert
-	sanitized.Metadata = ""
-	sanitized.CheckType = ""
-	sanitized.RuleID = nil
-	sanitized.EventID = nil
-	return &sanitized
+	return alerts.SanitizeAlert(alert)
 }
 
 // sanitizeAlerts removes sensitive internal fields from alerts for non-admin users.
@@ -716,11 +797,7 @@ func (h *AlertsHandlers) sanitizeAlerts(alertList []*domain.Alert, isAdmin bool)
 	if isAdmin {
 		return alertList
 	}
-	sanitized := make([]*domain.Alert, len(alertList))
-	for i, alert := range alertList {
-		sanitized[i] = h.sanitizeAlert(alert, false)
-	}
-	return sanitized
+	return alerts.SanitizeAlerts(alertList)
 }
 
 // checkAlertPermission checks if the user has the specified alert permission.
