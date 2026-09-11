@@ -200,6 +200,59 @@ func TestAllowedRealms(t *testing.T) {
 			policies: []*domain.TenantPolicy{{TenantID: "tenant-a", AllowedRealms: []string{}}},
 			wantAll:  true,
 		},
+		{
+			// The shape this resolver used to deny while the web allowed it.
+			// A SQL NULL allowed_realms column is an absent restriction, not
+			// an empty one: tenant_policies is opt-in, so a row that names no
+			// list grants every realm. Nothing here covered RealmsUnrestricted
+			// before, which is how the two sides drifted apart unnoticed.
+			name:     "a row whose allowed_realms column holds no list is unrestricted",
+			caller:   &Caller{UserID: 7},
+			policies: []*domain.TenantPolicy{{TenantID: "tenant-a", RealmsUnrestricted: true}},
+			wantAll:  true,
+		},
+		{
+			name:   "an unrestricted row wins over a restricting one",
+			caller: &Caller{UserID: 7},
+			policies: []*domain.TenantPolicy{
+				{TenantID: "tenant-a", AllowedRealms: []string{"prod"}},
+				{TenantID: "tenant-a", RealmsUnrestricted: true},
+			},
+			wantAll: true,
+		},
+		{
+			// The fail-open shape. A blank names no realm, but passed through
+			// it reads as "no realm filter" in the alerts repository and
+			// widened alert statistics to the whole tenant.
+			name:     "a single blank realm denies rather than widening the scope",
+			caller:   &Caller{UserID: 7},
+			policies: []*domain.TenantPolicy{{TenantID: "tenant-a", AllowedRealms: []string{""}}},
+			wantErr:  ErrForbidden,
+		},
+		{
+			name:     "nothing but blank realms denies",
+			caller:   &Caller{UserID: 7},
+			policies: []*domain.TenantPolicy{{TenantID: "tenant-a", AllowedRealms: []string{"", "  "}}},
+			wantErr:  ErrForbidden,
+		},
+		{
+			name:       "a blank beside a real realm keeps only the real one",
+			caller:     &Caller{UserID: 7},
+			policies:   []*domain.TenantPolicy{{TenantID: "tenant-a", AllowedRealms: []string{"", "prod"}}},
+			wantRealms: []string{"prod"},
+		},
+		{
+			// This resolver used to return the first matching row and stop.
+			// (user_id, tenant_id) is not unique and GetUserPolicies has no
+			// ORDER BY, so which row won was whatever Postgres returned first.
+			name:   "every matching row contributes, not just the first",
+			caller: &Caller{UserID: 7},
+			policies: []*domain.TenantPolicy{
+				{TenantID: "tenant-a", AllowedRealms: []string{"prod"}},
+				{TenantID: "tenant-a", AllowedRealms: []string{"staging"}},
+			},
+			wantRealms: []string{"prod", "staging"},
+		},
 	}
 
 	for _, tt := range tests {

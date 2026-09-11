@@ -151,12 +151,22 @@ func (a *Authorizer) VisibleTenants(ctx context.Context, caller *Caller, permiss
 	return narrowed, nil
 }
 
-// AllowedRealms resolves the caller's allowed realm set for a tenant. A
-// global admin gets every realm. A tenant policy row restricts the caller to
-// exactly its listed realms, and a row whose allowed_realms list is empty or
-// null denies every realm, matching what rbac.Service.HasAccessToRealm
-// enforces for a stored empty list. Only the absence of any policy row for
-// the tenant means unrestricted access to all of the tenant's realms.
+// AllowedRealms resolves the caller's allowed realm set for a tenant. A global
+// admin gets every realm. Otherwise the tenant's policy rows decide, via
+// rbac.ResolveRealmScope, which is the same function the web resolver in
+// internal/http/chi uses so a policy means one thing on both transports.
+//
+// This used to reimplement the rules and disagreed with the web on three of
+// the five shapes a row can take: it denied a row whose allowed_realms column
+// was NULL (unrestricted on the web), it returned only the first matching row
+// instead of the union across rows, and it passed blank realms straight
+// through, which widened alert statistics to the whole tenant because the
+// repository reads an all-blank scope as no realm filter.
+//
+// A policy that grants nothing is reported as ErrForbidden rather than an
+// empty scope, which is this API's existing contract: callers treat an error
+// as a refusal, and none of them has to remember that an empty realms slice
+// with all = false means "no realm" rather than "no restriction".
 func (a *Authorizer) AllowedRealms(ctx context.Context, caller *Caller, tenantID string) (realms []string, all bool, err error) {
 	if caller == nil {
 		return nil, false, ErrUnauthenticated
@@ -169,14 +179,13 @@ func (a *Authorizer) AllowedRealms(ctx context.Context, caller *Caller, tenantID
 	if err != nil {
 		return nil, false, fmt.Errorf("tenant policy lookup failed: %w", err)
 	}
-	for _, policy := range policies {
-		if policy == nil || policy.TenantID != tenantID {
-			continue
-		}
-		if len(policy.AllowedRealms) == 0 {
-			return nil, false, ErrForbidden
-		}
-		return policy.AllowedRealms, false, nil
+
+	realms, all = rbac.ResolveRealmScope(policies, tenantID)
+	if all {
+		return nil, true, nil
 	}
-	return nil, true, nil
+	if len(realms) == 0 {
+		return nil, false, ErrForbidden
+	}
+	return realms, false, nil
 }

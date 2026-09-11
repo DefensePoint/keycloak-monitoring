@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -482,37 +481,10 @@ func allowedRealmsWithAdmin(ctx context.Context, svc RBACChecker, userID uint, t
 		return nil, false, false, err
 	}
 
-	// (user_id, tenant_id) is not unique, so every matching row counts.
-	matched := false
-	for _, policy := range policies {
-		if policy == nil || policy.TenantID != tenantID {
-			continue
-		}
-		if policy.RealmsUnrestricted {
-			return nil, true, false, nil
-		}
-		matched = true
-		for _, realm := range policy.AllowedRealms {
-			// A blank realm names no realm, so it must never enter the scope.
-			// Left in, it slips past every len(scope) == 0 guard and then
-			// widens the query instead of narrowing it: alerts.GetStatistics
-			// strips empties and treats "nothing left" as no realm filter, and
-			// an empty realm selects the AMFA all-realms aggregate. A caller
-			// entitled to nothing would read the whole tenant.
-			//
-			// Dropped, not trimmed: a realm is only ever removed here, never
-			// rewritten into one the policy does not literally name. matched
-			// stays true, so a policy of nothing but blanks resolves to an
-			// empty scope and stays fail-closed, exactly like a stored '[]'.
-			if strings.TrimSpace(realm) == "" {
-				continue
-			}
-			if !slices.Contains(realms, realm) {
-				realms = append(realms, realm)
-			}
-		}
-	}
-	if !matched {
+	// Shared with the MCP authorizer, which reads the same rows over a
+	// different transport and must reach the same answer.
+	realms, all = rbac.ResolveRealmScope(policies, tenantID)
+	if all {
 		return nil, true, false, nil
 	}
 

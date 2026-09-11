@@ -201,12 +201,15 @@ type postureEnv struct {
 	// tokenRealmX is restricted by policy to the prod realm of tenant A;
 	// tokenNoRealms belongs to a user whose policy allows no realm at all.
 	tokenRealmX, tokenNoRealms string
-	tokenRevoked               string
-	revokedTokenID             uint
-	tokenExpired               string
-	tokenBlocked               string
-	blockedSubject             string
-	strayUserID                uint
+	// tokenNullRealms belongs to a user whose allowed_realms column is a SQL
+	// NULL, which is unrestricted rather than a denial.
+	tokenNullRealms string
+	tokenRevoked    string
+	revokedTokenID  uint
+	tokenExpired    string
+	tokenBlocked    string
+	blockedSubject  string
+	strayUserID     uint
 
 	aProdEvents    []string
 	aStagingEvent  string
@@ -524,6 +527,16 @@ func newPostureEnv(t *testing.T) *postureEnv {
 		t.Fatalf("create the empty-realm policy: %v", err)
 	}
 
+	// A nil realm list stores a SQL NULL allowed_realms column, which is an
+	// absent restriction rather than an empty one. This distinguishes NULL
+	// from the stored '[]' above: they differ by one character on disk and
+	// mean opposite things, and this resolver used to deny both.
+	nullRealms := newUser("nullrealms")
+	grant(nullRealms.ID, &tenantA)
+	if err := writeRBAC.CreateTenantPolicy(ctx, nullRealms.ID, tenantA, nil, postureGrantedBy); err != nil {
+		t.Fatalf("create the null-realm policy: %v", err)
+	}
+
 	blocked := newUser("blocked")
 	grant(blocked.ID, &tenantA)
 
@@ -549,6 +562,7 @@ func newPostureEnv(t *testing.T) *postureEnv {
 	tokenStrayMulti := mint(stray.ID, "stray-a-c", []string{tenantA, tenantC})
 	tokenRealmX := mint(realmX.ID, "realmx-a", []string{tenantA})
 	tokenNoRealms := mint(noRealms.ID, "norealms-a", []string{tenantA})
+	tokenNullRealms := mint(nullRealms.ID, "nullrealms-a", []string{tenantA})
 	tokenRevoked := mint(customer.ID, "customer-revoked", []string{tenantA})
 	tokenBlocked := mint(blocked.ID, "blocked-a", []string{tenantA})
 
@@ -649,6 +663,7 @@ func newPostureEnv(t *testing.T) *postureEnv {
 		tokenStrayMulti: tokenStrayMulti.Plaintext,
 		tokenRealmX:     tokenRealmX.Plaintext,
 		tokenNoRealms:   tokenNoRealms.Plaintext,
+		tokenNullRealms: tokenNullRealms.Plaintext,
 		tokenRevoked:    tokenRevoked.Plaintext,
 		revokedTokenID:  tokenRevoked.ID,
 		tokenExpired:    tokenExpired.Plaintext,
@@ -863,6 +878,46 @@ func TestMCPSecurityPosture(t *testing.T) {
 			map[string]any{"alert_id": env.aStagingAlert}, &alert)
 		if alert.RealmName != postureRealmStaging {
 			t.Errorf("get_alert realm = %q, want %q", alert.RealmName, postureRealmStaging)
+		}
+	})
+
+	// A SQL NULL allowed_realms column must behave exactly like the absence of
+	// a policy row: tenant_policies is an opt-in restriction, so a row naming
+	// no list is not a restriction. This resolver used to deny it, disagreeing
+	// with the web for the same row, and nothing here covered the shape.
+	//
+	// It runs every realm-scoped tool because the fix makes all = true
+	// reachable through a policy row for the first time, and a caller that
+	// read the realm set without checking all would now return nothing
+	// instead of everything.
+	t.Run("a null allowed_realms column leaves the tenant unrestricted", func(t *testing.T) {
+		var realms listRealmsOutput
+		callToolOKAs(t, env.ts, env.tokenNullRealms, "list_realms", nil, &realms)
+		if !slices.Equal(realms.Realms, []string{postureRealmProd, postureRealmStaging}) {
+			t.Errorf("list_realms = %v, want [%s %s]", realms.Realms, postureRealmProd, postureRealmStaging)
+		}
+
+		// Reachable only if the realm scope is unrestricted: this alert is in
+		// staging, which no restricted policy in this suite allows.
+		var alert alertSummary
+		callToolOKAs(t, env.ts, env.tokenNullRealms, "get_alert",
+			map[string]any{"alert_id": env.aStagingAlert}, &alert)
+		if alert.RealmName != postureRealmStaging {
+			t.Errorf("get_alert realm = %q, want %q", alert.RealmName, postureRealmStaging)
+		}
+
+		// Statistics must count the whole tenant rather than nothing, which is
+		// what a scope-filtering bug would produce.
+		var stats alertStatsOutput
+		callToolOKAs(t, env.ts, env.tokenNullRealms, "get_alert_stats", nil, &stats)
+		if stats.TotalActive == 0 {
+			t.Error("get_alert_stats counted nothing for an unrestricted caller")
+		}
+
+		var listed listAlertsOutput
+		callToolOKAs(t, env.ts, env.tokenNullRealms, "list_alerts", nil, &listed)
+		if len(listed.Alerts) == 0 {
+			t.Error("list_alerts returned nothing for an unrestricted caller")
 		}
 	})
 
