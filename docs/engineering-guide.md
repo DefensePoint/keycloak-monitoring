@@ -269,19 +269,19 @@ make test-all               # both
 
 ### Backend — running with Docker (no local Go required)
 
-The project builds with `golang:1.25.1-alpine` (see `build/Dockerfile`). Same image runs tests:
+The project builds with `golang:1.25.14-alpine` (see `build/Dockerfile`). Same image runs tests:
 
 ```bash
 # Warm cache once (downloads modules, ~1 min):
 docker run --rm \
   -v "$PWD:/app" -v go-mod-cache:/go/pkg/mod -w /app \
-  golang:1.25.1-alpine \
+  golang:1.25.14-alpine \
   sh -c "apk add --no-cache git build-base && go mod download"
 
 # Subsequent runs are fast (~30s):
 docker run --rm \
   -v "$PWD:/app" -v go-mod-cache:/go/pkg/mod -w /app \
-  golang:1.25.1-alpine \
+  golang:1.25.14-alpine \
   sh -c "apk add --no-cache git build-base >/dev/null 2>&1 && go build ./... && go test -short ./..."
 ```
 
@@ -381,7 +381,7 @@ docker run --rm \
   -v "$PWD:/app" -v go-mod-cache:/go/pkg/mod -w /app \
   -e AMFA_TEST_DSN="host=host.docker.internal port=5455 dbname=adaptive_mfa user=keycloak password=password sslmode=disable" \
   --add-host=host.docker.internal:host-gateway \
-  golang:1.25.1-alpine \
+  golang:1.25.14-alpine \
   sh -c "apk add --no-cache git build-base >/dev/null 2>&1 && go test -tags=integration -v ./amfa/postgres/..."
 ```
 
