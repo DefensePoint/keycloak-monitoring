@@ -390,7 +390,7 @@ There are three layers. All Go commands run in Docker (no host toolchain require
 
 ```bash
 gotest() { docker run --rm -v "$PWD:/app" -v go-mod-cache:/go/pkg/mod -w /app \
-  golang:1.25.1-alpine sh -c "apk add --no-cache git build-base >/dev/null 2>&1 && $*"; }
+  golang:1.25.14-alpine sh -c "apk add --no-cache git build-base >/dev/null 2>&1 && $*"; }
 ```
 
 **1. Unit tests** (stubbed repository, no database):
@@ -406,7 +406,7 @@ Covers config defaults, all five rules (alert shape, severity, `AlertID`, thresh
 ```bash
 docker run --rm -v "$PWD:/app" -v go-mod-cache:/go/pkg/mod -w /app \
   -e AMFA_TEST_DSN="host=host.docker.internal port=5455 dbname=adaptive_mfa user=keycloak password=password sslmode=disable" \
-  golang:1.25.1-alpine sh -c "apk add --no-cache git build-base >/dev/null 2>&1 && \
+  golang:1.25.14-alpine sh -c "apk add --no-cache git build-base >/dev/null 2>&1 && \
     go test -tags=integration ./amfa/postgres/ ./amfacheck/"
 ```
 
