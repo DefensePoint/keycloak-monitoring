@@ -6,6 +6,7 @@ import type {
   ClientsResponse,
   UserDetailsResponse,
   EventsResponse,
+  KeycloakEventStats,
 } from "@/shared/types";
 
 class KeycloakService {
@@ -16,6 +17,26 @@ class KeycloakService {
     const params = realm ? { realm } : undefined;
     return apiClient.get<KeycloakDashboard | KeycloakDashboardAll>(
       `/tenants/${tenantId}/keycloak/dashboard`,
+      params,
+    );
+  }
+
+  /** Event counts for a window. Omitting realm asks the API to aggregate over
+   *  every realm the caller may read, which is what the dashboard's default
+   *  All Realms view needs. */
+  async getEventStats(
+    tenantId: string,
+    realm?: string,
+    start?: string,
+    end?: string,
+  ): Promise<KeycloakEventStats> {
+    const params: Record<string, string> = {};
+    if (realm) params.realm = realm;
+    if (start) params.start = start;
+    if (end) params.end = end;
+
+    return apiClient.get<KeycloakEventStats>(
+      `/tenants/${tenantId}/keycloak/events/stats`,
       params,
     );
   }

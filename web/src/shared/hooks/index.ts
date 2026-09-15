@@ -13,6 +13,7 @@ export {
 export { useRealmSelector } from "./useRealmSelector";
 export {
   useKeycloakDashboard,
+  useKeycloakEventStats,
   useRealmDashboard,
   useRealmEvents,
   useRealmUsers,
