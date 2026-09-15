@@ -9,6 +9,7 @@ const mockUseKeycloakDashboard = vi.fn();
 const mockUseEvents = vi.fn();
 const mockUseEventStats = vi.fn();
 const mockUseAlertStats = vi.fn();
+const mockUseKeycloakEventStats = vi.fn();
 
 vi.mock("react-router-dom", () => ({
   useLocation: () => ({ pathname: "/tenant-1/dashboard" }),
@@ -32,6 +33,7 @@ vi.mock("@/shared/hooks", () => ({
   useKeycloakDashboard: () => mockUseKeycloakDashboard(),
   useEvents: () => mockUseEvents(),
   useEventStats: () => mockUseEventStats(),
+  useKeycloakEventStats: () => mockUseKeycloakEventStats(),
   useAlertStats: () => mockUseAlertStats(),
 }));
 
@@ -184,6 +186,12 @@ describe("DashboardPage", () => {
 
     mockUseAlertStats.mockReturnValue({
       data: mockAlertStats,
+      isLoading: false,
+      isError: false,
+    });
+
+    mockUseKeycloakEventStats.mockReturnValue({
+      data: { login_count: 50, login_error_count: 5 },
       isLoading: false,
       isError: false,
     });
@@ -379,5 +387,48 @@ describe("DashboardPage", () => {
     render(<DashboardPage />);
 
     expect(screen.getByText(/connection error/i)).toBeInTheDocument();
+  });
+});
+
+describe("DashboardPage login KPIs", () => {
+  // The realm metrics the dashboard used to sum are collected over one metrics
+  // polling interval, so on any system that is not mid-login they read zero
+  // while real logins sit in the events table. The KPI strip has to read the
+  // event statistics for the selected window instead.
+  it("reports logins from the event statistics, not from interval-scoped realm metrics", async () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        ...mockDashboard,
+        realms: [
+          {
+            ...mockDashboard.realms[0],
+            metrics: {
+              total_users: 100,
+              active_sessions: 10,
+              login_events: 0,
+              failed_login_events: 0,
+            },
+          },
+        ],
+      },
+      dataUpdatedAt: Date.now(),
+      isLoading: false,
+      isError: false,
+    });
+    mockUseKeycloakEventStats.mockReturnValue({
+      data: { login_count: 13, login_error_count: 2 },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<DashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Failed Logins")).toBeInTheDocument();
+    });
+
+    const failedCard = screen.getByText("Failed Logins").closest("div");
+    expect(failedCard).toHaveTextContent("2");
+    expect(failedCard).not.toHaveTextContent(/\b0\b/);
   });
 });

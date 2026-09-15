@@ -51,6 +51,7 @@ export type {
   KeycloakDashboard,
   RealmListItem,
   KeycloakDashboardAll,
+  KeycloakEventStats,
 } from "./keycloak.types";
 export type {
   BaseFormFieldProps,
