@@ -1043,8 +1043,8 @@ auth:
 
     # Initial admin credentials
     # SECURITY NOTICE: These credentials are ONLY used when creating the initial admin user
-    # (when no users exist in the database). You will be REQUIRED to change the password
-    # on first login.
+    # (when no users exist in the database). Change the password after first login; the
+    # initial password remains valid until changed.
     #
     # CRITICAL: You MUST set the initial admin password via environment variable in production
     # Example: MONITORING_AUTH_SIMPLE_DEFAULT_PASS='YourS3cur3P@ssw0rd!'

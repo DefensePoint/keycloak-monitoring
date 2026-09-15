@@ -97,7 +97,7 @@ make docker-up
 
 # 5. Access the dashboard at http://localhost:7880
 # Login with your configured admin credentials
-# IMPORTANT: You will be required to change the password on first login for security
+# IMPORTANT: Change the password after first login; the initial password remains valid until changed
 ```
 
 ### What You Get
@@ -319,7 +319,8 @@ auth:
 - Minimum 12 characters
 - At least one uppercase letter, one lowercase letter, one number, and one special character
 - Cannot be a common weak password (e.g., admin123, password123, etc.)
-- Admin will be forced to change password on first login
+
+Change the password after first login. The platform does not rotate it automatically, so the initial password remains valid until changed.
 
 For complete configuration reference, see the [configuration documents](docs/configuration.md) or review the [configuration example](config.yaml.example).
 
