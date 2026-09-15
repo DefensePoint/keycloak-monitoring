@@ -283,3 +283,18 @@ export interface KeycloakDashboardAll {
   total_realms: number;
   version_info?: KeycloakVersionInfo;
 }
+
+/** Event counts for a window, as returned by the keycloak event stats endpoint.
+ *  Realm is the realm asked for, or "all" when the counts were aggregated
+ *  across every realm the caller may read. */
+export interface KeycloakEventStats {
+  realm: string;
+  start: string;
+  end: string;
+  login_count: number;
+  login_error_count: number;
+  logout_count: number;
+  register_count: number;
+  code_to_token_count: number;
+  total_events: number;
+}

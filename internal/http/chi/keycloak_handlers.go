@@ -29,6 +29,11 @@ type KeycloakTenant struct {
 }
 
 // KeycloakHandlers handles HTTP requests for keycloak operations.
+// allRealms is what an aggregate reports in its realm field. It matches the
+// sentinel the dashboard's realm selector already uses, so the response names
+// the same thing the user picked.
+const allRealms = "all"
+
 type KeycloakHandlers struct {
 	service        keycloak.Service
 	rbacService    RBACChecker
@@ -481,26 +486,98 @@ func (h *KeycloakHandlers) handleKeycloakEventStats(w http.ResponseWriter, r *ht
 	tenantID := chi.URLParam(r, "tenantID")
 
 	realmName := r.URL.Query().Get("realm")
-	if realmName == "" {
-		httputil.RespondBadRequest(w, h.log, "realm query parameter is required")
+	from, to := parseTimeWindow(r, 24)
+
+	if realmName != "" {
+		// Check realm access
+		if !h.checkRealmAccess(ctx, w, tenantID, realmName) {
+			return
+		}
+
+		stats, err := h.service.GetEventStats(ctx, tenantID, realmName, from, to)
+		if err != nil {
+			h.log.Error("Failed to get event stats", logger.Err(err))
+			httputil.RespondInternalError(w, h.log, "Failed to retrieve event statistics")
+			return
+		}
+
+		httputil.RespondSuccess(w, h.log, stats)
 		return
 	}
 
-	// Check realm access
-	if !h.checkRealmAccess(ctx, w, tenantID, realmName) {
+	// No realm means All Realms, which is the dashboard's default view because
+	// default_realm ships empty. Refusing it left the KPI strip showing zero
+	// logins and zero failures while failures existed. Unlike the AMFA
+	// transport, whose credentials are scoped to a single realm, this path can
+	// aggregate: the platform already enumerates and polls every realm.
+	realms, ok := h.statsRealmsForCaller(ctx, w, tenantID)
+	if !ok {
 		return
 	}
 
-	from, to := parseHoursParam(r, 24)
+	aggregate := &keycloak.EventStats{Realm: allRealms, Start: from, End: to}
+	for _, realm := range realms {
+		stats, err := h.service.GetEventStats(ctx, tenantID, realm, from, to)
+		if err != nil {
+			h.log.Error("Failed to get event stats",
+				logger.Str("realm", realm),
+				logger.Err(err))
+			httputil.RespondInternalError(w, h.log, "Failed to retrieve event statistics")
+			return
+		}
 
-	stats, err := h.service.GetEventStats(ctx, tenantID, realmName, from, to)
+		aggregate.LoginCount += stats.LoginCount
+		aggregate.LoginErrorCount += stats.LoginErrorCount
+		aggregate.LogoutCount += stats.LogoutCount
+		aggregate.RegisterCount += stats.RegisterCount
+		aggregate.CodeToTokenCount += stats.CodeToTokenCount
+		aggregate.TotalEvents += stats.TotalEvents
+	}
+
+	httputil.RespondSuccess(w, h.log, aggregate)
+}
+
+// statsRealmsForCaller resolves which realms an All Realms aggregate may read.
+//
+// An unrestricted caller gets every realm the tenant has; a scoped caller gets
+// only their own. An empty slice with all = false means no realm, never no
+// restriction, so it is refused rather than widened: summing across realms the
+// caller cannot open would leak their activity through a total.
+func (h *KeycloakHandlers) statsRealmsForCaller(ctx context.Context, w http.ResponseWriter, tenantID string) ([]string, bool) {
+	user := GetUserFromContext(ctx)
+	if user == nil {
+		httputil.RespondUnauthorized(w, h.log, "Authentication required")
+		return nil, false
+	}
+
+	allowed, all, err := allowedRealms(ctx, h.rbacService, user.ID, tenantID)
 	if err != nil {
-		h.log.Error("Failed to get event stats", logger.Err(err))
+		h.log.Error("Failed to resolve permitted realms", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Failed to retrieve event statistics")
-		return
+		return nil, false
 	}
 
-	httputil.RespondSuccess(w, h.log, stats)
+	if all {
+		infos, err := h.service.ListRealms(ctx, tenantID)
+		if err != nil {
+			h.log.Error("Failed to list realms for stats aggregate", logger.Err(err))
+			httputil.RespondInternalError(w, h.log, "Failed to retrieve event statistics")
+			return nil, false
+		}
+
+		names := make([]string, 0, len(infos))
+		for _, info := range infos {
+			names = append(names, info.RealmName)
+		}
+		return names, true
+	}
+
+	if len(allowed) == 0 {
+		httputil.RespondForbidden(w, h.log, "Access to realm denied")
+		return nil, false
+	}
+
+	return allowed, true
 }
 
 // handleKeycloakRealms returns information about monitored realms.

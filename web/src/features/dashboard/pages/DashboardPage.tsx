@@ -31,6 +31,7 @@ import {
   useRealmSelector,
   useEvents,
   useEventStats,
+  useKeycloakEventStats,
   useAlertStats,
 } from "@/shared/hooks";
 import { useTenant, useToast } from "@/shared/context";
@@ -203,6 +204,16 @@ export function DashboardPage() {
     realm: selectedRealm !== "all" ? selectedRealm : undefined,
   });
 
+  // Login counts come from the events table for the selected window. Summing
+  // the per-realm metrics instead reported zero on any system that was not
+  // mid-login, because those are collected over one metrics polling interval.
+  const { data: loginStats } = useKeycloakEventStats({
+    tenantId: selectedTenant?.tenant_id,
+    realm: selectedRealm !== "all" ? selectedRealm : undefined,
+    start: startTime,
+    end: endTime,
+  });
+
   const { data: alertStats } = useAlertStats(selectedTenant?.tenant_id);
 
   // Pre-format events with timestamps to avoid repeated formatting in render
@@ -239,18 +250,12 @@ export function DashboardPage() {
         (sum, r) => sum + (r.metrics?.active_sessions || 0),
         0,
       ),
-      totalLogins: filteredRealms.reduce(
-        (sum, r) => sum + (r.metrics?.login_events || 0),
-        0,
-      ),
-      totalFailedLogins: filteredRealms.reduce(
-        (sum, r) => sum + (r.metrics?.failed_login_events || 0),
-        0,
-      ),
+      totalLogins: loginStats?.login_count ?? 0,
+      totalFailedLogins: loginStats?.login_error_count ?? 0,
       healthyRealms: filteredRealms.filter((r) => r.enabled && r.is_healthy)
         .length,
     };
-  }, [filteredRealms]);
+  }, [filteredRealms, loginStats]);
 
   // Memoize memory calculations
   const memoryMetrics = useMemo(() => {
