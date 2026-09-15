@@ -129,6 +129,10 @@ func (s *service) Callback(ctx context.Context, code, state, expectedState strin
 		return nil, nil, fmt.Errorf("failed to find or create user: %w", err)
 	}
 
+	if err := s.refuseUnusableAccount(dbUser); err != nil {
+		return nil, nil, err
+	}
+
 	// Create session
 	sessionID := generateSessionID()
 	session := &Session{
@@ -209,6 +213,31 @@ func (s *service) RefreshSession(ctx context.Context, sessionID string) (*Sessio
 	return session, nil
 }
 
+// refuseUnusableAccount rejects a sign-in for an account this platform has
+// deactivated or blocked, matching what simple auth enforces in
+// simpleAuthService.Authenticate.
+//
+// The check has to read the persisted row rather than the profile assembled
+// from the IdP claims: that profile always carries IsActive true, because the
+// same struct doubles as the create payload for a first-time SSO user. The
+// IdP answers "who is this", only our row answers "may they still come in".
+func (s *service) refuseUnusableAccount(user *domain.User) error {
+	if user == nil || (user.IsActive && !user.IsBlocked) {
+		return nil
+	}
+
+	s.logger.Warn("Authentication failed - account inactive or blocked",
+		logger.Uint("user_id", user.ID),
+		logger.Str("subject", user.Subject),
+		logger.Bool("is_active", user.IsActive),
+		logger.Bool("is_blocked", user.IsBlocked))
+
+	return &AuthError{
+		Code:    ErrCodeUnauthorized,
+		Message: "account is inactive or blocked",
+	}
+}
+
 // FindOrCreateUser finds or creates a user from OAuth2 user info.
 func (s *service) FindOrCreateUser(ctx context.Context, userInfo *UserInfo) (*domain.User, error) {
 	user := &domain.User{
@@ -227,6 +256,10 @@ func (s *service) FindOrCreateUser(ctx context.Context, userInfo *UserInfo) (*do
 	dbUser, err := s.userRepository.FindOrCreateBySubject(ctx, user)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find or create user: %w", err)
+	}
+
+	if err := s.refuseUnusableAccount(dbUser); err != nil {
+		return nil, err
 	}
 
 	return dbUser, nil
