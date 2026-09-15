@@ -3,6 +3,7 @@ import { keycloakService } from "@/shared/services";
 import type {
   KeycloakDashboard,
   KeycloakDashboardAll,
+  KeycloakEventStats,
   UsersResponse,
   ClientsResponse,
 } from "@/shared/types";
@@ -122,5 +123,35 @@ export function useRealmClients({
     queryFn: () => keycloakService.getRealmClients(tenantId!, realmName!),
     refetchInterval,
     enabled: !!realmName && !!tenantId,
+  });
+}
+
+interface UseKeycloakEventStatsOptions {
+  tenantId: string | undefined;
+  realm?: string;
+  start?: string;
+  end?: string;
+  refetchInterval?: number;
+}
+
+/** Login and error counts for the selected window.
+ *
+ *  The dashboard used to add up per-realm metrics for this, but those are
+ *  collected over a single metrics polling interval, so they read zero on any
+ *  system that is not mid-login. These counts come from the events table and
+ *  cover the window the user actually picked. */
+export function useKeycloakEventStats({
+  tenantId,
+  realm,
+  start,
+  end,
+  refetchInterval = 10000,
+}: UseKeycloakEventStatsOptions) {
+  return useQuery<KeycloakEventStats>({
+    queryKey: ["keycloak-event-stats", tenantId, realm, start, end],
+    queryFn: () => keycloakService.getEventStats(tenantId!, realm, start, end),
+    enabled: !!tenantId,
+    refetchInterval,
+    retry: false,
   });
 }
