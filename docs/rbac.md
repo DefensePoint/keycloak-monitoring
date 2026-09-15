@@ -322,7 +322,7 @@ Bootstrap flow (`internal/fx/bootstrap.go:97-157`):
 2. Creates the initial user.
 3. Calls `RBACSeeder.CreateDefaultAdminUser(userID)` (`rbac/seeder.go:177-178`) to assign the `admin` role.
 
-The initial admin is required to change their password on first login.
+The initial admin keeps the install-time password until it is changed manually. Change it after first login. Forced password rotation on first login was considered and deliberately not implemented.
 
 ### OAuth2 / OIDC
 

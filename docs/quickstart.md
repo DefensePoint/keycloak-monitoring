@@ -117,7 +117,7 @@ Open your browser to **<http://localhost:7880>**
 - Username: The value you set in `MONITORING_AUTH_SIMPLE_DEFAULT_USER`
 - Password: The value you set in `MONITORING_AUTH_SIMPLE_DEFAULT_PASS`
 
-**IMPORTANT**: You will be required to change your password on first login for security.
+**IMPORTANT**: Change your password after first login. The initial password is supplied via environment variable and remains valid until changed.
 
 ### Step 7: Verify Monitoring
 
