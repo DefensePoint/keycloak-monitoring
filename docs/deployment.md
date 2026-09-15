@@ -200,21 +200,9 @@ docker build --build-arg SERVICE=server -t kmt-server:latest .
 docker build --build-arg SERVICE=web -t kmt-web:latest .
 ```
 
-The web image accepts an optional `VITE_CARTO_BASEMAP_KEY` build arg for the
-AMFA geolocation map:
-
-```bash
-docker build --build-arg SERVICE=web \
-  --build-arg VITE_CARTO_BASEMAP_KEY="$VITE_CARTO_BASEMAP_KEY" \
-  -t kmt-web:latest .
-```
-
-Build args are baked in at build time, not read at runtime, so an image built
-without the key keeps serving watermarked tiles until it is rebuilt with one.
-Omitting it is supported: the map still renders, but CARTO stamps
-"API KEY REQUIRED" across every tile. See `web/.env.example` for how to request
-a free key. Never commit a key to the repository; supply it at build time from
-wherever your build runs.
+The AMFA geolocation map draws from boundary data bundled in the web image, so
+it needs no tile-service key and no network access to a third party. See
+`web/public/geo/SOURCE.md` for the data's provenance and licence.
 
 ### Step 4: Start Services
 

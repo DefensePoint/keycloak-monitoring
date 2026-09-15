@@ -8,20 +8,6 @@ FROM node:20-alpine AS frontend-builder
 # Re-declare ARG to use it in this stage
 ARG SERVICE
 
-# Free CARTO basemaps API key for the AMFA geolocation map. Vite inlines env
-# vars at build time, so this has to be present here rather than at runtime.
-# Optional: without it the map still renders, but CARTO watermarks every tile
-# with "API KEY REQUIRED". Request one at https://carto.com/basemaps/apikey/
-#
-# This is a public, rate-limited tile key that ships inside the JS bundle
-# anyway, so passing it as a build arg (visible in `docker history`) costs
-# nothing. Do not use this mechanism for real secrets.
-#
-# BuildKit emits SecretsUsedInArgOrEnv for this ARG because the name ends in
-# KEY. That warning is expected and benign here for the reason above; the name
-# has to match the env var Vite looks for, so it cannot be renamed away.
-ARG VITE_CARTO_BASEMAP_KEY=""
-
 WORKDIR /frontend
 
 # Copy frontend package files and conditionally build
@@ -37,7 +23,7 @@ COPY web/ ./
 
 # Build frontend only if SERVICE=web
 RUN if [ "$SERVICE" = "web" ]; then \
-    VITE_CARTO_BASEMAP_KEY="$VITE_CARTO_BASEMAP_KEY" npm run build; \
+    npm run build; \
 else \
     echo "Skipping frontend build for SERVICE=$SERVICE"; \
     mkdir -p dist; \
