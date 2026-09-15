@@ -46,7 +46,7 @@ You should see realms `master`, `AdaptiveAuth`, `SSOIdP`, `ExtensionTest` being 
 
 | Component | URL                                                      | Notes                                                                                                            |
 | --------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Dashboard | [http://localhost:7880](http://localhost:7880)           | Login `admin` / value of `MONITORING_AUTH_SIMPLE_DEFAULT_PASS` in `.env`. Password change forced on first login. |
+| Dashboard | [http://localhost:7880](http://localhost:7880)           | Login `admin` / value of `MONITORING_AUTH_SIMPLE_DEFAULT_PASS` in `.env`. Change the password after first login. |
 | API       | [http://localhost:7888](http://localhost:7888)           | REST + Swagger.                                                                                                  |
 | Postgres  | localhost:5433                                           | user `monitoring`, db `monitoring`, password `monitoring_password`.                                              |
 | Keycloak  | [http://localhost:8080/auth](http://localhost:8080/auth) | admin/admin, from `keycloak-deployment` (not managed here).                                                      |
@@ -75,7 +75,7 @@ make docker-clean     # drops the platform's postgres data
 docker compose -f deployments/local/docker-compose.yml down -v
 ```
 
-Then `make docker-up` to start fresh. The first login will again prompt for an admin password change.
+Then `make docker-up` to start fresh. The initial admin is re-created from the values in `.env`.
 
 ## Notes
 
