@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"time"
 
@@ -324,6 +325,20 @@ func (h *AuthHandlers) handleCallback(w http.ResponseWriter, r *http.Request) {
 	// Create/update user in database via service
 	user, err := h.service.FindOrCreateUser(r.Context(), userInfo)
 	if err != nil {
+		// A deactivated or blocked account is refused on purpose. Reporting it
+		// as a server fault would hide a security decision behind a fake error:
+		// nobody chasing "Internal server error" would think to check the
+		// user's status. errors.As rather than a type assertion so a future
+		// wrap upstream cannot silently turn this back into a 500.
+		var authErr *auth.AuthError
+		if errors.As(err, &authErr) && authErr.Code == auth.ErrCodeUnauthorized {
+			h.log.Warn("OAuth2 sign-in refused",
+				logger.Str("subject", userInfo.Subject),
+				logger.Err(err))
+			httputil.RespondUnauthorized(w, h.log, authErr.Message)
+			return
+		}
+
 		h.log.Error("Failed to create user in database", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Internal server error")
 		return
