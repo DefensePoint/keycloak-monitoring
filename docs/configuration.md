@@ -895,7 +895,7 @@ auth:
     #   - Minimum 12 characters
     #   - Uppercase, lowercase, number, and special character required
     #   - Cannot be common weak password (admin123, password123, etc.)
-    # Admin will be forced to change password on first login
+    # Change the admin password after first login; the initial password remains valid until changed
     default_user: ""
     default_pass: ""
     default_email: ""
