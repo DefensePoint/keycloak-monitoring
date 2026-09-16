@@ -389,6 +389,54 @@ Classification:
 - **On creation** — set based on auth flow (simple auth bootstrap sets `simple`; OAuth2 login sets `oauth2`).
 - **On login** — OAuth2 users have their type reaffirmed.
 
+## Removing a User's Access
+
+`DELETE /api/users/{id}` **deactivates**; it deletes nothing. The account, its
+roles, its tenant policies and its history all stay, and setting the account
+active again restores exactly what was there. No code path anywhere in the
+platform sets `deleted_at` on a user, so a user row is never removed and never
+soft-deleted — only deactivated. The route keeps the `DELETE` verb because that
+is the REST spelling of "remove this", and changing it would break existing
+clients.
+
+### It does not take effect immediately
+
+Deactivation is checked when somebody signs in, not on every request, so **a
+session created before the deactivation stays valid until it expires**: up to
+`auth.session.max_age`, 24 hours by default.
+
+The middleware does re-read the account on each request — `middleware.go:304`
+calls `GetUserBySubject` — but only to recover the user ID that RBAC needs. It
+never looks at `is_active` or `is_blocked`, and it cannot: `UserDetails`, the
+struct that lookup fills in, carries no status field at all
+(`internal/fx/server.go:78`). A failed lookup is ignored too, falling back to
+whatever the cookie said. So the account is read on every request and its state
+is never consulted.
+
+That makes the fix smaller than it looks, if it is ever wanted: add the two
+status fields to `UserDetails`, populate them in the adapter, and refuse in the
+middleware, which is what API-token authentication already does.
+
+| Access route | When deactivation takes effect |
+|---|---|
+| A session that already exists | When it expires, up to `max_age` (default 24h) |
+| A new sign-in | Immediately — refused as inactive |
+| API tokens | Immediately — the owner is re-checked on every call |
+
+The only thing that ends a live session early is the user logging out, which
+adds their session to an in-memory blacklist. That blacklist is per-process, so
+it does not carry across replicas, and no administrator action reaches it.
+
+**If you are cutting off access urgently**, deactivating is not enough on its
+own. Shorten `auth.session.max_age`, or revoke at the identity provider and end
+the session there, or restart the platform — an in-memory blacklist and its
+sessions do not survive that.
+
+### Deactivating is not deleting
+
+If the intent is to remove someone's data rather than their access, this is not
+that operation and there is no endpoint that is.
+
 ---
 
 ## Multi-Tenancy
