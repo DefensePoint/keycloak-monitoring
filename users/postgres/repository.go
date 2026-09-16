@@ -79,26 +79,41 @@ func (r *Repository) FindOrCreateBySubject(ctx context.Context, user *domain.Use
 	// Try to find existing user by subject
 	result := r.db.WithContext(ctx).Where(sqlWhereSubject, dbUser.Subject).First(&existingUser)
 
-	if result.Error == gorm.ErrRecordNotFound {
+	switch {
+	case result.Error == nil:
+		// Matched on subject: the ordinary case.
+
+	case errors.Is(result.Error, gorm.ErrRecordNotFound):
 		// Nobody live matches, but a deleted account might. Refuse rather than
 		// create a second one for the same person: see users.ErrUserDeleted.
 		if err := r.refuseIfDeleted(ctx, dbUser); err != nil {
 			return nil, err
 		}
 
-		// User doesn't exist, create new user
-		if err := r.db.WithContext(ctx).Create(dbUser).Error; err != nil {
-			return nil, fmt.Errorf("failed to create user: %w", err)
+		// An unfamiliar subject can still be a familiar person.
+		adopted, err := r.adoptByVerifiedEmail(ctx, dbUser, &existingUser)
+		if err != nil {
+			return nil, err
 		}
-		return toDomainUser(dbUser), nil
-	}
+		if !adopted {
+			if err := r.db.WithContext(ctx).Create(dbUser).Error; err != nil {
+				return nil, fmt.Errorf("failed to create user: %w", err)
+			}
+			return toDomainUser(dbUser), nil
+		}
+		// existingUser now holds the account this login belongs to, so the
+		// update below runs for it exactly as for a subject match: a relinked
+		// login refreshes the profile like any other.
 
-	if result.Error != nil {
+	default:
 		return nil, fmt.Errorf("failed to query user: %w", result.Error)
 	}
 
 	// User exists, update their information
 	updates := map[string]interface{}{
+		// Carried because adoption above may have changed it. For a subject
+		// match this writes back the value it just matched on.
+		"subject":            dbUser.Subject,
 		"email":              dbUser.Email,
 		"email_verified":     dbUser.EmailVerified,
 		"name":               dbUser.Name,
@@ -123,6 +138,58 @@ func (r *Repository) FindOrCreateBySubject(ctx context.Context, user *domain.Use
 	}
 
 	return toDomainUser(&existingUser), nil
+}
+
+// adoptByVerifiedEmail finds the account this login belongs to when the subject
+// is new but the person is not, and loads it into existing.
+//
+// An identity provider's subject is stable only while the provider is. Rebuild
+// a realm, migrate to a new one, or re-provision a user, and the same person
+// arrives with a new sub claim. Without this they become a second account:
+// their roles, tenant policies and history stay with a row nobody can reach any
+// more, and an administrator has to notice and merge them by hand.
+//
+// The address is what identifies them across that change, so this matches on
+// email — but only on an address the identity provider says it has verified.
+// That condition is the whole safety of it. An unverified address is a claim
+// the person made about themselves, and honouring it would let anyone who can
+// register an address in the realm inherit whatever account already holds it.
+// Until recently every account read as verified whether or not anyone had
+// checked, which is why this could not be built before that was fixed.
+//
+// Restricted further to accounts that hold no local password. Adopting a
+// username-and-password account would let an SSO login take over local
+// credentials, which is a different decision from the one this implements and a
+// wider trust boundary than a realm rebuild needs. Those credentials also carry
+// the way back in when the identity provider is unreachable, which is exactly
+// when nobody can afford to have lost them.
+//
+// Tested on the password rather than on auth_method, which looks like the
+// natural column and is not trustworthy here: role_sync builds its profile
+// without an AuthMethod, and the update below writes that blank through, so
+// every account Keycloak has synced sits at "" until the next restart repairs
+// it. Keying on auth_method meant adoption silently skipped exactly the
+// accounts a Keycloak deployment has most of. The password is the thing that
+// would actually be taken over, so it is the thing to ask about.
+//
+// At most one account can match: the unique index on email covers live rows
+// carrying an address, so there is no ambiguity to resolve.
+func (r *Repository) adoptByVerifiedEmail(ctx context.Context, candidate *database.User, existing *database.User) (bool, error) {
+	if !candidate.EmailVerified || candidate.Email == "" || candidate.Subject == "" {
+		return false, nil
+	}
+
+	err := r.db.WithContext(ctx).
+		Where("email = ? AND (password_hash IS NULL OR password_hash = '')", candidate.Email).
+		First(existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to look for an account with this email: %w", err)
+	}
+
+	return true, nil
 }
 
 // GetBySubject retrieves a user by their subject (OAuth2 sub claim).
