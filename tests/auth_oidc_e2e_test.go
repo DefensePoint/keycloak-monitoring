@@ -776,3 +776,83 @@ func TestAuthOIDCE2E_UsersWithoutAnEmailCanBothSignIn(t *testing.T) {
 		t.Errorf("expected %d accounts with no email, found %d", len(e2eNoEmailUsers), n)
 	}
 }
+
+// TestAuthOIDCE2E_ARebuiltRealmKeepsTheSameAccount is the scenario linking by
+// email exists for, driven by actually rebuilding the realm.
+//
+// The repository tests hand the code two different subjects and assert it
+// reconciles them, which proves the reconciliation and assumes the premise. A
+// realm really is deleted and recreated here, so the new sub claim is one
+// Keycloak minted rather than one the test chose, and the address arrives
+// verified because Keycloak says it is.
+func TestAuthOIDCE2E_ARebuiltRealmKeepsTheSameAccount(t *testing.T) {
+	kcURL, dsn := e2eEnv(t)
+	ctx := context.Background()
+
+	admin := newKCAdmin(t, kcURL)
+	admin.provisionRealm(t)
+
+	_, db := newBootedClient(t, dsn)
+
+	newSvc := func() auth.Service {
+		provider, err := auth.NewOIDCProvider(ctx, &auth.Config{
+			ProviderURL:  kcURL + "/realms/" + e2eRealm,
+			ClientID:     e2eClientID,
+			ClientSecret: e2eClientSecret,
+			RedirectURL:  "http://localhost:7880/callback",
+			Scopes:       []string{"openid", "email", "profile"},
+		}, logger.NewNoop())
+		if err != nil {
+			t.Fatalf("NewOIDCProvider: %v", err)
+		}
+		return auth.NewService(provider, auth.NewMemorySessionStore(time.Hour),
+			userspg.NewRepository(db), logger.NewNoop(), &auth.Config{})
+	}
+
+	u := e2eUsers[0] // the verified one; an unverified address must never link
+
+	before, err := newSvc().FindOrCreateUser(ctx, mustVerify(t, ctx,
+		mustProvider(t, ctx, kcURL), idTokenFor(t, kcURL, u.username)))
+	if err != nil {
+		t.Fatalf("first sign-in: %v", err)
+	}
+
+	// Rebuild the realm. Same people, same addresses, entirely new subjects.
+	admin.provisionRealm(t)
+
+	after, err := newSvc().FindOrCreateUser(ctx, mustVerify(t, ctx,
+		mustProvider(t, ctx, kcURL), idTokenFor(t, kcURL, u.username)))
+	if err != nil {
+		t.Fatalf("sign-in after the realm was rebuilt: %v", err)
+	}
+
+	if after.Subject == before.Subject {
+		t.Fatal("Keycloak reissued the same subject after a rebuild, so this test is not " +
+			"exercising the case it describes")
+	}
+	if after.ID != before.ID {
+		t.Errorf("rebuilding the realm split one person into two accounts (id %d then %d); "+
+			"their roles and history stay on the unreachable one", before.ID, after.ID)
+	}
+
+	var n int64
+	db.Model(&database.User{}).Where("email = ?", u.email).Count(&n)
+	if n != 1 {
+		t.Errorf("expected one account for %s, found %d", u.email, n)
+	}
+}
+
+func mustProvider(t *testing.T, ctx context.Context, kcURL string) *auth.OIDCProvider {
+	t.Helper()
+	p, err := auth.NewOIDCProvider(ctx, &auth.Config{
+		ProviderURL:  kcURL + "/realms/" + e2eRealm,
+		ClientID:     e2eClientID,
+		ClientSecret: e2eClientSecret,
+		RedirectURL:  "http://localhost:7880/callback",
+		Scopes:       []string{"openid", "email", "profile"},
+	}, logger.NewNoop())
+	if err != nil {
+		t.Fatalf("NewOIDCProvider: %v", err)
+	}
+	return p
+}

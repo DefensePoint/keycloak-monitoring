@@ -43,15 +43,26 @@ func newDeletedAccountRepo(t *testing.T) (*Repository, *gorm.DB) {
 	// migrations AutoMigrate runs on top of GORM's output, and without them
 	// every OAuth user here collides on an empty username — a property of the
 	// harness, not of the behaviour under test.
-	if _, err := database.NewClient(deletedAccountDBConfig(t, dsn), logger.NewNoop()); err != nil {
+	client, err := database.NewClient(deletedAccountDBConfig(t, dsn), logger.NewNoop())
+	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
+	// Both connections are closed at the end. Without this, a run with -count
+	// exhausts PostgreSQL's connection slots long before it exhausts the
+	// interleavings it was trying to explore.
+	t.Cleanup(func() { _ = client.Close() })
+
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
 	})
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
 
 	clean := func() {
 		db.Unscoped().Where("subject LIKE ? OR email LIKE ?", "del-%", "del-%").Delete(&database.User{})
