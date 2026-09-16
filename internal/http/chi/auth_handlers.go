@@ -411,12 +411,22 @@ func (h *AuthHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 		email = e
 	}
 
+	// A logout is worth being able to find again, so the line below names the
+	// session it ended. The session carries no user id — only the subject,
+	// address and name, which identify the person rather than the account — so
+	// the truncated session id is what ties this to the sign-in that created it
+	// and to the revocation just below.
+	var sessionRef string
+	if sessionID, ok := session.Values["session_id"].(string); ok && len(sessionID) >= 8 {
+		sessionRef = sessionID[:8] + "..."
+	}
+
 	// Add session ID to blacklist to prevent reuse (server-side revocation)
 	if h.sessionBlacklist != nil {
 		if sessionID, ok := session.Values["session_id"].(string); ok && sessionID != "" {
 			h.sessionBlacklist.Revoke(sessionID)
 			h.log.Debug("Session revoked and added to blacklist",
-				logger.Str("session_id", sessionID[:8]+"..."),
+				logger.Str("session_id", sessionRef),
 				logger.Str("email", email))
 		}
 	}
@@ -429,7 +439,9 @@ func (h *AuthHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.log.Info("User logged out", logger.Str("email", email))
+	h.log.Info("User logged out",
+		logger.Str("session_id", sessionRef),
+		logger.Str("email", email))
 
 	// Redirect to home page
 	http.Redirect(w, r, "/", http.StatusFound)

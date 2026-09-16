@@ -260,7 +260,7 @@ func (c *IdentityProviderMetadataCheck) checkCertificateExpiration(
 			c.logger.Warn("SAML IDP certificate is expired",
 				logger.Str("realm", realmName),
 				logger.Str("idp_alias", idp.Alias),
-				logger.Str("subject", cert.Subject),
+				logger.Str("certificate_subject", cert.Subject),
 				logger.Time("expired_at", cert.NotAfter))
 		} else if status.IsExpiringSoon {
 			alert := c.createExpiringSoonCertificateAlert(realmName, idp, metadataURL, cert, status)
@@ -269,14 +269,14 @@ func (c *IdentityProviderMetadataCheck) checkCertificateExpiration(
 			c.logger.Warn("SAML IDP certificate is expiring soon",
 				logger.Str("realm", realmName),
 				logger.Str("idp_alias", idp.Alias),
-				logger.Str("subject", cert.Subject),
+				logger.Str("certificate_subject", cert.Subject),
 				logger.Time("expires_at", cert.NotAfter),
 				logger.Int("days_until_expiry", status.DaysUntilExpiry))
 		} else {
 			c.logger.Debug("SAML IDP certificate is valid",
 				logger.Str("realm", realmName),
 				logger.Str("idp_alias", idp.Alias),
-				logger.Str("subject", cert.Subject),
+				logger.Str("certificate_subject", cert.Subject),
 				logger.Time("expires_at", cert.NotAfter),
 				logger.Int("days_until_expiry", status.DaysUntilExpiry))
 		}

@@ -247,9 +247,18 @@ func (s *service) refuseDeletedAccount(err error, userInfo *UserInfo) *AuthError
 		return nil
 	}
 
-	s.logger.Warn("Authentication failed - the account was deleted",
+	// Named by the id of the deleted row as well as by the claims that arrived:
+	// the id tells an administrator which account to look at, which a line
+	// saying only that an account was deleted could not.
+	deletedFields := []logger.Field{
 		logger.Str("subject", userInfo.Subject),
-		logger.Str("email", userInfo.Email))
+		logger.Str("email", userInfo.Email),
+	}
+	var deletedErr *users.DeletedAccountError
+	if errors.As(err, &deletedErr) {
+		deletedFields = append(deletedFields, logger.Uint("user_id", deletedErr.UserID))
+	}
+	s.logger.Warn("Authentication failed - the account was deleted", deletedFields...)
 
 	return &AuthError{
 		Code:    ErrCodeUnauthorized,

@@ -62,14 +62,15 @@ func (r *Repository) refuseIfDeleted(ctx context.Context, candidate *database.Us
 		return nil
 	}
 
-	var deleted int64
-	if err := q.Count(&deleted).Error; err != nil {
+	var deleted database.User
+	err := q.Select("id").First(&deleted).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("failed to check for a deleted account: %w", err)
 	}
-	if deleted > 0 {
-		return users.ErrUserDeleted
-	}
-	return nil
+	return &users.DeletedAccountError{UserID: deleted.ID}
 }
 
 func (r *Repository) FindOrCreateBySubject(ctx context.Context, user *domain.User) (*domain.User, error) {
