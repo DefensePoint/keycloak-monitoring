@@ -2,11 +2,13 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/users"
 )
 
 // Service defines the interface for authentication operations.
@@ -132,6 +134,9 @@ func (s *service) Callback(ctx context.Context, code, state, expectedState strin
 
 	dbUser, err := s.userRepository.FindOrCreateBySubject(ctx, user)
 	if err != nil {
+		if authErr := s.refuseDeletedAccount(err, userInfo); authErr != nil {
+			return nil, nil, authErr
+		}
 		return nil, nil, fmt.Errorf("failed to find or create user: %w", err)
 	}
 
@@ -227,6 +232,32 @@ func (s *service) RefreshSession(ctx context.Context, sessionID string) (*Sessio
 // from the IdP claims: that profile always carries IsActive true, because the
 // same struct doubles as the create payload for a first-time SSO user. The
 // IdP answers "who is this", only our row answers "may they still come in".
+// refuseDeletedAccount turns the repository's "this person was deleted" into a
+// refusal the caller can act on, and returns nil for every other error so the
+// generic path still wraps those.
+//
+// Kept distinct from refuseUnusableAccount below, which answers a different
+// question. That one reads flags on a row that exists; this one is about a row
+// that deliberately does not, so there is no account to inspect and nothing the
+// user can do about it themselves. Both end as ErrCodeUnauthorized, because to
+// the person signing in the difference is not actionable, but the log lines
+// differ and that is where an administrator looks.
+func (s *service) refuseDeletedAccount(err error, userInfo *UserInfo) *AuthError {
+	if !errors.Is(err, users.ErrUserDeleted) {
+		return nil
+	}
+
+	s.logger.Warn("Authentication failed - the account was deleted",
+		logger.Str("subject", userInfo.Subject),
+		logger.Str("email", userInfo.Email))
+
+	return &AuthError{
+		Code:    ErrCodeUnauthorized,
+		Message: "account has been deleted",
+		Err:     err,
+	}
+}
+
 func (s *service) refuseUnusableAccount(user *domain.User) error {
 	if user == nil || (user.IsActive && !user.IsBlocked) {
 		return nil
@@ -261,6 +292,9 @@ func (s *service) FindOrCreateUser(ctx context.Context, userInfo *UserInfo) (*do
 
 	dbUser, err := s.userRepository.FindOrCreateBySubject(ctx, user)
 	if err != nil {
+		if authErr := s.refuseDeletedAccount(err, userInfo); authErr != nil {
+			return nil, authErr
+		}
 		return nil, fmt.Errorf("failed to find or create user: %w", err)
 	}
 

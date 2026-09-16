@@ -76,6 +76,10 @@ var e2eUsers = []struct {
 	{"e2e-unverified", "e2e-unverified@example.invalid", false},
 }
 
+// Keycloak does not require an email address, and plenty of real accounts have
+// none. They all reach the platform carrying the same empty string.
+var e2eNoEmailUsers = []string{"e2e-noemail-one", "e2e-noemail-two"}
+
 // --- Keycloak admin plumbing -------------------------------------------------
 
 type kcAdmin struct {
@@ -164,6 +168,33 @@ func (k *kcAdmin) provisionRealm(t *testing.T) {
 		"redirectUris": []string{"http://localhost:7880/*"},
 	}); code != http.StatusCreated {
 		t.Fatalf("create client (HTTP %d): %s", code, string(body))
+	}
+
+	// Keycloak's VERIFY_PROFILE action treats a missing email as an incomplete
+	// profile and blocks the login with "Account is not fully set up", which
+	// would stop the accounts below ever reaching the platform. Realms that do
+	// not require an email address turn it off, and that is the realm shape
+	// this test is about.
+	if code, body := k.do(http.MethodPut,
+		"/admin/realms/"+e2eRealm+"/authentication/required-actions/VERIFY_PROFILE",
+		map[string]interface{}{
+			"alias": "VERIFY_PROFILE", "name": "Verify Profile",
+			"enabled": false, "defaultAction": false, "priority": 90,
+		}); code >= 300 {
+		t.Fatalf("disable VERIFY_PROFILE (HTTP %d): %s", code, string(body))
+	}
+
+	for _, u := range e2eNoEmailUsers {
+		if code, body := k.do(http.MethodPost, "/admin/realms/"+e2eRealm+"/users", map[string]interface{}{
+			"username": u, "enabled": true,
+			"firstName": "E2E", "lastName": u,
+			"requiredActions": []string{},
+			"credentials": []map[string]interface{}{
+				{"type": "password", "value": e2eUserPassword, "temporary": false},
+			},
+		}); code != http.StatusCreated {
+			t.Fatalf("create user %s (HTTP %d): %s", u, code, string(body))
+		}
 	}
 
 	for _, u := range e2eUsers {
@@ -584,5 +615,164 @@ func TestAuthOIDCE2E_BootRefusesUnsafeUsernameIndex(t *testing.T) {
 	// index so an operator can find it.
 	if !strings.Contains(err.Error(), "idx_users_username") {
 		t.Errorf("the refusal should name the index at fault, got: %v", err)
+	}
+}
+
+// TestAuthOIDCE2E_ADeletedUserIsRefused follows a deleted person back to the
+// login page, through the real login path rather than through inserts.
+//
+// The database tests create rows directly, which proves the index permits the
+// write and nothing about what someone signing in experiences. This is the case
+// that changed twice: before the indexes were narrowed it failed on a
+// constraint violation, which blocked the login by accident; narrowing them
+// alone would have let the person straight back in with a new account. Neither
+// was a decision, and this is.
+func TestAuthOIDCE2E_ADeletedUserIsRefused(t *testing.T) {
+	kcURL, dsn := e2eEnv(t)
+	ctx := context.Background()
+
+	admin := newKCAdmin(t, kcURL)
+	admin.provisionRealm(t)
+
+	_, db := newBootedClient(t, dsn)
+
+	provider, err := auth.NewOIDCProvider(ctx, &auth.Config{
+		ProviderURL:  kcURL + "/realms/" + e2eRealm,
+		ClientID:     e2eClientID,
+		ClientSecret: e2eClientSecret,
+		RedirectURL:  "http://localhost:7880/callback",
+		Scopes:       []string{"openid", "email", "profile"},
+	}, logger.NewNoop())
+	if err != nil {
+		t.Fatalf("NewOIDCProvider: %v", err)
+	}
+	svc := auth.NewService(provider, auth.NewMemorySessionStore(time.Hour),
+		userspg.NewRepository(db), logger.NewNoop(), &auth.Config{})
+
+	u := e2eUsers[0]
+
+	if _, err := svc.FindOrCreateUser(ctx, mustVerify(t, ctx, provider, idTokenFor(t, kcURL, u.username))); err != nil {
+		t.Fatalf("first sign-in: %v", err)
+	}
+
+	if err := db.Where("email = ?", u.email).Delete(&database.User{}).Error; err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+
+	_, err = svc.FindOrCreateUser(ctx, mustVerify(t, ctx, provider, idTokenFor(t, kcURL, u.username)))
+	if err == nil {
+		t.Fatal("a deleted user signed in again; deleting somebody has to stop them coming back, " +
+			"or it is not a revocation")
+	}
+	if !strings.Contains(err.Error(), "deleted") {
+		t.Errorf("the refusal should say the account was deleted rather than surface a database "+
+			"error, got: %v", err)
+	}
+
+	// No second account was quietly created on the way to refusing.
+	var live, deleted int64
+	db.Model(&database.User{}).Where("email = ?", u.email).Count(&live)
+	db.Model(&database.User{}).Unscoped().Where("email = ? AND deleted_at IS NOT NULL", u.email).Count(&deleted)
+	if live != 0 || deleted != 1 {
+		t.Errorf("expected the deleted row and nothing else for %s, got live=%d deleted=%d",
+			u.email, live, deleted)
+	}
+}
+
+// Somebody who was never deleted must still be able to sign in: the check reads
+// deleted rows, and a match that is too loose would lock out every future
+// account sharing a blank column with one.
+func TestAuthOIDCE2E_ADeletedUserDoesNotBlockOthers(t *testing.T) {
+	kcURL, dsn := e2eEnv(t)
+	ctx := context.Background()
+
+	admin := newKCAdmin(t, kcURL)
+	admin.provisionRealm(t)
+
+	_, db := newBootedClient(t, dsn)
+
+	provider, err := auth.NewOIDCProvider(ctx, &auth.Config{
+		ProviderURL:  kcURL + "/realms/" + e2eRealm,
+		ClientID:     e2eClientID,
+		ClientSecret: e2eClientSecret,
+		RedirectURL:  "http://localhost:7880/callback",
+		Scopes:       []string{"openid", "email", "profile"},
+	}, logger.NewNoop())
+	if err != nil {
+		t.Fatalf("NewOIDCProvider: %v", err)
+	}
+	svc := auth.NewService(provider, auth.NewMemorySessionStore(time.Hour),
+		userspg.NewRepository(db), logger.NewNoop(), &auth.Config{})
+
+	gone, other := e2eUsers[0], e2eUsers[1]
+
+	if _, err := svc.FindOrCreateUser(ctx, mustVerify(t, ctx, provider, idTokenFor(t, kcURL, gone.username))); err != nil {
+		t.Fatalf("first sign-in: %v", err)
+	}
+	if err := db.Where("email = ?", gone.email).Delete(&database.User{}).Error; err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+
+	if _, err := svc.FindOrCreateUser(ctx, mustVerify(t, ctx, provider, idTokenFor(t, kcURL, other.username))); err != nil {
+		t.Fatalf("an unrelated person could not sign in because somebody else had been deleted: %v", err)
+	}
+}
+
+func mustVerify(t *testing.T, ctx context.Context, p *auth.OIDCProvider, raw string) *auth.UserInfo {
+	t.Helper()
+	info, err := p.VerifyIDToken(ctx, raw)
+	if err != nil {
+		t.Fatalf("VerifyIDToken: %v", err)
+	}
+	return info
+}
+
+// TestAuthOIDCE2E_UsersWithoutAnEmailCanBothSignIn is the half of the index work
+// that survives refusing deleted users: accounts that are blank in a column the
+// unique index covers.
+//
+// The database tests insert such rows directly. This signs both people in
+// through Keycloak, because the empty string reaching the column has to come
+// from a real token with no email claim for the test to mean anything — if
+// Keycloak sent something else, the collision the index change fixes would
+// never arise this way.
+func TestAuthOIDCE2E_UsersWithoutAnEmailCanBothSignIn(t *testing.T) {
+	kcURL, dsn := e2eEnv(t)
+	ctx := context.Background()
+
+	admin := newKCAdmin(t, kcURL)
+	admin.provisionRealm(t)
+
+	_, db := newBootedClient(t, dsn)
+
+	provider, err := auth.NewOIDCProvider(ctx, &auth.Config{
+		ProviderURL:  kcURL + "/realms/" + e2eRealm,
+		ClientID:     e2eClientID,
+		ClientSecret: e2eClientSecret,
+		RedirectURL:  "http://localhost:7880/callback",
+		Scopes:       []string{"openid", "email", "profile"},
+	}, logger.NewNoop())
+	if err != nil {
+		t.Fatalf("NewOIDCProvider: %v", err)
+	}
+	svc := auth.NewService(provider, auth.NewMemorySessionStore(time.Hour),
+		userspg.NewRepository(db), logger.NewNoop(), &auth.Config{})
+
+	for i, username := range e2eNoEmailUsers {
+		info := mustVerify(t, ctx, provider, idTokenFor(t, kcURL, username))
+		if info.Email != "" {
+			t.Fatalf("%s arrived with an email (%q); Keycloak filled one in, so this test is "+
+				"not exercising the blank-column case", username, info.Email)
+		}
+		if _, err := svc.FindOrCreateUser(ctx, info); err != nil {
+			t.Fatalf("account %d with no email could not sign in, so the second such Keycloak "+
+				"user can never reach the platform: %v", i, err)
+		}
+	}
+
+	var n int64
+	db.Model(&database.User{}).Where("email = ?", "").Count(&n)
+	if n != int64(len(e2eNoEmailUsers)) {
+		t.Errorf("expected %d accounts with no email, found %d", len(e2eNoEmailUsers), n)
 	}
 }

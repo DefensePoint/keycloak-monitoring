@@ -3,11 +3,29 @@ package users
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
 )
+
+// ErrUserDeleted is returned when a login matches an account that has been
+// deleted, instead of quietly creating a second one for the same person.
+//
+// A soft delete leaves the row in place but invisible to every ordinary query,
+// so a returning user looks like somebody the platform has never seen. Creating
+// an account for them would undo an administrator's decision without recording
+// that it had been undone: the new account carries none of the old one's roles,
+// but it does carry a session, and the deleted row stays deleted so nothing in
+// the interface shows what happened.
+//
+// Until the indexes on users were narrowed to live rows this could not arise —
+// the insert collided with the deleted row's email address and the login failed
+// on a constraint violation. That was never a decision anyone made, and it also
+// blocked re-adding somebody deliberately. This is the decision that replaces
+// it.
+var ErrUserDeleted = errors.New("account has been deleted")
 
 // Repository defines the interface for user persistence operations.
 type Repository interface {

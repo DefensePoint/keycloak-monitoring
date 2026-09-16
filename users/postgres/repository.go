@@ -32,6 +32,46 @@ func NewRepository(db *gorm.DB) users.Repository {
 }
 
 // FindOrCreateBySubject finds a user by subject (OAuth2 sub claim) or creates a new one.
+// refuseIfDeleted reports users.ErrUserDeleted when this login belongs to an
+// account that was deleted.
+//
+// Matched on subject and on email, because the two identify a returning person
+// in different situations: the subject is stable while the identity provider is,
+// and the email survives a realm being rebuilt, which is the case that hands a
+// familiar person a brand new subject.
+//
+// Blank values match nobody. Every one of these columns is legitimately empty
+// for some kind of account — Keycloak users often have no email — so matching on
+// one would refuse every future login of that shape on behalf of a single
+// deleted row.
+//
+// Unscoped, since the whole point is to see what ordinary queries hide.
+func (r *Repository) refuseIfDeleted(ctx context.Context, candidate *database.User) error {
+	q := r.db.WithContext(ctx).Unscoped().Model(&database.User{}).
+		Where("deleted_at IS NOT NULL")
+
+	switch {
+	case candidate.Subject != "" && candidate.Email != "":
+		q = q.Where("subject = ? OR email = ?", candidate.Subject, candidate.Email)
+	case candidate.Subject != "":
+		q = q.Where("subject = ?", candidate.Subject)
+	case candidate.Email != "":
+		q = q.Where("email = ?", candidate.Email)
+	default:
+		// Nothing identifying to match on; the create path takes over.
+		return nil
+	}
+
+	var deleted int64
+	if err := q.Count(&deleted).Error; err != nil {
+		return fmt.Errorf("failed to check for a deleted account: %w", err)
+	}
+	if deleted > 0 {
+		return users.ErrUserDeleted
+	}
+	return nil
+}
+
 func (r *Repository) FindOrCreateBySubject(ctx context.Context, user *domain.User) (*domain.User, error) {
 	dbUser := toDBUser(user)
 	var existingUser database.User
@@ -40,6 +80,12 @@ func (r *Repository) FindOrCreateBySubject(ctx context.Context, user *domain.Use
 	result := r.db.WithContext(ctx).Where(sqlWhereSubject, dbUser.Subject).First(&existingUser)
 
 	if result.Error == gorm.ErrRecordNotFound {
+		// Nobody live matches, but a deleted account might. Refuse rather than
+		// create a second one for the same person: see users.ErrUserDeleted.
+		if err := r.refuseIfDeleted(ctx, dbUser); err != nil {
+			return nil, err
+		}
+
 		// User doesn't exist, create new user
 		if err := r.db.WithContext(ctx).Create(dbUser).Error; err != nil {
 			return nil, fmt.Errorf("failed to create user: %w", err)
