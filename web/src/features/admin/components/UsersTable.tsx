@@ -312,7 +312,7 @@ export const UsersTable: React.FC<UsersTableProps> = ({
               size="small"
               onClick={() => onDelete(row.original.id)}
               sx={{ color: theme.palette.error.light }}
-              title="Delete user"
+              title="Deactivate user"
             >
               <Delete fontSize="small" />
             </IconButton>

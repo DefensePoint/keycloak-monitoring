@@ -87,7 +87,7 @@ export function AdminUsersPage() {
     // Prevent self-deletion
     if (userId === currentUser?.id) {
       showToast({
-        message: "You cannot delete your own account",
+        message: "You cannot deactivate your own account",
         type: "error",
       });
       return;
@@ -103,11 +103,11 @@ export function AdminUsersPage() {
       onSuccess: () => {
         setDeleteDialogOpen(false);
         setUserToDelete(null);
-        showToast({ message: "User deleted successfully", type: "success" });
+        showToast({ message: "User deactivated", type: "success" });
       },
       onError: (err: unknown) => {
         showToast({
-          message: getErrorMessage(err, "Failed to delete user"),
+          message: getErrorMessage(err, "Failed to deactivate user"),
           type: "error",
         });
         setDeleteDialogOpen(false);
@@ -329,8 +329,8 @@ export function AdminUsersPage() {
 
       <ConfirmDialog
         open={deleteDialogOpen}
-        title="Delete User"
-        message="Are you sure you want to delete this user?"
+        title="Deactivate user"
+        message="They will be signed out of the platform and cannot sign in again until they are reactivated. Their account, roles and history are kept. Any session they already have stays valid until it expires, for up to 24 hours."
         onConfirm={handleDeleteConfirm}
         onCancel={handleDeleteCancel}
         isLoading={isDeleting}

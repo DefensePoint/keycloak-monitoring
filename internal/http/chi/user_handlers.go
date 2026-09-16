@@ -315,10 +315,26 @@ func (h *UserHandlers) updateUser(w http.ResponseWriter, r *http.Request) {
 	httputil.RespondSuccess(w, h.log, user)
 }
 
-// deleteUser handles DELETE /api/users/{id}
+// deleteUser handles DELETE /api/users/{id}, which deactivates rather than
+// deletes.
 //
-//	@Summary		Delete user
-//	@Description	Deletes a user by their ID
+// The route keeps the DELETE verb because that is the REST spelling of
+// "remove this" and changing it would break every existing client. What the
+// words say is another matter: the account, its roles and its history are all
+// kept, the change is reversible by setting the account active again, and
+// nothing is erased. Everything a person reads now says deactivate.
+//
+// One consequence worth knowing before using this to cut off access: it takes
+// effect at the next sign-in, not immediately. A session created before the
+// change stays valid until it expires — up to the configured session max_age,
+// 24 hours by default. The middleware does re-read the account on every
+// request, but only to recover the ID that RBAC needs: UserDetails carries no
+// status field, so is_active is never consulted once a session exists. API
+// tokens are not affected; they check the account on every call and stop
+// working at once.
+//
+//	@Summary		Deactivate user
+//	@Description	Deactivates a user by their ID. The account, its roles and its history are kept, and the change is reversible. It takes effect at the next sign-in: an existing session stays valid until it expires (session max_age, 24h by default). API tokens stop working immediately.
 //	@Tags			users
 //	@Produce		json
 //	@Param			userID	path		int	true	"User ID"

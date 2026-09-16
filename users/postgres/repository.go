@@ -318,6 +318,20 @@ func (r *Repository) Update(ctx context.Context, user *domain.User) error {
 }
 
 // Delete deletes a user (soft delete by marking as inactive).
+// Delete deactivates the account rather than deleting anything.
+//
+// The name is the interface's, kept so this stays a drop-in implementation,
+// but it writes is_active and nothing else: no row is removed, deleted_at is
+// never set, and the roles, policies and history all stay. Nothing anywhere in
+// the platform sets deleted_at on a user, so an account is only ever
+// deactivated, and reactivating it restores exactly what was there.
+//
+// It does not end a session that already exists. The middleware re-reads the
+// account on every request but only to recover the ID that RBAC needs, and the
+// struct it fills in carries no status field, so is_active is never consulted
+// once somebody holds a session: access continues until that session expires,
+// up to session max_age, 24 hours by default. API tokens do re-check, and stop
+// working immediately.
 func (r *Repository) Delete(ctx context.Context, userID uint) error {
 	result := r.db.WithContext(ctx).Model(&database.User{}).Where("id = ?", userID).Update("is_active", false)
 	if result.Error != nil {
