@@ -7,21 +7,45 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/healthcheck"
 )
 
 func main() {
 	// Parse command-line flags
 	configPath := flag.String("config", "", "Path to configuration file")
+	healthFlag := flag.Bool("healthcheck", false, "Probe the local health endpoint and exit (container healthcheck)")
 	flag.Parse()
+
+	if *healthFlag {
+		cfg, err := config.LoadConfigQuiet(*configPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "unhealthy: %v\n", err)
+			os.Exit(1)
+		}
+		// Unlike the api and mcp servers, web binds cfg host, which may be a
+		// specific interface where loopback would refuse the probe.
+		host := cfg.Web.Server.Host
+		if host == "" || host == "0.0.0.0" || host == "::" {
+			host = "127.0.0.1"
+		}
+		url := fmt.Sprintf("http://%s/healthz", net.JoinHostPort(host, strconv.Itoa(cfg.Web.Server.Port)))
+		if err := healthcheck.Probe(url, 3*time.Second); err != nil {
+			fmt.Fprintf(os.Stderr, "unhealthy: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// Load configuration
 	cfg, err := config.LoadConfig(*configPath)

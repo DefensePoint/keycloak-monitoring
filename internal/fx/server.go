@@ -128,15 +128,11 @@ func provideHTTPServer(p HTTPServerParams) *http.Server {
 	}
 }
 
-func registerServerHooks(lc fx.Lifecycle, server *http.Server, log *logger.Logger) {
+func registerServerHooks(lc fx.Lifecycle, server *http.Server, log *logger.Logger, sd fx.Shutdowner) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			log.Info("Starting HTTP server", logger.Str("addr", server.Addr))
-			go func() {
-				if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-					log.Error("HTTP server error", logger.Err(err))
-				}
-			}()
+			go serveOrShutdown("HTTP server", server, log, sd)
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {

@@ -36,6 +36,12 @@ services:
     networks:
       - kmt-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER:-postgres} -d monitoring"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     # TimescaleDB configuration
     command: >
       postgres
@@ -64,8 +70,18 @@ services:
       - kmt-network
       - traefik-network
     restart: unless-stopped
+    # web and mcp run distroless images (no shell, no curl), so container
+    # healthchecks can only be the binary probing itself; api-server uses the
+    # same mechanism for consistency.
+    healthcheck:
+      test: ["CMD", "/app/kmt", "-config", "/app/config.yaml", "-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   mcp-server:
     image: ${KMT_MCP_IMAGE:-kmt-mcp-server:latest}
@@ -75,8 +91,15 @@ services:
     networks:
       - kmt-network
     restart: on-failure
+    healthcheck:
+      test: ["CMD", "/app/kmt", "-config", "/app/config.yaml", "-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   web:
     image: ${KMT_WEB_IMAGE:-kmt-web:latest}
@@ -89,8 +112,17 @@ services:
       - kmt-network
       - traefik-network
     restart: unless-stopped
+    # 5s interval keeps the routing gap small on redeploys: Traefik only
+    # routes to containers that report healthy.
+    healthcheck:
+      test: ["CMD", "/app/kmt", "-config", "/app/config.yaml", "-healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
-      - api-server
+      api-server:
+        condition: service_healthy
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-network"
