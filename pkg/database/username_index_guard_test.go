@@ -42,12 +42,26 @@ func newIndexGuardClient(t *testing.T) (*Client, *gorm.DB) {
 	if err := db.AutoMigrate(&User{}); err != nil {
 		t.Fatalf("auto-migrate users: %v", err)
 	}
+	// The guard inspects every unique index on users, so put the two this test
+	// is not about into their correct shape first; otherwise whichever is
+	// checked first decides the result.
+	for _, stmt := range []string{
+		"DROP INDEX IF EXISTS idx_users_email",
+		"CREATE UNIQUE INDEX idx_users_email ON users(email) WHERE deleted_at IS NULL AND email IS NOT NULL AND email <> ''",
+		"DROP INDEX IF EXISTS idx_users_subject",
+		"CREATE UNIQUE INDEX idx_users_subject ON users(subject) WHERE deleted_at IS NULL AND subject IS NOT NULL AND subject <> ''",
+	} {
+		if err := db.Exec(stmt).Error; err != nil {
+			t.Fatalf("prepare sibling indexes: %v", err)
+		}
+	}
+
 	t.Cleanup(func() { db.Exec("DROP INDEX IF EXISTS idx_users_username") })
 
 	return &Client{db: db, logger: logger.New(zerolog.New(io.Discard))}, db
 }
 
-func TestAssertUsernameIndexIsSafe_RefusesAPlainUniqueIndex(t *testing.T) {
+func TestAssertUserUniqueIndexes_RefusesAPlainUniqueIndex(t *testing.T) {
 	c, db := newIndexGuardClient(t)
 
 	db.Exec("DROP INDEX IF EXISTS idx_users_username")
@@ -55,7 +69,7 @@ func TestAssertUsernameIndexIsSafe_RefusesAPlainUniqueIndex(t *testing.T) {
 		t.Fatalf("create plain index: %v", err)
 	}
 
-	err := c.assertUsernameIndexIsSafe()
+	err := c.assertUserUniqueIndexesAreSafe()
 	if err == nil {
 		t.Fatal("startup was allowed with a plain unique index; the second person to sign in " +
 			"through SSO would fail on a constraint violation")
@@ -67,17 +81,35 @@ func TestAssertUsernameIndexIsSafe_RefusesAPlainUniqueIndex(t *testing.T) {
 	}
 }
 
-func TestAssertUsernameIndexIsSafe_AcceptsAPartialIndex(t *testing.T) {
+func TestAssertUserUniqueIndexes_AcceptsALiveOnlyIndex(t *testing.T) {
+	c, db := newIndexGuardClient(t)
+
+	db.Exec("DROP INDEX IF EXISTS idx_users_username")
+	if err := db.Exec(`CREATE UNIQUE INDEX idx_users_username ON users(username)
+		WHERE deleted_at IS NULL AND username IS NOT NULL AND username != ''`).Error; err != nil {
+		t.Fatalf("create live-only index: %v", err)
+	}
+
+	if err := c.assertUserUniqueIndexesAreSafe(); err != nil {
+		t.Errorf("this is the state the migration produces and must be accepted: %v", err)
+	}
+}
+
+// The predicate migrateUsernameIndex leaves behind excludes blank usernames but
+// not deleted rows, so it is no longer sufficient: a deleted user would keep
+// their username forever. The guard has to reject it, which is what makes the
+// migration upgrade it rather than skip it.
+func TestAssertUserUniqueIndexes_RefusesThePredicateWithoutDeletedAt(t *testing.T) {
 	c, db := newIndexGuardClient(t)
 
 	db.Exec("DROP INDEX IF EXISTS idx_users_username")
 	if err := db.Exec(`CREATE UNIQUE INDEX idx_users_username ON users(username)
 		WHERE username IS NOT NULL AND username != ''`).Error; err != nil {
-		t.Fatalf("create partial index: %v", err)
+		t.Fatalf("create the older partial index: %v", err)
 	}
 
-	if err := c.assertUsernameIndexIsSafe(); err != nil {
-		t.Errorf("a partial index is the state the migration produces and must be accepted: %v", err)
+	if err := c.assertUserUniqueIndexesAreSafe(); err == nil {
+		t.Error("an index that still covers soft-deleted rows was accepted")
 	}
 }
 
@@ -86,14 +118,14 @@ func TestAssertUsernameIndexIsSafe_AcceptsAPartialIndex(t *testing.T) {
 // INDEX rejected duplicate usernames after the old index was already dropped.
 // Starting from there enforces username uniqueness nowhere at all, which is
 // weaker than the state the boot began in.
-func TestAssertUsernameIndexIsSafe_RefusesAMissingIndex(t *testing.T) {
+func TestAssertUserUniqueIndexes_RefusesAMissingIndex(t *testing.T) {
 	c, db := newIndexGuardClient(t)
 
 	if err := db.Exec("DROP INDEX IF EXISTS idx_users_username").Error; err != nil {
 		t.Fatalf("drop index: %v", err)
 	}
 
-	err := c.assertUsernameIndexIsSafe()
+	err := c.assertUserUniqueIndexesAreSafe()
 	if err == nil {
 		t.Fatal("startup was allowed with nothing enforcing username uniqueness")
 	}

@@ -280,8 +280,13 @@ func (c *Client) AutoMigrate() error {
 		c.logger.Warn("Failed to migrate username index, continuing", logger.Err(err))
 	}
 
-	// ...but do not continue past the state that migration exists to prevent.
-	if err := c.assertUsernameIndexIsSafe(); err != nil {
+	// The same treatment for every unique index on users, not just username.
+	if err := c.migrateUserUniqueIndexes(); err != nil {
+		c.logger.Warn("Failed to migrate the unique indexes on users, continuing", logger.Err(err))
+	}
+
+	// ...but do not continue past the state those migrations exist to prevent.
+	if err := c.assertUserUniqueIndexesAreSafe(); err != nil {
 		return err
 	}
 
@@ -618,58 +623,154 @@ func (c *Client) migrateUnprovenEmailVerified() error {
 	return nil
 }
 
-// assertUsernameIndexIsSafe refuses to start when a non-partial unique index
-// sits on users(username).
+// userUniqueIndex describes a unique index on users that must exclude rows the
+// application does not consider live.
 //
-// Every OAuth user is created with an empty username — only simple auth sets
-// one — and PostgreSQL treats the empty string as a value, not as absent. So a
-// plain unique index admits the first OAuth user and rejects every one after
-// them: SSO appears to work, because whoever signed in first is fine, and
-// nobody else can be created. The failure surfaces as a constraint violation
-// from a login, far from the index that caused it.
-//
-// migrateUsernameIndex above converts the index GORM creates into a partial
-// one, and its failure is logged and tolerated so that an unrelated hiccup
-// cannot keep the whole platform down. That tolerance is what makes this check
-// necessary: the migration failing is survivable, serving traffic afterwards is
-// not, and the two need separating.
-//
-// A missing index is refused too, and that is the case worth understanding.
-// Every path through migrateUsernameIndex ends with the index in place, so its
-// absence means the migration failed — and the way it fails in practice is
-// CREATE UNIQUE INDEX rejecting duplicate usernames after the old index was
-// already dropped. Continuing from there leaves nothing enforcing username
-// uniqueness at all, so two simple-auth accounts can share a username and a
-// lookup by username returns whichever the planner reaches first. Silently
-// weaker than the state we started in.
-func (c *Client) assertUsernameIndexIsSafe() error {
-	var indexDef string
-	err := c.db.Raw(
-		`SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_users_username'`).
-		Scan(&indexDef).Error
-	if err != nil {
-		return fmt.Errorf("failed to inspect the username index: %w", err)
-	}
+// Every one of these columns is legitimately empty for some kind of account,
+// and every one of them can belong to a soft-deleted row, so a plain unique
+// index over the bare column enforces more than the application means and
+// blocks work it should allow.
+type userUniqueIndex struct {
+	name string
+	// column is named only to build the repair statement in an error.
+	column string
+	// predicate is what keeps the index honest: live rows only, and only rows
+	// that actually carry a value.
+	predicate string
+	// why explains, to whoever reads a refusal at three in the morning, which
+	// accounts a plain index would break.
+	why string
+}
 
-	const repair = "`CREATE UNIQUE INDEX idx_users_username ON users(username) " +
-		"WHERE username IS NOT NULL AND username != ''`"
+var userUniqueIndexes = []userUniqueIndex{
+	{
+		name:      "idx_users_email",
+		column:    "email",
+		predicate: "deleted_at IS NULL AND email IS NOT NULL AND email <> ''",
+		why: "Keycloak accounts frequently have no email at all, and role_sync copies " +
+			"that absence through verbatim, so a plain index admits the first such user " +
+			"and rejects every one after them",
+	},
+	{
+		name:      "idx_users_subject",
+		column:    "subject",
+		predicate: "deleted_at IS NULL AND subject IS NOT NULL AND subject <> ''",
+		why: "simple auth derives the subject from the email address, so an account " +
+			"without one carries an empty subject too",
+	},
+	{
+		name:      "idx_users_username",
+		column:    "username",
+		predicate: "deleted_at IS NULL AND username IS NOT NULL AND username <> ''",
+		why: "every OAuth user is created with an empty username, since only simple " +
+			"auth sets one, so a plain index lets exactly one of them exist",
+	},
+}
 
-	switch {
-	case strings.Contains(indexDef, "WHERE"):
-		return nil
-	case indexDef == "":
-		return fmt.Errorf(
-			"refusing to start: there is no idx_users_username, so nothing enforces "+
-				"username uniqueness and two accounts can share one. The migration that "+
-				"creates it most often fails because usernames are already duplicated: "+
-				"resolve those, then %s", repair)
-	default:
-		return fmt.Errorf(
-			"refusing to start: idx_users_username is a plain unique index, so only one "+
-				"OAuth user can exist (all of them have an empty username) and every "+
-				"subsequent SSO sign-in fails on a constraint violation; recreate it as "+
-				"%s. Current definition: %s", repair, indexDef)
+func (i userUniqueIndex) createSQL() string {
+	return fmt.Sprintf("CREATE UNIQUE INDEX %s ON users(%s) WHERE %s", i.name, i.column, i.predicate)
+}
+
+// isLiveOnly reports whether an existing index already excludes deleted rows.
+//
+// Deliberately not "does it have a predicate at all". migrateUsernameIndex,
+// which runs earlier and predates this, gives the username index a predicate
+// that excludes blank usernames but not deleted ones — so treating any WHERE
+// clause as good enough silently left that index half-fixed, and a deleted
+// user's username reserved forever. The catalogue renders the clause as
+// `(deleted_at IS NULL)`, so match on the column and the test, not the exact
+// spelling of the whole predicate.
+func isLiveOnly(indexDef string) bool {
+	return strings.Contains(indexDef, "deleted_at IS NULL")
+}
+
+// migrateUserUniqueIndexes rewrites the unique indexes on users so they cover
+// live, non-empty rows only.
+//
+// Two separate problems share one fix. PostgreSQL treats the empty string as a
+// value rather than as absent, so a plain unique index over a column that is
+// blank for a whole class of account admits the first and rejects the rest.
+// And a soft delete leaves the row in place, so a deleted user's address,
+// subject and username stay reserved forever: the same person cannot be
+// re-added, and the failure arrives as a constraint violation nowhere near the
+// deletion that caused it.
+//
+// Narrowing a unique index can never fail on data that satisfied the wider one,
+// so this is safe to apply to any existing database: every row that fits the
+// plain index still fits the partial one.
+//
+// Idempotent. An index already carrying a predicate is left alone, so the
+// common case is three catalogue reads and no writes.
+func (c *Client) migrateUserUniqueIndexes() error {
+	for _, idx := range userUniqueIndexes {
+		var indexDef string
+		if err := c.db.Raw(
+			`SELECT indexdef FROM pg_indexes WHERE indexname = ?`, idx.name).
+			Scan(&indexDef).Error; err != nil {
+			return fmt.Errorf("failed to inspect %s: %w", idx.name, err)
+		}
+
+		if isLiveOnly(indexDef) {
+			continue
+		}
+
+		if indexDef != "" {
+			c.logger.Info("Rewriting a unique index on users to cover live rows only",
+				logger.Str("index", idx.name))
+			if err := c.db.Exec("DROP INDEX IF EXISTS " + idx.name).Error; err != nil {
+				return fmt.Errorf("failed to drop %s: %w", idx.name, err)
+			}
+		}
+
+		if err := c.db.Exec(idx.createSQL()).Error; err != nil {
+			return fmt.Errorf("failed to create %s: %w", idx.name, err)
+		}
 	}
+	return nil
+}
+
+// assertUserUniqueIndexesAreSafe refuses to start when a unique index on users
+// would reject accounts the application considers valid.
+//
+// It is a backstop rather than the mechanism: migrateUserUniqueIndexes above
+// puts the indexes right, and its failure is logged and tolerated so that an
+// unrelated hiccup cannot keep the whole platform down. That tolerance is what
+// makes this necessary. The migration failing is survivable; serving traffic
+// afterwards, with an index that silently blocks sign-ins or lets duplicates
+// through, is not. The two decisions were previously one.
+//
+// Both wrong states are refused. A plain index over the bare column rejects
+// accounts that are legitimately blank in it, and rejects any user whose
+// identifier belongs to a soft-deleted row. A missing index is refused too:
+// every path through the migration ends with the index in place, so its absence
+// means the migration failed, and nothing then enforces uniqueness at all.
+func (c *Client) assertUserUniqueIndexesAreSafe() error {
+	for _, idx := range userUniqueIndexes {
+		var indexDef string
+		if err := c.db.Raw(
+			`SELECT indexdef FROM pg_indexes WHERE indexname = ?`, idx.name).
+			Scan(&indexDef).Error; err != nil {
+			return fmt.Errorf("failed to inspect %s: %w", idx.name, err)
+		}
+
+		switch {
+		case isLiveOnly(indexDef):
+			continue
+		case indexDef == "":
+			return fmt.Errorf(
+				"refusing to start: there is no %s, so nothing enforces uniqueness of "+
+					"users.%s and two accounts can share one. The migration that creates "+
+					"it most often fails because the column is already duplicated: resolve "+
+					"that, then `%s`", idx.name, idx.column, idx.createSQL())
+		default:
+			return fmt.Errorf(
+				"refusing to start: %s does not exclude soft-deleted rows, so it also "+
+					"covers rows the platform has deleted and rows with no %s — %s. "+
+					"Recreate it as `%s`. Current definition: %s",
+				idx.name, idx.column, idx.why, idx.createSQL(), indexDef)
+		}
+	}
+	return nil
 }
 
 // migrateUserAuthMethod sets auth_method for existing users based on their authentication data.
