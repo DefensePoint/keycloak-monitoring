@@ -137,7 +137,7 @@ func (h *RBACHandlers) handleCurrentUser(w http.ResponseWriter, r *http.Request)
 		"id":                 user.ID,
 		"subject":            user.Subject,
 		"email":              user.Email,
-		"email_verified":     true,
+		"email_verified":     user.EmailVerified,
 		"name":               user.Name,
 		"preferred_username": user.PreferredUsername,
 		"roles":              userWithRoles.Roles,

@@ -110,11 +110,17 @@ func (s *service) Callback(ctx context.Context, code, state, expectedState strin
 		}
 	}
 
-	// Find or create user
+	// Find or create user.
+	//
+	// EmailVerified carries whatever the IdP asserted, never an assumption. An
+	// OIDC provider is free to issue a token for an address nobody has
+	// confirmed, and Keycloak does exactly that for a user created by an admin.
+	// Storing true regardless made every account look confirmed, which is the
+	// one claim account-linking by email would have to rely on.
 	user := &domain.User{
 		Subject:           userInfo.Subject,
 		Email:             userInfo.Email,
-		EmailVerified:     true, // From OAuth2, email is verified
+		EmailVerified:     userInfo.EmailVerified,
 		Name:              userInfo.Name,
 		GivenName:         userInfo.GivenName,
 		FamilyName:        userInfo.FamilyName,
@@ -243,7 +249,7 @@ func (s *service) FindOrCreateUser(ctx context.Context, userInfo *UserInfo) (*do
 	user := &domain.User{
 		Subject:           userInfo.Subject,
 		Email:             userInfo.Email,
-		EmailVerified:     true,
+		EmailVerified:     userInfo.EmailVerified, // See Callback.
 		Name:              userInfo.Name,
 		GivenName:         userInfo.GivenName,
 		FamilyName:        userInfo.FamilyName,
