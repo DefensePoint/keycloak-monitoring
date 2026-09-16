@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -9,88 +10,111 @@ import (
 	"github.com/spf13/viper"
 )
 
-// LoadConfig loads configuration using Viper
+// LoadConfig loads configuration using Viper, narrating every step to
+// stdout, including a raw dump of the config file contents.
 func LoadConfig(configPath string) (*AppConfig, error) {
+	return loadConfig(configPath, os.Stdout)
+}
+
+// LoadConfigQuiet loads configuration without the debug narration. The
+// -healthcheck probes must use this: the narration dumps raw config contents
+// (secrets included) and Docker stores probe output in the container health
+// log, which both leaks the secrets into `docker inspect` and truncates away
+// the probe verdict at 4096 bytes.
+func LoadConfigQuiet(configPath string) (*AppConfig, error) {
+	return loadConfig(configPath, io.Discard)
+}
+
+// narrator emits the loader's debug narration. Write errors are swallowed
+// on purpose: narration must never fail config loading, and the quiet path
+// writes to io.Discard anyway.
+type narrator struct{ out io.Writer }
+
+func (n narrator) println(a ...any)               { _, _ = fmt.Fprintln(n.out, a...) }
+func (n narrator) printf(format string, a ...any) { _, _ = fmt.Fprintf(n.out, format, a...) }
+
+func loadConfig(configPath string, out io.Writer) (*AppConfig, error) {
+	say := narrator{out: out}
 	v := viper.New()
 
-	fmt.Println()
-	fmt.Println("╔══════════════════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║                         CONFIGURATION LOADER DEBUG                           ║")
-	fmt.Println("╚══════════════════════════════════════════════════════════════════════════════╝")
-	fmt.Println()
+	say.println()
+	say.println("╔══════════════════════════════════════════════════════════════════════════════╗")
+	say.println("║                         CONFIGURATION LOADER DEBUG                           ║")
+	say.println("╚══════════════════════════════════════════════════════════════════════════════╝")
+	say.println()
 
 	// Step 1: Determine config file path
-	fmt.Println("┌─────────────────────────────────────────────────────────────────────────────┐")
-	fmt.Println("│ STEP 1: Config File Resolution                                             │")
-	fmt.Println("└─────────────────────────────────────────────────────────────────────────────┘")
+	say.println("┌─────────────────────────────────────────────────────────────────────────────┐")
+	say.println("│ STEP 1: Config File Resolution                                             │")
+	say.println("└─────────────────────────────────────────────────────────────────────────────┘")
 
 	if configPath != "" {
-		fmt.Printf("  ✓ Config path provided via CLI/env: %s\n", configPath)
+		say.printf("  ✓ Config path provided via CLI/env: %s\n", configPath)
 		v.SetConfigFile(configPath)
 	} else {
-		fmt.Println("  ⚠ No config path provided")
-		fmt.Println("  → Looking for 'config.yaml' in current directory...")
+		say.println("  ⚠ No config path provided")
+		say.println("  → Looking for 'config.yaml' in current directory...")
 		cwd, _ := os.Getwd()
-		fmt.Printf("  → Current working directory: %s\n", cwd)
+		say.printf("  → Current working directory: %s\n", cwd)
 		v.SetConfigName("config")
 		v.SetConfigType("yaml")
 		v.AddConfigPath(".")
 	}
-	fmt.Println()
+	say.println()
 
 	// Step 2: Set defaults
-	fmt.Println("┌─────────────────────────────────────────────────────────────────────────────┐")
-	fmt.Println("│ STEP 2: Setting Default Values                                             │")
-	fmt.Println("└─────────────────────────────────────────────────────────────────────────────┘")
-	fmt.Println("  ✓ Default values loaded (see setDefaults() for all values)")
+	say.println("┌─────────────────────────────────────────────────────────────────────────────┐")
+	say.println("│ STEP 2: Setting Default Values                                             │")
+	say.println("└─────────────────────────────────────────────────────────────────────────────┘")
+	say.println("  ✓ Default values loaded (see setDefaults() for all values)")
 	setDefaults(v)
-	fmt.Println()
+	say.println()
 
 	// Step 3: Read config file
-	fmt.Println("┌─────────────────────────────────────────────────────────────────────────────┐")
-	fmt.Println("│ STEP 3: Reading Config File                                                │")
-	fmt.Println("└─────────────────────────────────────────────────────────────────────────────┘")
+	say.println("┌─────────────────────────────────────────────────────────────────────────────┐")
+	say.println("│ STEP 3: Reading Config File                                                │")
+	say.println("└─────────────────────────────────────────────────────────────────────────────┘")
 
 	configFileLoaded := false
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			fmt.Println("  ✗ Config file NOT FOUND")
-			fmt.Println("  → Will use defaults + environment variables only")
+			say.println("  ✗ Config file NOT FOUND")
+			say.println("  → Will use defaults + environment variables only")
 		} else {
-			fmt.Printf("  ✗ Error reading config file: %v\n", err)
+			say.printf("  ✗ Error reading config file: %v\n", err)
 			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}
 	} else {
 		configFileLoaded = true
-		fmt.Printf("  ✓ Config file LOADED: %s\n", v.ConfigFileUsed())
+		say.printf("  ✓ Config file LOADED: %s\n", v.ConfigFileUsed())
 
 		// Print RAW file contents for debugging
-		fmt.Println()
-		fmt.Println("  ┌─── RAW CONFIG FILE CONTENTS ───────────────────────────────────────────────┐")
+		say.println()
+		say.println("  ┌─── RAW CONFIG FILE CONTENTS ───────────────────────────────────────────────┐")
 		if rawContent, err := os.ReadFile(v.ConfigFileUsed()); err == nil {
 			lines := strings.Split(string(rawContent), "\n")
 			for i, line := range lines {
 				if i < 30 { // Only show first 30 lines
-					fmt.Printf("  │ %3d: %s\n", i+1, line)
+					say.printf("  │ %3d: %s\n", i+1, line)
 				}
 			}
 			if len(lines) > 30 {
-				fmt.Printf("  │ ... (%d more lines)\n", len(lines)-30)
+				say.printf("  │ ... (%d more lines)\n", len(lines)-30)
 			}
 		} else {
-			fmt.Printf("  │ ERROR reading file: %v\n", err)
+			say.printf("  │ ERROR reading file: %v\n", err)
 		}
-		fmt.Println("  └─────────────────────────────────────────────────────────────────────────────┘")
+		say.println("  └─────────────────────────────────────────────────────────────────────────────┘")
 	}
-	fmt.Println()
+	say.println()
 
 	// Step 4: Environment variables
-	fmt.Println("┌─────────────────────────────────────────────────────────────────────────────┐")
-	fmt.Println("│ STEP 4: Environment Variables (DATABASE)                                   │")
-	fmt.Println("└─────────────────────────────────────────────────────────────────────────────┘")
-	fmt.Println("  → Prefix: MONITORING_")
-	fmt.Println("  → Example: MONITORING_DATABASE_HOST, MONITORING_DATABASE_PORT, etc.")
-	fmt.Println()
+	say.println("┌─────────────────────────────────────────────────────────────────────────────┐")
+	say.println("│ STEP 4: Environment Variables (DATABASE)                                   │")
+	say.println("└─────────────────────────────────────────────────────────────────────────────┘")
+	say.println("  → Prefix: MONITORING_")
+	say.println("  → Example: MONITORING_DATABASE_HOST, MONITORING_DATABASE_PORT, etc.")
+	say.println()
 
 	v.AutomaticEnv()
 	v.SetEnvPrefix("MONITORING")
@@ -105,7 +129,7 @@ func LoadConfig(configPath string) (*AppConfig, error) {
 		"MONITORING_DATABASE_PASSWORD",
 		"MONITORING_DATABASE_SSL_MODE",
 	}
-	fmt.Println("  Database environment variables:")
+	say.println("  Database environment variables:")
 	foundAny := false
 	for _, envKey := range dbEnvVars {
 		value := os.Getenv(envKey)
@@ -114,15 +138,15 @@ func LoadConfig(configPath string) (*AppConfig, error) {
 			if strings.Contains(strings.ToLower(envKey), "password") {
 				value = "********"
 			}
-			fmt.Printf("    ✓ %s = %s\n", envKey, value)
+			say.printf("    ✓ %s = %s\n", envKey, value)
 		} else {
-			fmt.Printf("    ✗ %s (not set)\n", envKey)
+			say.printf("    ✗ %s (not set)\n", envKey)
 		}
 	}
 	if !foundAny {
-		fmt.Println("    → No database env vars set, will use config file or defaults")
+		say.println("    → No database env vars set, will use config file or defaults")
 	}
-	fmt.Println()
+	say.println()
 
 	// Unmarshal
 	var config AppConfig
@@ -132,24 +156,24 @@ func LoadConfig(configPath string) (*AppConfig, error) {
 	config.MCP.RemovedKeys = removedMCPKeysInFile(v)
 
 	// Step 5: Final configuration summary
-	fmt.Println("┌─────────────────────────────────────────────────────────────────────────────┐")
-	fmt.Println("│ STEP 5: Final Configuration (with source)                                  │")
-	fmt.Println("└─────────────────────────────────────────────────────────────────────────────┘")
-	fmt.Println()
+	say.println("┌─────────────────────────────────────────────────────────────────────────────┐")
+	say.println("│ STEP 5: Final Configuration (with source)                                  │")
+	say.println("└─────────────────────────────────────────────────────────────────────────────┘")
+	say.println()
 
-	printConfigWithSource(v, &config, configFileLoaded)
+	printConfigWithSource(say, v, &config, configFileLoaded)
 
-	fmt.Println()
-	fmt.Println("╔══════════════════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║                      END CONFIGURATION LOADER DEBUG                          ║")
-	fmt.Println("╚══════════════════════════════════════════════════════════════════════════════╝")
-	fmt.Println()
+	say.println()
+	say.println("╔══════════════════════════════════════════════════════════════════════════════╗")
+	say.println("║                      END CONFIGURATION LOADER DEBUG                          ║")
+	say.println("╚══════════════════════════════════════════════════════════════════════════════╝")
+	say.println()
 
 	return &config, nil
 }
 
 // printConfigWithSource prints database configuration with source
-func printConfigWithSource(v *viper.Viper, config *AppConfig, configFileLoaded bool) {
+func printConfigWithSource(say narrator, v *viper.Viper, config *AppConfig, configFileLoaded bool) {
 	getSource := func(key string) string {
 		envKey := "MONITORING_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
 		if os.Getenv(envKey) != "" {
@@ -161,20 +185,20 @@ func printConfigWithSource(v *viper.Viper, config *AppConfig, configFileLoaded b
 		return "DEFAULT"
 	}
 
-	fmt.Println("  ┌─── DATABASE CONFIG ─────────────────────────────────────────────────────────┐")
-	fmt.Printf("  │ host     = %-25s  ← %s\n", config.Database.Host, getSource("database.host"))
-	fmt.Printf("  │ port     = %-25d  ← %s\n", config.Database.Port, getSource("database.port"))
-	fmt.Printf("  │ database = %-25s  ← %s\n", config.Database.Database, getSource("database.database"))
-	fmt.Printf("  │ user     = %-25s  ← %s\n", config.Database.User, getSource("database.user"))
+	say.println("  ┌─── DATABASE CONFIG ─────────────────────────────────────────────────────────┐")
+	say.printf("  │ host     = %-25s  ← %s\n", config.Database.Host, getSource("database.host"))
+	say.printf("  │ port     = %-25d  ← %s\n", config.Database.Port, getSource("database.port"))
+	say.printf("  │ database = %-25s  ← %s\n", config.Database.Database, getSource("database.database"))
+	say.printf("  │ user     = %-25s  ← %s\n", config.Database.User, getSource("database.user"))
 	if config.Database.Password != "" {
-		fmt.Printf("  │ password = %-25s  ← %s\n", "********", getSource("database.password"))
+		say.printf("  │ password = %-25s  ← %s\n", "********", getSource("database.password"))
 	} else {
-		fmt.Printf("  │ password = %-25s  ← %s\n", "(empty)", getSource("database.password"))
+		say.printf("  │ password = %-25s  ← %s\n", "(empty)", getSource("database.password"))
 	}
-	fmt.Printf("  │ ssl_mode = %-25s  ← %s\n", config.Database.SSLMode, getSource("database.ssl_mode"))
-	fmt.Println("  └─────────────────────────────────────────────────────────────────────────────┘")
-	fmt.Println()
-	fmt.Printf("  → Connection string: postgres://%s:***@%s:%d/%s?sslmode=%s\n",
+	say.printf("  │ ssl_mode = %-25s  ← %s\n", config.Database.SSLMode, getSource("database.ssl_mode"))
+	say.println("  └─────────────────────────────────────────────────────────────────────────────┘")
+	say.println()
+	say.printf("  → Connection string: postgres://%s:***@%s:%d/%s?sslmode=%s\n",
 		config.Database.User, config.Database.Host, config.Database.Port, config.Database.Database, config.Database.SSLMode)
 }
 

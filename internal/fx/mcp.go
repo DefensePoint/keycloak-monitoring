@@ -186,7 +186,7 @@ func provideMCPServer(
 	return mcpserver.New(cfg, log, tokens, rbacService, tenants, realms, alertReader, amfaStats, eventReader, m), nil
 }
 
-func registerMCPServerHooks(lc fx.Lifecycle, server *mcpserver.Server, log *logger.Logger) {
+func registerMCPServerHooks(lc fx.Lifecycle, server *mcpserver.Server, log *logger.Logger, sd fx.Shutdowner) {
 	// ReadTimeout and WriteTimeout stay 0: they would cut off long-lived
 	// streaming responses.
 	httpServer := &http.Server{
@@ -199,11 +199,7 @@ func registerMCPServerHooks(lc fx.Lifecycle, server *mcpserver.Server, log *logg
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			log.Info("Starting MCP HTTP server", logger.Str("addr", httpServer.Addr))
-			go func() {
-				if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-					log.Error("MCP HTTP server error", logger.Err(err))
-				}
-			}()
+			go serveOrShutdown("MCP HTTP server", httpServer, log, sd)
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {
