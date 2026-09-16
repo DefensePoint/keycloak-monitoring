@@ -2,9 +2,12 @@ package auth
 
 import (
 	"context"
+	"sync"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
+
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 
 // OIDCProvider implements the Provider interface for OAuth2/OIDC authentication.
@@ -14,10 +17,45 @@ type OIDCProvider struct {
 	oauth2Config *oauth2.Config
 	verifier     *oidc.IDTokenVerifier
 	provider     *oidc.Provider
+	log          *logger.Logger
+
+	// warnNoEmailVerified fires the claim-missing warning once per process
+	// rather than once per login. See warnIfEmailVerifiedAbsent.
+	warnNoEmailVerified sync.Once
+}
+
+// warnIfEmailVerifiedAbsent reports an IdP that does not send email_verified.
+//
+// Go decodes an absent bool claim as false, which is indistinguishable from an
+// IdP saying the address is unconfirmed. Without this, a realm whose client is
+// missing the email scope or its mapper would mark every user unverified and
+// give no clue why: no error, no failed login, just a column that is quietly
+// wrong and a badge nobody trusts.
+//
+// Keycloak sends the claim under the default scopes, so this should never fire.
+// If it does, the realm's client configuration is the thing to look at.
+//
+// Once per process: this runs on every login, and a misconfiguration that
+// repeats per request drowns the log rather than informing it.
+func (p *OIDCProvider) warnIfEmailVerifiedAbsent(claims map[string]interface{}, source string) {
+	if p.log == nil {
+		return
+	}
+	if _, present := claims["email_verified"]; present {
+		return
+	}
+	p.warnNoEmailVerified.Do(func() {
+		p.log.Warn("Identity provider does not send the email_verified claim; every user will "+
+			"be recorded as unverified. Check that the client has the email scope and its "+
+			"mapper enabled",
+			logger.Str("source", source),
+			logger.Str("provider_url", p.config.ProviderURL),
+			logger.Str("client_id", p.config.ClientID))
+	})
 }
 
 // NewOIDCProvider creates a new OIDC authentication provider.
-func NewOIDCProvider(ctx context.Context, cfg *Config) (*OIDCProvider, error) {
+func NewOIDCProvider(ctx context.Context, cfg *Config, log *logger.Logger) (*OIDCProvider, error) {
 	if cfg == nil {
 		return nil, &AuthError{
 			Code:    ErrCodeProviderError,
@@ -61,6 +99,7 @@ func NewOIDCProvider(ctx context.Context, cfg *Config) (*OIDCProvider, error) {
 		oauth2Config: oauth2Config,
 		verifier:     verifier,
 		provider:     provider,
+		log:          log,
 	}, nil
 }
 
@@ -111,6 +150,13 @@ func (p *OIDCProvider) VerifyIDToken(ctx context.Context, rawIDToken string) (*U
 			Message: "failed to parse ID token claims",
 			Err:     err,
 		}
+	}
+
+	// Decoded a second time as a map purely to tell "the IdP said false" from
+	// "the IdP said nothing", which the struct above cannot express.
+	var allClaims map[string]interface{}
+	if err := idToken.Claims(&allClaims); err == nil {
+		p.warnIfEmailVerifiedAbsent(allClaims, "id_token")
 	}
 
 	userInfo := &UserInfo{
@@ -180,6 +226,11 @@ func (p *OIDCProvider) GetUserInfo(ctx context.Context, accessToken string) (*Us
 			Message: "failed to parse userinfo claims",
 			Err:     err,
 		}
+	}
+
+	var allClaims map[string]interface{}
+	if err := userInfo.Claims(&allClaims); err == nil {
+		p.warnIfEmailVerifiedAbsent(allClaims, "userinfo")
 	}
 
 	result := &UserInfo{

@@ -204,7 +204,7 @@ func provideOIDCProvider(cfg *config.AppConfig, authCfg *auth.Config, log *logge
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	provider, err := auth.NewOIDCProvider(ctx, authCfg)
+	provider, err := auth.NewOIDCProvider(ctx, authCfg, log)
 	if err != nil {
 		log.Error("Failed to initialize OIDC provider - SSO will not work",
 			logger.Err(err),

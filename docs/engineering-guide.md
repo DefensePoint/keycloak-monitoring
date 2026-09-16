@@ -253,6 +253,7 @@ Create a pull request on GitHub/GitLab.
 | **Destructive DB tests** (env-gated) | KMT's own migrations / RBAC seeders and the tenant purge path. Drop the schema or delete role rows globally. | Skip when `KMT_DESTRUCTIVE_TEST_DATABASE_DSN` unset; CI deliberately does not set it. | Point `KMT_DESTRUCTIVE_TEST_DATABASE_DSN` at a throwaway database. |
 | **AMFA integration tests** (build-tag + env-gated) | AMFA repository SQL queries against a real AMFA Postgres. Tagged `//go:build integration`. | Skip in default run. | `go test -tags=integration ./amfa/postgres/...` with `AMFA_TEST_DSN` set. The schema check in the same package drops `alembic_version` and reads `AMFA_DESTRUCTIVE_TEST_DSN` instead. |
 | **Alert pipeline e2e** (build-tag + env-gated) | The alert pipeline against a whole running deployment. Tagged `//go:build integration`. | Skip in default run. | `go test -tags=integration ./tests/...` with `KMT_E2E_TEST_DATABASE_DSN` set. See `tests/test_README.md`. |
+| **Auth OIDC e2e** (build-tag + env-gated) | The OIDC login path against a real Keycloak: token claims, the provider, the service and the stored row. Provisions its own realm, client and users. Tagged `//go:build integration`. | Skip in default run. | `go test -tags=integration ./tests/ -run AuthOIDCE2E` with `KMT_AUTH_E2E_KEYCLOAK_URL` and `KMT_AUTH_E2E_DATABASE_DSN` set. Both throwaway; the DSN's schema is dropped. |
 | **Full e2e smoke** (manual) | UI walkthrough against running stacks. Not automated. | N/A | See `docs/amfa-integration.md` § Verification. |
 
 > **No testify in this project.** All Go tests use stdlib `testing` (`if got != want { t.Errorf(...) }` style). Don't add `github.com/stretchr/testify` as a dependency.
@@ -305,7 +306,9 @@ go test -v ./internal/http/chi/...
 
 ### Backend — DB-backed unit tests
 
-A small number of tests want a real PostgreSQL. The two below are read by the package tests and are separated by how much damage they do, each `t.Skip(...)`ing cleanly when its own variable is absent. Two more exist outside this table: `KMT_E2E_TEST_DATABASE_DSN` for the alert pipeline e2e, and `AMFA_TEST_DSN` / `AMFA_DESTRUCTIVE_TEST_DSN` for the AMFA integration tests. Four variables in total, and no test reads more than one of them.
+A small number of tests want a real PostgreSQL. The two below are read by the package tests and are separated by how much damage they do, each `t.Skip(...)`ing cleanly when its own variable is absent. Two more exist outside this table: `KMT_E2E_TEST_DATABASE_DSN` for the alert pipeline e2e, and `AMFA_TEST_DSN` / `AMFA_DESTRUCTIVE_TEST_DSN` for the AMFA integration tests. No test reads more than one of them.
+
+The auth OIDC e2e is the one exception to that rule, and deliberately so: it needs an IdP as well as a database, so it reads `KMT_AUTH_E2E_KEYCLOAK_URL` alongside its own `KMT_AUTH_E2E_DATABASE_DSN`. Neither names anything shared — it drops the DSN's schema and creates and deletes its own Keycloak realm — and `testdb.RequireDisposable` refuses a DSN that does not look throwaway.
 
 | Variable | Read by | Point it at |
 |---|---|---|

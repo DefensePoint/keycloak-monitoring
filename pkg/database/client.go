@@ -270,9 +270,19 @@ func (c *Client) AutoMigrate() error {
 		c.logger.Warn("Failed to migrate user auth_method, continuing", logger.Err(err))
 	}
 
+	// Data migration: clear email_verified that was asserted rather than observed
+	if err := c.migrateUnprovenEmailVerified(); err != nil {
+		c.logger.Warn("Failed to clear unproven email_verified, continuing", logger.Err(err))
+	}
+
 	// Data migration: Fix username unique index to allow multiple NULL/empty values
 	if err := c.migrateUsernameIndex(); err != nil {
 		c.logger.Warn("Failed to migrate username index, continuing", logger.Err(err))
+	}
+
+	// ...but do not continue past the state that migration exists to prevent.
+	if err := c.assertUsernameIndexIsSafe(); err != nil {
+		return err
 	}
 
 	// Data migration: Detect InfiniSpan for existing tenants
@@ -553,6 +563,113 @@ func (c *Client) migrateAlertIDIndex() error {
 
 	c.logger.Info("Successfully migrated alert_id index to be tenant-scoped")
 	return nil
+}
+
+// emailVerifiedFixCutoff is the moment the OAuth login path started recording
+// the IdP's own email_verified claim instead of hardcoding true.
+//
+// It is the pivot the migration below turns on, so it must never move. An OAuth
+// row last touched before it carries the hardcoded value and says nothing about
+// the address; one touched after carries whatever the IdP actually asserted and
+// is authoritative. Moving this forward would discard real claims.
+var emailVerifiedFixCutoff = time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
+
+// migrateUnprovenEmailVerified clears email_verified on OAuth users whose value
+// was assumed rather than observed.
+//
+// The OAuth paths in auth/service.go set EmailVerified: true unconditionally,
+// with the comment "From OAuth2, email is verified". That is not what OIDC
+// means: an IdP issues email_verified per address, and Keycloak reports false
+// for an account an admin created without confirming the address. The claim was
+// parsed correctly in auth/provider.go and then discarded, so every OAuth user
+// in the table reads as confirmed whether or not anyone confirmed them.
+//
+// Nothing gates access on this today — it reaches a badge in the users table and
+// the /me response — so the cost of the stale value is a false statement rather
+// than an outage. It matters because account linking by email is the next thing
+// to be built here, and linking would rest on exactly this flag.
+//
+// The value cannot be recovered retroactively: a hardcoded true and a genuine
+// true are the same byte. So this clears them and lets the truth return on each
+// user's next login, where FindOrCreateBySubject writes the real claim. Users
+// see an "unverified" badge in the meantime, which is honest — we do not know.
+//
+// Idempotent, and safe to run on every boot, because of the cutoff: a login
+// after the fix updates last_login_at past it and puts the row permanently out
+// of scope. A re-run can therefore never clobber a claim the IdP made. Simple
+// auth users are untouched; their flag is set elsewhere and is a separate
+// question.
+func (c *Client) migrateUnprovenEmailVerified() error {
+	res := c.db.Exec(`
+		UPDATE users
+		SET email_verified = false
+		WHERE auth_method = 'oauth'
+		  AND email_verified = true
+		  AND (last_login_at IS NULL OR last_login_at < ?)
+	`, emailVerifiedFixCutoff)
+	if res.Error != nil {
+		return fmt.Errorf("failed to clear unproven email_verified: %w", res.Error)
+	}
+	if res.RowsAffected > 0 {
+		c.logger.Info("Cleared email_verified that was assumed rather than asserted by the IdP; "+
+			"each user's next login restores the real claim",
+			logger.Int64("rows", res.RowsAffected))
+	}
+	return nil
+}
+
+// assertUsernameIndexIsSafe refuses to start when a non-partial unique index
+// sits on users(username).
+//
+// Every OAuth user is created with an empty username — only simple auth sets
+// one — and PostgreSQL treats the empty string as a value, not as absent. So a
+// plain unique index admits the first OAuth user and rejects every one after
+// them: SSO appears to work, because whoever signed in first is fine, and
+// nobody else can be created. The failure surfaces as a constraint violation
+// from a login, far from the index that caused it.
+//
+// migrateUsernameIndex above converts the index GORM creates into a partial
+// one, and its failure is logged and tolerated so that an unrelated hiccup
+// cannot keep the whole platform down. That tolerance is what makes this check
+// necessary: the migration failing is survivable, serving traffic afterwards is
+// not, and the two need separating.
+//
+// A missing index is refused too, and that is the case worth understanding.
+// Every path through migrateUsernameIndex ends with the index in place, so its
+// absence means the migration failed — and the way it fails in practice is
+// CREATE UNIQUE INDEX rejecting duplicate usernames after the old index was
+// already dropped. Continuing from there leaves nothing enforcing username
+// uniqueness at all, so two simple-auth accounts can share a username and a
+// lookup by username returns whichever the planner reaches first. Silently
+// weaker than the state we started in.
+func (c *Client) assertUsernameIndexIsSafe() error {
+	var indexDef string
+	err := c.db.Raw(
+		`SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_users_username'`).
+		Scan(&indexDef).Error
+	if err != nil {
+		return fmt.Errorf("failed to inspect the username index: %w", err)
+	}
+
+	const repair = "`CREATE UNIQUE INDEX idx_users_username ON users(username) " +
+		"WHERE username IS NOT NULL AND username != ''`"
+
+	switch {
+	case strings.Contains(indexDef, "WHERE"):
+		return nil
+	case indexDef == "":
+		return fmt.Errorf(
+			"refusing to start: there is no idx_users_username, so nothing enforces "+
+				"username uniqueness and two accounts can share one. The migration that "+
+				"creates it most often fails because usernames are already duplicated: "+
+				"resolve those, then %s", repair)
+	default:
+		return fmt.Errorf(
+			"refusing to start: idx_users_username is a plain unique index, so only one "+
+				"OAuth user can exist (all of them have an empty username) and every "+
+				"subsequent SSO sign-in fails on a constraint violation; recreate it as "+
+				"%s. Current definition: %s", repair, indexDef)
+	}
 }
 
 // migrateUserAuthMethod sets auth_method for existing users based on their authentication data.
