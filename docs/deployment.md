@@ -300,33 +300,134 @@ networks:
 
 ## Kubernetes Deployment
 
-### Step 1: Create Namespace
+Use Helm if you already run charts. The kubectl samples below are the same shape without Helm. Both paths expect images you built and pushed (see `build/Dockerfile` and `make docker-build`).
+
+### Workloads
+
+| Workload | Port | Probe | Notes |
+| --- | --- | --- | --- |
+| API server | 7888 | liveness `/health`, readiness `/ready` | Owns schema migrations. Run **one** replica with `Recreate`. |
+| Web | 7880 | `/healthz` | The only service behind Ingress. Proxies `/api/` and `/auth/` to the API server. |
+| MCP server | 7889 | liveness `/health`, readiness `/ready` | Optional. Off by default. Keep ClusterIP; do not put it on the Ingress. |
+| PostgreSQL | 5432 | `pg_isready` | TimescaleDB is required. A plain Postgres image will fail startup. |
+
+Do not probe `/api/health`. That path is not a health endpoint.
+
+`MONITORING_*` environment variables override `config.yaml` only when the matching key exists in the file. Keep secret-bearing keys present and empty in the ConfigMap, and inject the real values as env vars from a Secret.
+
+Required secrets (32+ character session secret, AES encryption key, database password, tenant client secret):
+
+- `MONITORING_AUTH_SESSION_SECRET`
+- `MONITORING_SECURITY_ENCRYPTION_KEY`
+- `MONITORING_DATABASE_PASSWORD`
+- tenant client secret (the `MONITORING_KEYCLOAK_TENANTS_<NAME>_CLIENT_SECRET` key that matches your tenant block)
+
+### Helm (recommended)
+
+This repository does not ship a Helm chart. Maintain a chart with this layout and values, then install it:
+
+```text
+charts/kmt/
+  Chart.yaml
+  values.yaml
+  templates/
+    configmap.yaml      # config.yaml mounted at /app/config.yaml
+    secret.yaml         # or your secret manager
+    postgres.yaml       # skip if you bring your own TimescaleDB
+    server.yaml
+    web.yaml
+    mcp-server.yaml     # gated on mcp.enabled
+    ingress.yaml        # fronts web only
+```
+
+**values.yaml** (trim and point images at your registry):
+
+```yaml
+server:
+  replicas: 1
+  image: your-registry/kmt-server:TAG
+  strategy: Recreate
+  startupProbe:
+    httpGet: { path: /health, port: http }
+    periodSeconds: 10
+    failureThreshold: 30
+  readinessProbe:
+    httpGet: { path: /ready, port: http }
+  livenessProbe:
+    httpGet: { path: /health, port: http }
+
+web:
+  replicas: 2
+  image: your-registry/kmt-web:TAG
+  readinessProbe:
+    httpGet: { path: /healthz, port: http }
+  livenessProbe:
+    httpGet: { path: /healthz, port: http }
+
+mcp:
+  enabled: false
+  replicas: 0
+  image: your-registry/kmt-mcp-server:TAG
+  readinessProbe:
+    httpGet: { path: /ready, port: http }
+  livenessProbe:
+    httpGet: { path: /health, port: http }
+
+postgres:
+  enabled: true
+  image: timescale/timescaledb:latest-pg16
+  database: monitoring
+  user: monitoring
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: monitoring.example.com
+      serviceName: web
+      servicePort: 7880
+
+config:
+  http:
+    server: { host: "0.0.0.0", port: 7888 }
+  web:
+    server:
+      host: "0.0.0.0"
+      port: 7880
+      api_host_url: "http://api-server:7888"
+  mcp:
+    enabled: false
+    port: 7889
+```
+
+Render `config:` into the ConfigMap verbatim. When you enable MCP, set both `mcp.enabled` in values **and** `config.mcp.enabled`; the binary exits immediately if the config says disabled.
+
+```bash
+helm upgrade --install kmt ./charts/kmt \
+  --namespace monitoring-platform --create-namespace \
+  -f values.yaml
+```
+
+### kubectl
+
+Same workloads, no chart. Replace `TAG` and the secret values.
 
 ```bash
 kubectl create namespace monitoring-platform
-```
 
-### Step 2: Create ConfigMap
-
-```bash
 kubectl create configmap monitoring-config \
   --from-file=config.yaml \
   -n monitoring-platform
-```
 
-### Step 3: Create Secrets
-
-```bash
 kubectl create secret generic monitoring-secrets \
-  --from-literal=database-password=your_db_password \
-  --from-literal=keycloak-admin-password=keycloak_password \
-  --from-literal=session-secret=$(openssl rand -base64 32) \
+  --from-literal=database-password='...' \
+  --from-literal=session-secret="$(openssl rand -base64 32)" \
+  --from-literal=encryption-key="$(openssl rand -base64 32)" \
+  --from-literal=keycloak-client-secret='...' \
   -n monitoring-platform
 ```
 
-### Step 4: Deploy PostgreSQL
-
-**postgres-pvc.yaml**:
+**postgres.yaml**
 
 ```yaml
 apiVersion: v1
@@ -335,17 +436,11 @@ metadata:
   name: postgres-pvc
   namespace: monitoring-platform
 spec:
-  accessModes:
-    - ReadWriteOnce
+  accessModes: [ReadWriteOnce]
   resources:
     requests:
-      storage: 50Gi
-  storageClassName: fast-ssd  # Adjust to your storage class
-```
-
-**postgres-deployment.yaml**:
-
-```yaml
+      storage: 10Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -362,27 +457,27 @@ spec:
         app: postgres
     spec:
       containers:
-      - name: postgres
-        image: timescale/timescaledb:latest-pg16
-        env:
-        - name: POSTGRES_DB
-          value: monitoring
-        - name: POSTGRES_USER
-          value: monitoring
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: monitoring-secrets
-              key: database-password
-        ports:
-        - containerPort: 5432
-        volumeMounts:
-        - name: postgres-storage
-          mountPath: /var/lib/postgresql/data
+        - name: postgres
+          image: timescale/timescaledb:latest-pg16
+          env:
+            - name: POSTGRES_DB
+              value: monitoring
+            - name: POSTGRES_USER
+              value: monitoring
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: monitoring-secrets
+                  key: database-password
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
       volumes:
-      - name: postgres-storage
-        persistentVolumeClaim:
-          claimName: postgres-pvc
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: postgres-pvc
 ---
 apiVersion: v1
 kind: Service
@@ -393,13 +488,11 @@ spec:
   selector:
     app: postgres
   ports:
-  - port: 5432
-    targetPort: 5432
+    - port: 5432
+      targetPort: 5432
 ```
 
-### Step 5: Deploy API Server
-
-**api-server-deployment.yaml**:
+**api-server.yaml**
 
 ```yaml
 apiVersion: apps/v1
@@ -408,7 +501,9 @@ metadata:
   name: api-server
   namespace: monitoring-platform
 spec:
-  replicas: 3
+  replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: api-server
@@ -418,46 +513,55 @@ spec:
         app: api-server
     spec:
       containers:
-      - name: api-server
-        image: kmt-server:latest
-        env:
-        - name: MONITORING_DATABASE_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: monitoring-secrets
-              key: database-password
-        - name: MONITORING_KEYCLOAK_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: monitoring-secrets
-              key: keycloak-client-secret
-        - name: MONITORING_AUTH_SESSION_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: monitoring-secrets
-              key: session-secret
-        ports:
-        - containerPort: 7888
-        volumeMounts:
-        - name: config
-          mountPath: /app/config.yaml
-          subPath: config.yaml
-        livenessProbe:
-          httpGet:
-            path: /api/health
-            port: 7888
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /api/health
-            port: 7888
-          initialDelaySeconds: 5
-          periodSeconds: 5
+        - name: api-server
+          image: your-registry/kmt-server:TAG
+          env:
+            - name: MONITORING_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: monitoring-secrets
+                  key: database-password
+            - name: MONITORING_AUTH_SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: monitoring-secrets
+                  key: session-secret
+            - name: MONITORING_SECURITY_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: monitoring-secrets
+                  key: encryption-key
+            - name: MONITORING_KEYCLOAK_TENANTS_DEMO_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: monitoring-secrets
+                  key: keycloak-client-secret
+          ports:
+            - name: http
+              containerPort: 7888
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+              readOnly: true
       volumes:
-      - name: config
-        configMap:
-          name: monitoring-config
+        - name: config
+          configMap:
+            name: monitoring-config
 ---
 apiVersion: v1
 kind: Service
@@ -468,13 +572,13 @@ spec:
   selector:
     app: api-server
   ports:
-  - port: 7888
-    targetPort: 7888
+    - port: 7888
+      targetPort: http
 ```
 
-### Step 6: Deploy Web Server
+Rename `MONITORING_KEYCLOAK_TENANTS_DEMO_CLIENT_SECRET` to match the tenant name in `config.yaml`.
 
-**web-deployment.yaml**:
+**web.yaml**
 
 ```yaml
 apiVersion: apps/v1
@@ -493,18 +597,28 @@ spec:
         app: web
     spec:
       containers:
-      - name: web
-        image: kmt-web:latest
-        ports:
-        - containerPort: 7880
-        volumeMounts:
-        - name: config
-          mountPath: /app/config.yaml
-          subPath: config.yaml
+        - name: web
+          image: your-registry/kmt-web:TAG
+          ports:
+            - name: http
+              containerPort: 7880
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+              readOnly: true
       volumes:
-      - name: config
-        configMap:
-          name: monitoring-config
+        - name: config
+          configMap:
+            name: monitoring-config
 ---
 apiVersion: v1
 kind: Service
@@ -515,14 +629,11 @@ spec:
   selector:
     app: web
   ports:
-  - port: 7880
-    targetPort: 7880
-  type: LoadBalancer  # or ClusterIP with Ingress
+    - port: 7880
+      targetPort: http
 ```
 
-### Step 7: Create Ingress
-
-**ingress.yaml**:
+**ingress.yaml** (fronts web only)
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -536,36 +647,27 @@ metadata:
 spec:
   ingressClassName: nginx
   tls:
-  - hosts:
-    - monitoring.example.com
-    secretName: monitoring-tls
+    - hosts: [monitoring.example.com]
+      secretName: monitoring-tls
   rules:
-  - host: monitoring.example.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: web
-            port:
-              number: 7880
+    - host: monitoring.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  number: 7880
 ```
-
-### Deploy All
 
 ```bash
-kubectl apply -f postgres-pvc.yaml
-kubectl apply -f postgres-deployment.yaml
-kubectl apply -f api-server-deployment.yaml
-kubectl apply -f web-deployment.yaml
-kubectl apply -f ingress.yaml
-
-# Check status
-kubectl get pods -n monitoring-platform
-kubectl get svc -n monitoring-platform
-kubectl get ingress -n monitoring-platform
+kubectl apply -f postgres.yaml -f api-server.yaml -f web.yaml -f ingress.yaml
+kubectl get pods,svc,ingress -n monitoring-platform
 ```
+
+Optional MCP: same shape as the API server, image `your-registry/kmt-mcp-server:TAG`, container port 7889, probes `/health` and `/ready`, Service ClusterIP only. Set `mcp.enabled: true` in `config.yaml` or the process exits.
 
 ## Manual Deployment
 
