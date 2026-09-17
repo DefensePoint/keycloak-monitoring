@@ -2,6 +2,12 @@
 
 A comprehensive monitoring and security compliance platform for Keycloak identity and access management systems. Built with Go and React, this platform provides real-time monitoring, automated security configuration scanning, alert management, and integrated notifications for multi-tenant Keycloak deployments.
 
+## Hosted demo
+
+A hosted demo is available so you can try the tool without standing it up from scratch:
+
+- [https://keycloak-monitoring-demo.defensepoint.com/](https://keycloak-monitoring-demo.defensepoint.com/)
+
 ## Features
 
 ### Core Capabilities
