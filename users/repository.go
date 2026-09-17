@@ -27,6 +27,21 @@ import (
 // it.
 var ErrUserDeleted = errors.New("account has been deleted")
 
+// DeletedAccountError carries the id of the deleted account a login matched.
+//
+// The refusal is logged, and a line saying only that an account was deleted
+// leaves an administrator with no way to tell which one — the first thing they
+// will want to know. The id answers it without the log carrying the address or
+// subject that arrived with the login: those identify the person, the id
+// identifies the row, and the row is what an administrator acts on.
+type DeletedAccountError struct{ UserID uint }
+
+func (e *DeletedAccountError) Error() string { return ErrUserDeleted.Error() }
+
+// Unwrap keeps errors.Is(err, ErrUserDeleted) working for every caller that
+// only cares that the account was deleted.
+func (e *DeletedAccountError) Unwrap() error { return ErrUserDeleted }
+
 // Repository defines the interface for user persistence operations.
 type Repository interface {
 	// FindOrCreateBySubject finds a user by subject (OAuth2 sub claim) or creates a new one.

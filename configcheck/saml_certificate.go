@@ -179,7 +179,7 @@ func (f *SAMLMetadataFetcher) parseCertificates(metadata *SAMLMetadata) ([]*Cert
 
 		f.logger.Debug("Parsed certificate",
 			logger.Str("use", keyDesc.Use),
-			logger.Str("subject", certInfo.Subject),
+			logger.Str("certificate_subject", certInfo.Subject),
 			logger.Time("not_after", certInfo.NotAfter),
 			logger.Time("not_before", certInfo.NotBefore))
 	}
