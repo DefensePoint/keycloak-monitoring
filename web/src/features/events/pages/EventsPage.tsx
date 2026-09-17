@@ -312,14 +312,28 @@ export function EventsPage() {
               </Typography>
             );
           }
+          // Some event types carry no username: Keycloak omits it from the
+          // details of REFRESH_TOKEN and CODE_TO_TOKEN, and where the login
+          // has no AMFA counterpart there is no other record of the name. The
+          // id is then all there is, so it is shown once, in monospace, so it
+          // reads as an identifier rather than as somebody's name. Printing it
+          // twice — once as the label and again beneath — is what made these
+          // rows look broken.
+          const name = row.original.username || row.original.email;
+          if (!name) {
+            return (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ fontFamily: "monospace" }}
+              >
+                {row.original.user_id}
+              </Typography>
+            );
+          }
           return (
             <Box>
-              <Typography variant="body2">
-                {row.original.username ||
-                  row.original.email ||
-                  row.original.user_id ||
-                  "Unknown User"}
-              </Typography>
+              <Typography variant="body2">{name}</Typography>
               {row.original.username && row.original.email && (
                 <Typography variant="caption" color="text.secondary">
                   {row.original.email}

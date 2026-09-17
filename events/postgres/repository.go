@@ -384,6 +384,18 @@ func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 		    screen_resolution = a.screen_resolution,
 		    risk_level = COALESCE(k.risk_level, a.risk_level),
 		    raw_data = COALESCE(k.raw_data, a.raw_data),
+		    -- The AMFA mirror resolves these against Keycloak when it writes
+		    -- its row; the Keycloak monitor takes them from the event payload
+		    -- and leaves them empty for the event types that carry no username
+		    -- (REFRESH_TOKEN, CODE_TO_TOKEN and friends). Copying them here
+		    -- costs no Keycloak call: the value is already on the row being
+		    -- absorbed, and without this it is discarded when that row is.
+		    --
+		    -- NULLIF, because these columns are NOT NULL with an empty default:
+		    -- a plain COALESCE would see '' as a value and keep it, which is a
+		    -- silent no-op. Keycloak still wins where it has something.
+		    username = COALESCE(NULLIF(k.username, ''), a.username),
+		    email = COALESCE(NULLIF(k.email, ''), a.email),
 		    updated_at = now()
 		FROM events AS a
 		WHERE a.source_system = 'amfa' AND a.deleted_at IS NULL
