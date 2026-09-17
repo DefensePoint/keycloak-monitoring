@@ -143,9 +143,20 @@ vi.mock("material-react-table", () => ({
     // definitions worth exercising here, and rendering them all would drag
     // every other Cell's dependencies into this mock.
     const actions = columns?.find((column) => column.id === "actions");
+    // The user column is rendered too: it decides what a row shows when the
+    // event carries no username, which is most of them for token events, and
+    // that is a display decision worth holding still. It needs nothing but
+    // layout components, so it does not drag anything into this mock.
+    const user = columns?.find((column) => column.accessorKey === "username");
     return (
       <div data-testid="events-table">
         <div>Table with {data.length} events</div>
+        {user?.Cell &&
+          data.map((original, index) => (
+            <div data-testid="row-user" key={index}>
+              {user.Cell!({ row: { original } })}
+            </div>
+          ))}
         {actions?.Cell &&
           data.map((original, index) => (
             <div data-testid="row-actions" key={index}>
@@ -185,8 +196,20 @@ const mockEventsResponse = {
       username: "admin",
       client_id: "admin-cli",
     },
+    {
+      // Keycloak puts no username in the details of a token event, so where
+      // the login has no AMFA counterpart the id is all the row carries.
+      event_id: "event-3",
+      timestamp: "2024-01-03T00:00:00Z",
+      type: "REFRESH_TOKEN",
+      severity: "info",
+      description: "Token refreshed",
+      source: "keycloak:master",
+      user_id: "11111111-2222-3333-4444-555555555555",
+      client_id: "admin-cli",
+    },
   ],
-  total: 2,
+  total: 3,
 };
 
 const mockKeycloakDashboard = {
@@ -252,7 +275,7 @@ describe("EventsPage", () => {
       expect(screen.getByTestId("events-table")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Table with 2 events")).toBeInTheDocument();
+    expect(screen.getByText("Table with 3 events")).toBeInTheDocument();
   });
 
   it("should display realm selector", async () => {
@@ -294,7 +317,7 @@ describe("EventsPage", () => {
 
     // Note: This test would require mocking the MaterialReactTable with clickable rows
     // For now, we just verify the table is rendered
-    expect(screen.getByText("Table with 2 events")).toBeInTheDocument();
+    expect(screen.getByText("Table with 3 events")).toBeInTheDocument();
   });
 
   it("should display pagination info", async () => {
@@ -304,7 +327,7 @@ describe("EventsPage", () => {
       expect(screen.getByText(/Page 1 of/)).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/2 total events/)).toBeInTheDocument();
+    expect(screen.getByText(/3 total events/)).toBeInTheDocument();
   });
 
   it("hides the AMFA KPI strip when no realm uses AMFA", async () => {
@@ -617,6 +640,36 @@ describe("EventsPage", () => {
       await waitFor(() => {
         expect(screen.getByTestId("location-map")).toBeInTheDocument();
       });
+    });
+  });
+  describe("the user column", () => {
+    // A row with no username showed its user id twice: once as the label and
+    // again in the monospace line beneath it, which is what made the table look
+    // like it was full of raw UUIDs.
+    it("shows the user id once when the row carries no name", async () => {
+      render(<EventsPage />);
+      await waitFor(() => {
+        expect(screen.getByTestId("events-table")).toBeInTheDocument();
+      });
+
+      const id = "11111111-2222-3333-4444-555555555555";
+      await waitFor(() => {
+        expect(screen.getAllByText(id)).toHaveLength(1);
+      });
+    });
+
+    it("shows the name, and the id beneath it, when the row has one", async () => {
+      render(<EventsPage />);
+      await waitFor(() => {
+        expect(screen.getByTestId("events-table")).toBeInTheDocument();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("testuser")).toBeInTheDocument();
+      });
+      // The id still appears for a named row: it is additional information
+      // there rather than a substitute for the name.
+      expect(screen.getAllByText("user-123")).toHaveLength(1);
     });
   });
 });

@@ -251,7 +251,9 @@ func (m *Monitor) collectEvents(ctx context.Context) {
 			// federated realms it triggers getUserByUsername on the storage
 			// provider while a service-account session is active in context,
 			// which makes some custom user storage providers log a warning for
-			// every event processed.
+			// every event processed. Where an event has an AMFA counterpart the
+			// name is recovered instead by ReconcileAMFAMerges, which copies it
+			// from the row AMFA already resolved.
 			username := event.Details["username"]
 			email := event.Details["email"]
 
