@@ -63,16 +63,12 @@ func NewRouter(
 
 	// Add Chi's built-in middleware (optional, can be customized)
 	r.Use(middleware.RequestID)
-	// chi v5.3.0 deprecated RealIP without changing its behavior: it still
-	// overwrites RemoteAddr from True-Client-IP / X-Real-IP / the leftmost
-	// X-Forwarded-For whether or not a proxy set them, so the client IP here
-	// remains attacker-controlled. Kept as-is for now because the documented
-	// deployment does front this with nginx/traefik, and the safe replacements
-	// (ClientIPFromXFFTrustedProxies + GetClientIP) need a trusted-proxy CIDR
-	// setting this repo does not have yet. The only consumer on this router is
-	// the remote_addr field in the request log, so the exposure is spoofable
-	// log entries, not an authorization or rate-limit decision.
-	r.Use(middleware.RealIP) //nolint:staticcheck // SA1019: see the comment above
+	// chi RealIP still prefers True-Client-IP, then X-Real-IP, then the
+	// leftmost X-Forwarded-For, from the client even when a proxy is in
+	// front. nginx overwriting X-Real-IP does not stop a client
+	// True-Client-IP. The nginx sample now clears that header; that is
+	// an interim mitigation, not a trusted-proxy implementation.
+	r.Use(middleware.RealIP) //nolint:staticcheck // SA1019
 
 	return &Router{
 		chi:            r,
