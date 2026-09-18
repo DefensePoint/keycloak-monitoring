@@ -178,11 +178,16 @@ logging:
 
 ```bash
 # Create .env file for secrets
+# Initial-admin password must not substring-match the weak list
+# (admin, password, secret, default, changeme, welcome, …).
 cat > .env <<EOF
 MONITORING_DATABASE_PASSWORD=your_secure_db_password
 MONITORING_KEYCLOAK_CLIENT_SECRET=keycloak_client_secret
 MONITORING_AUTH_OAUTH2_CLIENT_SECRET=oauth2_client_secret
 MONITORING_AUTH_SESSION_SECRET=$(openssl rand -base64 32)
+MONITORING_AUTH_SIMPLE_DEFAULT_USER=operator
+MONITORING_AUTH_SIMPLE_DEFAULT_EMAIL=operator@example.com
+MONITORING_AUTH_SIMPLE_DEFAULT_PASS='Init!2026-Qx7nK2'
 EOF
 
 # Secure the file
@@ -221,7 +226,7 @@ docker-compose -f deployments/local/docker-compose.yml logs -f
 
 ```bash
 # Check API health
-curl http://localhost:7888/api/health
+curl http://localhost:7888/health
 
 # Check web server
 curl http://localhost:7880
@@ -265,12 +270,15 @@ services:
       - MONITORING_DATABASE_PASSWORD=${MONITORING_DATABASE_PASSWORD}
       - MONITORING_KEYCLOAK_CLIENT_SECRET=${MONITORING_KEYCLOAK_CLIENT_SECRET}
       - MONITORING_AUTH_SESSION_SECRET=${MONITORING_AUTH_SESSION_SECRET}
+      - MONITORING_AUTH_SIMPLE_DEFAULT_USER=${MONITORING_AUTH_SIMPLE_DEFAULT_USER}
+      - MONITORING_AUTH_SIMPLE_DEFAULT_EMAIL=${MONITORING_AUTH_SIMPLE_DEFAULT_EMAIL}
+      - MONITORING_AUTH_SIMPLE_DEFAULT_PASS=${MONITORING_AUTH_SIMPLE_DEFAULT_PASS}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     networks:
       - monitoring_network
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:7888/api/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:7888/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -320,7 +328,10 @@ Required secrets (32+ character session secret, AES encryption key, database pas
 - `MONITORING_AUTH_SESSION_SECRET`
 - `MONITORING_SECURITY_ENCRYPTION_KEY`
 - `MONITORING_DATABASE_PASSWORD`
+- `MONITORING_AUTH_SIMPLE_DEFAULT_PASS` (only the password is a secret; user and email can be plain env)
 - tenant client secret (the `MONITORING_KEYCLOAK_TENANTS_<NAME>_CLIENT_SECRET` key that matches your tenant block)
+
+Simple-auth seed (`MONITORING_AUTH_SIMPLE_DEFAULT_USER`, `_EMAIL`, `_PASS`) is required even when `auth.simple` keys in `config.yaml` are empty. Without them the API rolls back on start with `SECURITY ERROR: default_user must be set` and never binds. The password validator substring-matches a weak list (`admin`, `password`, `secret`, `default`, `changeme`, `welcome`); do not use an example that contains those strings.
 
 ### Helm (recommended)
 
@@ -424,6 +435,7 @@ kubectl create secret generic monitoring-secrets \
   --from-literal=session-secret="$(openssl rand -base64 32)" \
   --from-literal=encryption-key="$(openssl rand -base64 32)" \
   --from-literal=keycloak-client-secret='...' \
+  --from-literal=initial-admin-password='Init!2026-Qx7nK2' \
   -n monitoring-platform
 ```
 
@@ -469,6 +481,10 @@ spec:
                 secretKeyRef:
                   name: monitoring-secrets
                   key: database-password
+            # New volumes only. An existing cluster at the mount root
+            # is invisible if PGDATA moves to a subdirectory.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           ports:
             - containerPort: 5432
           volumeMounts:
@@ -491,6 +507,8 @@ spec:
     - port: 5432
       targetPort: 5432
 ```
+
+`PGDATA` in a subdirectory is for **new** volumes. Kubernetes PVCs on ext4 often have `lost+found` at the mount root, which makes initdb refuse the directory. An existing database already at `/var/lib/postgresql/data` becomes invisible if you change `PGDATA`; move the data or keep the old value.
 
 **api-server.yaml**
 
@@ -536,6 +554,15 @@ spec:
                 secretKeyRef:
                   name: monitoring-secrets
                   key: keycloak-client-secret
+            - name: MONITORING_AUTH_SIMPLE_DEFAULT_USER
+              value: operator
+            - name: MONITORING_AUTH_SIMPLE_DEFAULT_EMAIL
+              value: operator@example.com
+            - name: MONITORING_AUTH_SIMPLE_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: monitoring-secrets
+                  key: initial-admin-password
           ports:
             - name: http
               containerPort: 7888
@@ -716,6 +743,19 @@ sudo chown -R monitoring:monitoring /opt/monitoring-platform
 
 ### API Server Service
 
+Unit files are world-readable. Put secrets in a 0600 EnvironmentFile. The web unit does not seed simple-auth.
+
+```bash
+sudo install -d -m 0750 -o monitoring -g monitoring /etc/monitoring-platform
+sudo tee /etc/monitoring-platform/secrets.env >/dev/null <<'EOF'
+MONITORING_DATABASE_PASSWORD=your_password
+MONITORING_KEYCLOAK_CLIENT_SECRET=keycloak_client_secret
+MONITORING_AUTH_SIMPLE_DEFAULT_PASS=Init!2026-Qx7nK2
+EOF
+sudo chmod 0600 /etc/monitoring-platform/secrets.env
+sudo chown monitoring:monitoring /etc/monitoring-platform/secrets.env
+```
+
 **/etc/systemd/system/monitoring-api.service**:
 
 ```ini
@@ -740,8 +780,9 @@ ProtectHome=true
 ReadWritePaths=/opt/monitoring-platform
 
 # Environment
-Environment="MONITORING_DATABASE_PASSWORD=your_password"
-Environment="MONITORING_KEYCLOAK_CLIENT_SECRET=keycloak_client_secret"
+EnvironmentFile=/etc/monitoring-platform/secrets.env
+Environment="MONITORING_AUTH_SIMPLE_DEFAULT_USER=operator"
+Environment="MONITORING_AUTH_SIMPLE_DEFAULT_EMAIL=operator@example.com"
 
 [Install]
 WantedBy=multi-user.target
