@@ -12,6 +12,11 @@
 #   - Keycloak 1:    http://localhost:8080  (admin/admin) - simulates "prod"
 #   - Keycloak 2:    http://localhost:8081  (admin/admin) - simulates "staging"
 #   - PostgreSQL:    localhost:5432
+#
+# After this change, drop the old shared project once:
+#   docker compose -p local -f deployments/local/docker-compose.yml down -v
+
+name: kmt-local
 
 services:
   # ==========================================================================
@@ -57,14 +62,14 @@ services:
   # ==========================================================================
   keycloak-db-1:
     image: postgres:16-alpine
-    container_name: keycloak-db-1
+    container_name: kmt-keycloak-db-1
     profiles: ["bundled-kc"]
     environment:
       POSTGRES_DB: keycloak
       POSTGRES_USER: keycloak
       POSTGRES_PASSWORD: keycloak
     volumes:
-      - keycloak-db-1-data:/var/lib/postgresql/data
+      - kmt-keycloak-db-1-data:/var/lib/postgresql/data
     networks:
       - kmt-network
     restart: unless-stopped
@@ -76,7 +81,7 @@ services:
 
   keycloak-1:
     image: quay.io/keycloak/keycloak:26.7
-    container_name: keycloak-1
+    container_name: kmt-keycloak-1
     profiles: ["bundled-kc"]
     ports:
       - "8080:8080"
@@ -110,14 +115,14 @@ services:
   # ==========================================================================
   keycloak-db-2:
     image: postgres:16-alpine
-    container_name: keycloak-db-2
+    container_name: kmt-keycloak-db-2
     profiles: ["bundled-kc"]
     environment:
       POSTGRES_DB: keycloak
       POSTGRES_USER: keycloak
       POSTGRES_PASSWORD: keycloak
     volumes:
-      - keycloak-db-2-data:/var/lib/postgresql/data
+      - kmt-keycloak-db-2-data:/var/lib/postgresql/data
     networks:
       - kmt-network
     restart: unless-stopped
@@ -129,7 +134,7 @@ services:
 
   keycloak-2:
     image: quay.io/keycloak/keycloak:26.7
-    container_name: keycloak-2
+    container_name: kmt-keycloak-2
     profiles: ["bundled-kc"]
     ports:
       - "8081:8080"
@@ -240,8 +245,8 @@ services:
 
 volumes:
   kmt-postgres-data:
-  keycloak-db-1-data:
-  keycloak-db-2-data:
+  kmt-keycloak-db-1-data:
+  kmt-keycloak-db-2-data:
 
 networks:
   kmt-network:
