@@ -249,7 +249,6 @@ services:
       POSTGRES_DB: monitoring
       POSTGRES_USER: monitoring
       POSTGRES_PASSWORD: ${MONITORING_DATABASE_PASSWORD}
-      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -482,6 +481,8 @@ spec:
                 secretKeyRef:
                   name: monitoring-secrets
                   key: database-password
+            # New volumes only. An existing cluster at the mount root
+            # is invisible if PGDATA moves to a subdirectory.
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           ports:
@@ -506,6 +507,8 @@ spec:
     - port: 5432
       targetPort: 5432
 ```
+
+`PGDATA` in a subdirectory is for **new** volumes. Kubernetes PVCs on ext4 often have `lost+found` at the mount root, which makes initdb refuse the directory. An existing database already at `/var/lib/postgresql/data` becomes invisible if you change `PGDATA`; move the data or keep the old value.
 
 **api-server.yaml**
 
@@ -740,6 +743,19 @@ sudo chown -R monitoring:monitoring /opt/monitoring-platform
 
 ### API Server Service
 
+Unit files are world-readable. Put secrets in a 0600 EnvironmentFile. The web unit does not seed simple-auth.
+
+```bash
+sudo install -d -m 0750 -o monitoring -g monitoring /etc/monitoring-platform
+sudo tee /etc/monitoring-platform/secrets.env >/dev/null <<'EOF'
+MONITORING_DATABASE_PASSWORD=your_password
+MONITORING_KEYCLOAK_CLIENT_SECRET=keycloak_client_secret
+MONITORING_AUTH_SIMPLE_DEFAULT_PASS=Init!2026-Qx7nK2
+EOF
+sudo chmod 0600 /etc/monitoring-platform/secrets.env
+sudo chown monitoring:monitoring /etc/monitoring-platform/secrets.env
+```
+
 **/etc/systemd/system/monitoring-api.service**:
 
 ```ini
@@ -764,8 +780,9 @@ ProtectHome=true
 ReadWritePaths=/opt/monitoring-platform
 
 # Environment
-Environment="MONITORING_DATABASE_PASSWORD=your_password"
-Environment="MONITORING_KEYCLOAK_CLIENT_SECRET=keycloak_client_secret"
+EnvironmentFile=/etc/monitoring-platform/secrets.env
+Environment="MONITORING_AUTH_SIMPLE_DEFAULT_USER=operator"
+Environment="MONITORING_AUTH_SIMPLE_DEFAULT_EMAIL=operator@example.com"
 
 [Install]
 WantedBy=multi-user.target
