@@ -1,0 +1,1 @@
+export { TenantAccessGuard } from "./TenantAccessGuard";

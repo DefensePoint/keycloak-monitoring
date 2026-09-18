@@ -1,0 +1,42 @@
+{
+  "name": "kmt",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "cd web && npm run dev",
+    "build": "cd web && npm run build",
+    "preview": "cd web && npm run preview",
+    "lint": "cd web && npm run lint",
+    "lint:fix": "cd web && eslint src --ext ts,tsx --fix",
+    "format": "cd web && prettier --write \"src/**/*.{ts,tsx,css}\"",
+    "format:check": "cd web && prettier --check \"src/**/*.{ts,tsx,css}\"",
+    "test": "cd web && npm run test",
+    "test:watch": "cd web && npm run test",
+    "test:ui": "cd web && npm run test:ui",
+    "test:run": "cd web && npm run test -- --run",
+    "test:coverage": "cd web && npm run test:coverage",
+    "ci": "npm run lint && npm run format:check && npm run test:run && npm run build",
+    "ci:quick": "npm run lint && npm run format:check",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.1.0",
+    "@commitlint/config-conventional": "^20.0.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.4",
+    "prettier": "^3.7.4"
+  },
+  "lint-staged": {
+    "web/**/*.{ts,tsx}": [
+      "sh -c 'cd web && npx eslint --fix \"$@\"' --",
+      "prettier --write"
+    ],
+    "web/**/*.css": [
+      "prettier --write"
+    ],
+    "**/*.go": [
+      "gofmt -w"
+    ]
+  }
+}
