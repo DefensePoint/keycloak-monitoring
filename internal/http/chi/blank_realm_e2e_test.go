@@ -27,6 +27,7 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
 	rbacpostgres "github.com/DefensePoint/keycloak-monitoring/internal/rbac/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
@@ -45,6 +46,8 @@ func newBlankRealmStack(t *testing.T) *blankRealmStack {
 	if dsn == "" {
 		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping e2e test")
 	}
+
+	testdb.ShareDatabase(t, dsn)
 
 	log := logger.NewNoop()
 	client, err := database.NewClient(dsnConfig(t, dsn), log)

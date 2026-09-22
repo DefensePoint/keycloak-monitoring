@@ -54,8 +54,10 @@ temp/
 *.tmp
 
 # Frontend files
-node_modules/
-dist/
+# ** is required: these patterns match against the path relative to the build
+# context root, so a bare "node_modules/" would miss web/node_modules.
+**/node_modules
+**/dist
 
 # Sensitive files
 .env

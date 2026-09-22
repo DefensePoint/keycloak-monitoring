@@ -28,6 +28,7 @@ import (
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
@@ -42,6 +43,8 @@ func newReconcileTestRepo(t *testing.T) (*Repository, *gorm.DB) {
 	if dsn == "" {
 		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
 	}
+
+	testdb.ShareDatabase(t, dsn)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger:                 gormlogger.Default.LogMode(gormlogger.Silent),

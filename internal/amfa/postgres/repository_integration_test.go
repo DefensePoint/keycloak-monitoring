@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
 )
 
 // openAmfaTestDB connects to the AMFA test database identified by the
@@ -27,6 +28,8 @@ func openAmfaTestDB(t *testing.T) *gorm.DB {
 		t.Skip("AMFA_TEST_DSN not set; skipping integration test. " +
 			"Example: 'host=localhost port=5455 dbname=adaptive_mfa user=keycloak password=password sslmode=disable'")
 	}
+
+	testdb.ShareDatabase(t, dsn)
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("connect to AMFA DB: %v", err)

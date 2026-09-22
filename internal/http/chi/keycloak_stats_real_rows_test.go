@@ -27,6 +27,7 @@ import (
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
 	kcpg "github.com/DefensePoint/keycloak-monitoring/internal/keycloak/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
@@ -45,6 +46,8 @@ func newStatsRealRowsStack(t *testing.T, rbacSvc RBACChecker) *statsRealRowsStac
 	if dsn == "" {
 		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
 	}
+
+	testdb.ShareDatabase(t, dsn)
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
 	})

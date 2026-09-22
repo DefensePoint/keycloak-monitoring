@@ -53,6 +53,7 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
 	rbacpostgres "github.com/DefensePoint/keycloak-monitoring/internal/rbac/postgres"
 	tenantpostgres "github.com/DefensePoint/keycloak-monitoring/internal/tenant/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
 	"github.com/DefensePoint/keycloak-monitoring/internal/users"
 	userspostgres "github.com/DefensePoint/keycloak-monitoring/internal/users/postgres"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
@@ -307,6 +308,8 @@ func newPostureEnv(t *testing.T) *postureEnv {
 	if dsn == "" {
 		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
 	}
+
+	testdb.ShareDatabase(t, dsn)
 	dbCfg := parseTestDSN(t, dsn)
 	log := logger.NewNoop()
 	ctx := context.Background()

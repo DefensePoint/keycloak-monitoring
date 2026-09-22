@@ -16,6 +16,7 @@ import (
 	amfapg "github.com/DefensePoint/keycloak-monitoring/internal/amfa/postgres"
 	"github.com/DefensePoint/keycloak-monitoring/internal/amfacheck"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
 )
 
 // memAlertStore is an in-memory amfacheck.AlertStore for the integration test.
@@ -50,6 +51,8 @@ func openAmfaDB(t *testing.T) *gorm.DB {
 	if dsn == "" {
 		t.Skip("AMFA_TEST_DSN not set; skipping amfacheck integration test")
 	}
+
+	testdb.ShareDatabase(t, dsn)
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("connect AMFA DB: %v", err)

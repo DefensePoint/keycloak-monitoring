@@ -21,6 +21,7 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
+	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
@@ -31,6 +32,8 @@ func newEventStatsDB(t *testing.T) *gorm.DB {
 	if dsn == "" {
 		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
 	}
+
+	testdb.ShareDatabase(t, dsn)
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
 	})

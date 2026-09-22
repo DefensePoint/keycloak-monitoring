@@ -26,6 +26,7 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
@@ -72,6 +73,8 @@ func newEnabledTestRepo(t *testing.T) (tenant.Repository, *gorm.DB) {
 	if dsn == "" {
 		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
 	}
+
+	testdb.ShareDatabase(t, dsn)
 
 	client, err := database.NewClient(dsnConfig(t, dsn), logger.NewNoop())
 	if err != nil {

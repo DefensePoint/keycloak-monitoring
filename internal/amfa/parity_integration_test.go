@@ -32,6 +32,7 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/amfa"
 	"github.com/DefensePoint/keycloak-monitoring/internal/amfa/httpclient"
 	amfapg "github.com/DefensePoint/keycloak-monitoring/internal/amfa/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
 )
 
 // parityFixture holds both implementations plus the realm and window they are
@@ -55,6 +56,8 @@ func newParityFixture(t *testing.T) parityFixture {
 	if dsn == "" || apiURL == "" || realm == "" || token == "" {
 		t.Skip("parity test needs AMFA_TEST_DSN, AMFA_TEST_API_URL, AMFA_TEST_REALM and AMFA_TEST_TOKEN")
 	}
+
+	testdb.ShareDatabase(t, dsn)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {

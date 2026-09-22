@@ -201,10 +201,14 @@ SWAG := docker run --rm -v $(CURDIR):/app -v kmt-swag-cache:/go -w /app \
 	golang:1.26 go run github.com/swaggo/swag/cmd/swag@latest
 endif
 
+# --parseDependency is deliberately absent: it makes swag name every schema after
+# its full import path instead of alerts.Statistics, and produces the same
+# document otherwise. Add it back only if a handler exposes a type swag cannot
+# resolve, and expect every schema name to change if you do.
 .PHONY: swagger
 swagger: ## Generate Swagger documentation
 	@echo "Generating Swagger documentation..."
-	@$(SWAG) init -g cmd/server/main.go -o docs/swagger --parseDependency --parseInternal
+	@$(SWAG) init -g cmd/server/main.go -o docs/swagger --parseInternal
 	@echo "Swagger docs generated at docs/swagger/"
 
 .PHONY: swagger-fmt

@@ -21,6 +21,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/alerts"
+	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
@@ -33,6 +34,8 @@ func newRealmScopeTestRepo(t *testing.T) (*Repository, string) {
 	if dsn == "" {
 		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
 	}
+
+	testdb.ShareDatabase(t, dsn)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger:                 gormlogger.Default.LogMode(gormlogger.Silent),

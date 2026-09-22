@@ -76,7 +76,7 @@ const docTemplate = `{
                                 "roles": {
                                     "type": "array",
                                     "items": {
-                                        "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.UserRole"
+                                        "$ref": "#/definitions/domain.UserRole"
                                     }
                                 },
                                 "subject": {
@@ -85,7 +85,7 @@ const docTemplate = `{
                                 "tenant_policies": {
                                     "type": "array",
                                     "items": {
-                                        "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.TenantPolicy"
+                                        "$ref": "#/definitions/domain.TenantPolicy"
                                     }
                                 }
                             }
@@ -94,13 +94,13 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -138,7 +138,7 @@ const docTemplate = `{
                                 "permissions": {
                                     "type": "array",
                                     "items": {
-                                        "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.Permission"
+                                        "$ref": "#/definitions/domain.Permission"
                                     }
                                 }
                             }
@@ -147,19 +147,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -193,31 +193,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.MessageResponse"
+                            "$ref": "#/definitions/dto.MessageResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid policy ID",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -255,7 +255,7 @@ const docTemplate = `{
                                 "roles": {
                                     "type": "array",
                                     "items": {
-                                        "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.Role"
+                                        "$ref": "#/definitions/domain.Role"
                                     }
                                 }
                             }
@@ -264,19 +264,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -305,7 +305,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.CreateRole"
+                            "$ref": "#/definitions/requests.CreateRole"
                         }
                     }
                 ],
@@ -313,31 +313,31 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.Role"
+                            "$ref": "#/definitions/domain.Role"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -371,37 +371,37 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.Role"
+                            "$ref": "#/definitions/domain.Role"
                         }
                     },
                     "400": {
                         "description": "Invalid role ID",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Role not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -437,7 +437,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.UpdateRole"
+                            "$ref": "#/definitions/requests.UpdateRole"
                         }
                     }
                 ],
@@ -445,37 +445,37 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.Role"
+                            "$ref": "#/definitions/domain.Role"
                         }
                     },
                     "400": {
                         "description": "Invalid role ID or request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Cannot modify system roles",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Role not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -507,37 +507,37 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.MessageResponse"
+                            "$ref": "#/definitions/dto.MessageResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid role ID",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Cannot delete system roles",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Role not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -576,7 +576,7 @@ const docTemplate = `{
                                 "policies": {
                                     "type": "array",
                                     "items": {
-                                        "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.TenantPolicy"
+                                        "$ref": "#/definitions/domain.TenantPolicy"
                                     }
                                 }
                             }
@@ -585,25 +585,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Invalid user ID",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -639,7 +639,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.CreateTenantPolicy"
+                            "$ref": "#/definitions/requests.CreateTenantPolicy"
                         }
                     }
                 ],
@@ -647,31 +647,31 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.MessageResponse"
+                            "$ref": "#/definitions/dto.MessageResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid user ID or request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -716,7 +716,7 @@ const docTemplate = `{
                                 "roles": {
                                     "type": "array",
                                     "items": {
-                                        "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.UserRole"
+                                        "$ref": "#/definitions/domain.UserRole"
                                     }
                                 }
                             }
@@ -725,25 +725,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Invalid user ID",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -779,7 +779,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.AssignRole"
+                            "$ref": "#/definitions/requests.AssignRole"
                         }
                     }
                 ],
@@ -787,31 +787,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.MessageResponse"
+                            "$ref": "#/definitions/dto.MessageResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid user ID or request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -858,31 +858,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.MessageResponse"
+                            "$ref": "#/definitions/dto.MessageResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid user or role ID",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -915,7 +915,7 @@ const docTemplate = `{
                                 "tenants": {
                                     "type": "array",
                                     "items": {
-                                        "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.KeycloakTenant"
+                                        "$ref": "#/definitions/domain.KeycloakTenant"
                                     }
                                 }
                             }
@@ -924,19 +924,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -965,7 +965,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.CreateTenant"
+                            "$ref": "#/definitions/requests.CreateTenant"
                         }
                     }
                 ],
@@ -976,7 +976,7 @@ const docTemplate = `{
                             "type": "object",
                             "properties": {
                                 "tenant": {
-                                    "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.KeycloakTenant"
+                                    "$ref": "#/definitions/domain.KeycloakTenant"
                                 }
                             }
                         }
@@ -984,31 +984,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Another tenant is already default",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -1039,7 +1039,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.TestTenantConnection"
+                            "$ref": "#/definitions/requests.TestTenantConnection"
                         }
                     }
                 ],
@@ -1078,7 +1078,7 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "503": {
@@ -1129,7 +1129,7 @@ const docTemplate = `{
                             "type": "object",
                             "properties": {
                                 "tenant": {
-                                    "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.KeycloakTenant"
+                                    "$ref": "#/definitions/domain.KeycloakTenant"
                                 }
                             }
                         }
@@ -1137,25 +1137,25 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Tenant not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -1191,7 +1191,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.UpdateTenant"
+                            "$ref": "#/definitions/requests.UpdateTenant"
                         }
                     }
                 ],
@@ -1202,7 +1202,7 @@ const docTemplate = `{
                             "type": "object",
                             "properties": {
                                 "tenant": {
-                                    "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.KeycloakTenant"
+                                    "$ref": "#/definitions/domain.KeycloakTenant"
                                 }
                             }
                         }
@@ -1210,37 +1210,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Tenant not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Another tenant is already default",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -1272,31 +1272,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.MessageResponse"
+                            "$ref": "#/definitions/dto.MessageResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Tenant not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -1377,7 +1377,7 @@ const docTemplate = `{
                                 "alerts": {
                                     "type": "array",
                                     "items": {
-                                        "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.Alert"
+                                        "$ref": "#/definitions/domain.Alert"
                                     }
                                 },
                                 "count": {
@@ -1398,19 +1398,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -1468,7 +1468,7 @@ const docTemplate = `{
                                 "alerts": {
                                     "type": "array",
                                     "items": {
-                                        "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.Alert"
+                                        "$ref": "#/definitions/domain.Alert"
                                     }
                                 },
                                 "count": {
@@ -1483,25 +1483,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -1553,25 +1553,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing alert_id",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -1612,31 +1612,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.Alert"
+                            "$ref": "#/definitions/domain.Alert"
                         }
                     },
                     "400": {
                         "description": "Missing alert_id",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Alert not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -1677,37 +1677,37 @@ const docTemplate = `{
                     "200": {
                         "description": "Resolved alert",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.Alert"
+                            "$ref": "#/definitions/domain.Alert"
                         }
                     },
                     "400": {
                         "description": "Missing alert_id",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Alert not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -1753,19 +1753,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -1810,7 +1810,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.UpdateAlertStatus"
+                            "$ref": "#/definitions/requests.UpdateAlertStatus"
                         }
                     }
                 ],
@@ -1818,31 +1818,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.Alert"
+                            "$ref": "#/definitions/domain.Alert"
                         }
                     },
                     "400": {
                         "description": "Missing alert_id or invalid status",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -1883,25 +1883,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.Alert"
+                            "$ref": "#/definitions/domain.Alert"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Alert not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -1942,31 +1942,31 @@ const docTemplate = `{
                     "200": {
                         "description": "Resolved alert",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.Alert"
+                            "$ref": "#/definitions/domain.Alert"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Alert not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -2011,7 +2011,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.UpdateAlertStatus"
+                            "$ref": "#/definitions/requests.UpdateAlertStatus"
                         }
                     }
                 ],
@@ -2019,31 +2019,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.Alert"
+                            "$ref": "#/definitions/domain.Alert"
                         }
                     },
                     "400": {
                         "description": "Invalid status",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -2120,19 +2120,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -2172,25 +2172,25 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Tenant not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -2231,19 +2231,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -2290,19 +2290,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -2368,25 +2368,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm parameter",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -2440,25 +2440,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm parameter",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -2499,19 +2499,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -2558,19 +2558,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -2611,19 +2611,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -2670,19 +2670,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -2736,25 +2736,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm parameter",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -2795,19 +2795,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -2855,25 +2855,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm parameter",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -2921,31 +2921,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm parameter",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Realm not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3005,25 +3005,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm parameter",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3078,25 +3078,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm or userId parameter",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3137,19 +3137,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3209,32 +3209,32 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.OperatorAction"
+                                "$ref": "#/definitions/domain.OperatorAction"
                             }
                         }
                     },
                     "400": {
                         "description": "Invalid date range",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3282,32 +3282,32 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.OperatorMetricsSummary"
+                                "$ref": "#/definitions/domain.OperatorMetricsSummary"
                             }
                         }
                     },
                     "400": {
                         "description": "Invalid date range",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3360,31 +3360,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.OperatorMetricsSummary"
+                            "$ref": "#/definitions/domain.OperatorMetricsSummary"
                         }
                     },
                     "400": {
                         "description": "Missing email or invalid date range",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3439,25 +3439,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing realm name or user ID",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3511,25 +3511,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Missing or invalid dates",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Tenant not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3594,19 +3594,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3640,19 +3640,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_version.Info"
+                            "$ref": "#/definitions/version.Info"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3691,19 +3691,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3732,7 +3732,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.CreateAPIToken"
+                            "$ref": "#/definitions/requests.CreateAPIToken"
                         }
                     }
                 ],
@@ -3746,31 +3746,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Invalid request or expiry",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "User not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3804,37 +3804,37 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.MessageResponse"
+                            "$ref": "#/definitions/dto.MessageResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid token ID",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Token not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3864,7 +3864,7 @@ const docTemplate = `{
                                 "users": {
                                     "type": "array",
                                     "items": {
-                                        "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.User"
+                                        "$ref": "#/definitions/domain.User"
                                     }
                                 }
                             }
@@ -3873,19 +3873,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3914,7 +3914,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.CreateUser"
+                            "$ref": "#/definitions/requests.CreateUser"
                         }
                     }
                 ],
@@ -3922,37 +3922,37 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.User"
+                            "$ref": "#/definitions/domain.User"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "User already exists",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -3986,37 +3986,37 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.User"
+                            "$ref": "#/definitions/domain.User"
                         }
                     },
                     "400": {
                         "description": "Invalid user ID",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "User not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -4052,7 +4052,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.UpdateUser"
+                            "$ref": "#/definitions/requests.UpdateUser"
                         }
                     }
                 ],
@@ -4060,43 +4060,43 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.User"
+                            "$ref": "#/definitions/domain.User"
                         }
                     },
                     "400": {
                         "description": "Invalid user ID or request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "OAuth users cannot be modified",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "User not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Username already taken",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -4128,31 +4128,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.MessageResponse"
+                            "$ref": "#/definitions/dto.MessageResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid user ID",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -4172,7 +4172,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_version.PublicInfo"
+                            "$ref": "#/definitions/version.PublicInfo"
                         }
                     }
                 }
@@ -4208,13 +4208,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Invalid parameters",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -4265,13 +4265,13 @@ const docTemplate = `{
                     "403": {
                         "description": "OAuth2 disabled",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -4297,7 +4297,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.SimpleLogin"
+                            "$ref": "#/definitions/requests.SimpleLogin"
                         }
                     }
                 ],
@@ -4333,13 +4333,13 @@ const docTemplate = `{
                     "403": {
                         "description": "Simple auth disabled",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -4359,7 +4359,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -4390,7 +4390,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.ChangePassword"
+                            "$ref": "#/definitions/requests.ChangePassword"
                         }
                     }
                 ],
@@ -4440,13 +4440,13 @@ const docTemplate = `{
                     "403": {
                         "description": "Simple auth disabled",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -4516,19 +4516,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Token refresh not available",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -4553,13 +4553,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_http_chi.UserDetails"
+                            "$ref": "#/definitions/chi.UserDetails"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     }
                 }
@@ -4688,7 +4688,45 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_domain.Alert": {
+        "chi.UserDetails": {
+            "type": "object",
+            "properties": {
+                "Email": {
+                    "type": "string"
+                },
+                "EmailVerified": {
+                    "type": "boolean"
+                },
+                "FamilyName": {
+                    "type": "string"
+                },
+                "GivenName": {
+                    "type": "string"
+                },
+                "ID": {
+                    "type": "integer"
+                },
+                "Locale": {
+                    "type": "string"
+                },
+                "MustChangePassword": {
+                    "type": "boolean"
+                },
+                "Name": {
+                    "type": "string"
+                },
+                "PreferredUsername": {
+                    "type": "string"
+                },
+                "Subject": {
+                    "type": "string"
+                },
+                "UpdatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.Alert": {
             "type": "object",
             "properties": {
                 "acknowledged_at": {
@@ -4765,7 +4803,7 @@ const docTemplate = `{
                     "description": "Severity level",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.AlertSeverity"
+                            "$ref": "#/definitions/domain.AlertSeverity"
                         }
                     ]
                 },
@@ -4773,7 +4811,7 @@ const docTemplate = `{
                     "description": "Where the alert originated (config, event, log, metric)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.AlertSource"
+                            "$ref": "#/definitions/domain.AlertSource"
                         }
                     ]
                 },
@@ -4781,7 +4819,7 @@ const docTemplate = `{
                     "description": "Current status",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.AlertStatus"
+                            "$ref": "#/definitions/domain.AlertStatus"
                         }
                     ]
                 },
@@ -4797,7 +4835,7 @@ const docTemplate = `{
                     "description": "Type of alert",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.AlertType"
+                            "$ref": "#/definitions/domain.AlertType"
                         }
                     ]
                 },
@@ -4806,7 +4844,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_domain.AlertSeverity": {
+        "domain.AlertSeverity": {
             "type": "string",
             "enum": [
                 "info",
@@ -4821,7 +4859,7 @@ const docTemplate = `{
                 "AlertSeverityCritical"
             ]
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_domain.AlertSource": {
+        "domain.AlertSource": {
             "type": "string",
             "enum": [
                 "configuration",
@@ -4848,7 +4886,7 @@ const docTemplate = `{
                 "AlertSourceMetric"
             ]
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_domain.AlertStatus": {
+        "domain.AlertStatus": {
             "type": "string",
             "enum": [
                 "active",
@@ -4863,7 +4901,7 @@ const docTemplate = `{
                 "AlertStatusIgnored"
             ]
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_domain.AlertType": {
+        "domain.AlertType": {
             "type": "string",
             "enum": [
                 "configuration",
@@ -4899,7 +4937,7 @@ const docTemplate = `{
                 "AlertTypeEvent"
             ]
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_domain.AuthMethod": {
+        "domain.AuthMethod": {
             "type": "string",
             "enum": [
                 "simple",
@@ -4918,14 +4956,14 @@ const docTemplate = `{
                 "AuthMethodOAuth"
             ]
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_domain.KeycloakTenant": {
+        "domain.KeycloakTenant": {
             "type": "object",
             "properties": {
                 "admin_realm": {
                     "type": "string"
                 },
                 "amfa": {
-                    "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.TenantAmfa"
+                    "$ref": "#/definitions/domain.TenantAmfa"
                 },
                 "client_id": {
                     "type": "string"
@@ -4998,7 +5036,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_domain.OperatorAction": {
+        "domain.OperatorAction": {
             "type": "object",
             "properties": {
                 "ActionTime": {
@@ -5066,7 +5104,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_domain.OperatorMetricsSummary": {
+        "domain.OperatorMetricsSummary": {
             "type": "object",
             "properties": {
                 "alerts_acknowledged": {
@@ -5182,7 +5220,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_domain.Permission": {
+        "domain.Permission": {
             "type": "object",
             "properties": {
                 "action": {
@@ -5214,7 +5252,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_domain.Role": {
+        "domain.Role": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -5241,7 +5279,7 @@ const docTemplate = `{
                 "permissions": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.Permission"
+                        "$ref": "#/definitions/domain.Permission"
                     }
                 },
                 "updated_at": {
@@ -5249,7 +5287,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_domain.TenantAmfa": {
+        "domain.TenantAmfa": {
             "type": "object",
             "properties": {
                 "api_base_url": {
@@ -5266,7 +5304,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_domain.TenantPolicy": {
+        "domain.TenantPolicy": {
             "type": "object",
             "properties": {
                 "allowed_realms": {
@@ -5299,14 +5337,14 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_domain.User": {
+        "domain.User": {
             "type": "object",
             "properties": {
                 "auth_method": {
                     "description": "Authentication method (simple or oauth)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.AuthMethod"
+                            "$ref": "#/definitions/domain.AuthMethod"
                         }
                     ]
                 },
@@ -5378,7 +5416,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_domain.UserRole": {
+        "domain.UserRole": {
             "type": "object",
             "properties": {
                 "assigned_at": {
@@ -5397,7 +5435,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "role": {
-                    "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_domain.Role"
+                    "$ref": "#/definitions/domain.Role"
                 },
                 "role_id": {
                     "type": "integer"
@@ -5414,7 +5452,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto.ErrorResponse": {
+        "dto.ErrorResponse": {
             "description": "Standard error response with optional validation details",
             "type": "object",
             "properties": {
@@ -5427,7 +5465,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto.MessageResponse": {
+        "dto.MessageResponse": {
             "description": "Simple success message response",
             "type": "object",
             "properties": {
@@ -5437,7 +5475,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.AssignRole": {
+        "requests.AssignRole": {
             "description": "Request body for role assignment",
             "type": "object",
             "required": [
@@ -5458,7 +5496,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.ChangePassword": {
+        "requests.ChangePassword": {
             "description": "Request body for password change",
             "type": "object",
             "required": [
@@ -5484,7 +5522,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.CreateAPIToken": {
+        "requests.CreateAPIToken": {
             "description": "Request body for API token creation",
             "type": "object",
             "required": [
@@ -5520,7 +5558,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.CreateRole": {
+        "requests.CreateRole": {
             "description": "Request body for role creation",
             "type": "object",
             "required": [
@@ -5557,7 +5595,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.CreateTenant": {
+        "requests.CreateTenant": {
             "description": "Request body for tenant creation",
             "type": "object",
             "required": [
@@ -5574,7 +5612,7 @@ const docTemplate = `{
                     "example": "master"
                 },
                 "amfa": {
-                    "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.TenantAmfa"
+                    "$ref": "#/definitions/requests.TenantAmfa"
                 },
                 "client_id": {
                     "type": "string",
@@ -5641,7 +5679,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.CreateTenantPolicy": {
+        "requests.CreateTenantPolicy": {
             "description": "Request body for tenant policy creation",
             "type": "object",
             "required": [
@@ -5666,7 +5704,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.CreateUser": {
+        "requests.CreateUser": {
             "description": "Request body for user creation",
             "type": "object",
             "required": [
@@ -5697,7 +5735,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.SimpleLogin": {
+        "requests.SimpleLogin": {
             "description": "Request body for simple authentication",
             "type": "object",
             "required": [
@@ -5717,7 +5755,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.TenantAmfa": {
+        "requests.TenantAmfa": {
             "type": "object",
             "properties": {
                 "api_base_url": {
@@ -5743,7 +5781,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.TestTenantConnection": {
+        "requests.TestTenantConnection": {
             "description": "Request body for testing Keycloak connection",
             "type": "object",
             "required": [
@@ -5773,7 +5811,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.UpdateAlertStatus": {
+        "requests.UpdateAlertStatus": {
             "description": "Request body for updating alert status",
             "type": "object",
             "required": [
@@ -5797,7 +5835,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.UpdateRole": {
+        "requests.UpdateRole": {
             "description": "Request body for role update",
             "type": "object",
             "properties": {
@@ -5823,7 +5861,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.UpdateTenant": {
+        "requests.UpdateTenant": {
             "description": "Request body for tenant update (all fields optional)",
             "type": "object",
             "properties": {
@@ -5833,7 +5871,7 @@ const docTemplate = `{
                     "example": "master"
                 },
                 "amfa": {
-                    "$ref": "#/definitions/github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.TenantAmfa"
+                    "$ref": "#/definitions/requests.TenantAmfa"
                 },
                 "client_id": {
                     "type": "string",
@@ -5894,7 +5932,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_http_dto_requests.UpdateUser": {
+        "requests.UpdateUser": {
             "description": "Request body for user update (all fields optional)",
             "type": "object",
             "properties": {
@@ -5928,72 +5966,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_DefensePoint_keycloak-monitoring_internal_version.Info": {
-            "type": "object",
-            "properties": {
-                "build_date": {
-                    "type": "string"
-                },
-                "git_commit": {
-                    "type": "string"
-                },
-                "go_version": {
-                    "type": "string"
-                },
-                "platform": {
-                    "type": "string"
-                },
-                "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_DefensePoint_keycloak-monitoring_internal_version.PublicInfo": {
-            "type": "object",
-            "properties": {
-                "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "internal_http_chi.UserDetails": {
-            "type": "object",
-            "properties": {
-                "Email": {
-                    "type": "string"
-                },
-                "EmailVerified": {
-                    "type": "boolean"
-                },
-                "FamilyName": {
-                    "type": "string"
-                },
-                "GivenName": {
-                    "type": "string"
-                },
-                "ID": {
-                    "type": "integer"
-                },
-                "Locale": {
-                    "type": "string"
-                },
-                "MustChangePassword": {
-                    "type": "boolean"
-                },
-                "Name": {
-                    "type": "string"
-                },
-                "PreferredUsername": {
-                    "type": "string"
-                },
-                "Subject": {
-                    "type": "string"
-                },
-                "UpdatedAt": {
-                    "type": "string"
-                }
-            }
-        },
         "tenant.HealthStatus": {
             "type": "object",
             "properties": {
@@ -6013,6 +5985,34 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "tenant_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "version.Info": {
+            "type": "object",
+            "properties": {
+                "build_date": {
+                    "type": "string"
+                },
+                "git_commit": {
+                    "type": "string"
+                },
+                "go_version": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "version.PublicInfo": {
+            "type": "object",
+            "properties": {
+                "version": {
                     "type": "string"
                 }
             }
