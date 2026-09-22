@@ -1,0 +1,100 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family:
+    "Inter",
+    system-ui,
+    -apple-system,
+    sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: dark;
+  color: #ffffff;
+  background-color: #0e0e0e;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* DefensePoint Enterprise Variables */
+  --bg-primary: #0e0e0e;
+  --bg-secondary: #1a1a1a;
+  --bg-elevated: #212121;
+  --border-primary: #2a2a2a;
+  --red-primary: #db2833;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Animations */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+/* Dialog element reset - remove default browser styles */
+dialog {
+  /* Remove default border, padding, and positioning */
+  border: none;
+  padding: 0;
+  margin: 0;
+  position: static;
+  max-width: none;
+  max-height: none;
+
+  /* Make dialog transparent to let our custom styling show through */
+  background: transparent;
+  color: inherit;
+
+  /* Ensure it doesn't interfere with our layout */
+  display: block;
+}
+
+/* Remove default dialog backdrop styles */
+dialog::backdrop {
+  display: none;
+}

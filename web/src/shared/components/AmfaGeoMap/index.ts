@@ -1,0 +1,1 @@
+export { AmfaGeoMap } from "./AmfaGeoMap";

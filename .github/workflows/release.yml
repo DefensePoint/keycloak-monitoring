@@ -1,0 +1,108 @@
+name: Release
+
+# Pushing a tag like v1.1.0 runs the backend and frontend test suites,
+# builds the three service images (server, web, mcp-server) from that
+# tag, pushes them to GHCR, and publishes a GitHub Release whose notes
+# carry the pull commands. deployments/server/docker-compose.yml already
+# consumes the images via KMT_API_IMAGE / KMT_WEB_IMAGE / KMT_MCP_IMAGE.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the release
+  packages: write # push images to GHCR
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: go build -o bin/ ./cmd/...
+      - name: Unit tests
+        run: go test -short -race ./...
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Unit tests
+        run: npm test -- --run
+
+  images:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [server, web, mcp-server]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/defensepoint/kmt-${{ matrix.service }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/Dockerfile
+          push: true
+          build-args: |
+            SERVICE=${{ matrix.service }}
+            VERSION=${{ github.ref_name }}
+            VCS_REF=${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  release:
+    needs: images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          NOTES="$(printf '%s\n\n%s\n%s\n%s\n%s\n%s\n\n%s' \
+            "Images for this release:" \
+            '```' \
+            "docker pull ghcr.io/defensepoint/kmt-server:${V}" \
+            "docker pull ghcr.io/defensepoint/kmt-web:${V}" \
+            "docker pull ghcr.io/defensepoint/kmt-mcp-server:${V}" \
+            '```' \
+            "Deploy with deployments/server/docker-compose.yml by setting KMT_API_IMAGE, KMT_WEB_IMAGE, and KMT_MCP_IMAGE to these references.")"
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --generate-notes \
+            --notes "$NOTES"
