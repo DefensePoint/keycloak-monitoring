@@ -10,7 +10,7 @@ import (
 	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
 	_ "github.com/DefensePoint/keycloak-monitoring/internal/http/dto" // swagger
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
-	"github.com/DefensePoint/keycloak-monitoring/reports"
+	"github.com/DefensePoint/keycloak-monitoring/internal/reports"
 )
 
 // ReportTenantService provides tenant information for reports.

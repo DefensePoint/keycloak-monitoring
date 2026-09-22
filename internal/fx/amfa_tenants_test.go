@@ -7,11 +7,11 @@ import (
 
 	"go.uber.org/fx/fxtest"
 
-	"github.com/DefensePoint/keycloak-monitoring/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/internal/amfa"
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
-	"github.com/DefensePoint/keycloak-monitoring/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
 )
 
 // fakeAmfaTenantService is a minimal tenant.Service for exercising

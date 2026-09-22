@@ -6,22 +6,22 @@ import (
 
 	"go.uber.org/fx"
 
-	"github.com/DefensePoint/keycloak-monitoring/alerts"
-	"github.com/DefensePoint/keycloak-monitoring/apitoken"
-	"github.com/DefensePoint/keycloak-monitoring/auth"
-	"github.com/DefensePoint/keycloak-monitoring/events"
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts"
+	"github.com/DefensePoint/keycloak-monitoring/internal/apitoken"
+	"github.com/DefensePoint/keycloak-monitoring/internal/auth"
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/events"
 	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
 	chihttp "github.com/DefensePoint/keycloak-monitoring/internal/http/chi"
+	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
-	"github.com/DefensePoint/keycloak-monitoring/keycloak"
-	"github.com/DefensePoint/keycloak-monitoring/notifications"
-	"github.com/DefensePoint/keycloak-monitoring/operator"
-	"github.com/DefensePoint/keycloak-monitoring/rbac"
-	"github.com/DefensePoint/keycloak-monitoring/reports"
-	"github.com/DefensePoint/keycloak-monitoring/tenant"
-	"github.com/DefensePoint/keycloak-monitoring/users"
+	"github.com/DefensePoint/keycloak-monitoring/internal/notifications"
+	"github.com/DefensePoint/keycloak-monitoring/internal/operator"
+	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/reports"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/internal/users"
 )
 
 // HandlersModule provides HTTP handlers

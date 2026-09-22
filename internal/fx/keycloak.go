@@ -11,9 +11,9 @@ import (
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	chihttp "github.com/DefensePoint/keycloak-monitoring/internal/http/chi"
+	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
+	kcpostgres "github.com/DefensePoint/keycloak-monitoring/internal/keycloak/postgres"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
-	"github.com/DefensePoint/keycloak-monitoring/keycloak"
-	kcpostgres "github.com/DefensePoint/keycloak-monitoring/keycloak/postgres"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/saferequest"
 )

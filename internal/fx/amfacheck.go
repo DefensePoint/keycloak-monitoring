@@ -5,14 +5,14 @@ import (
 
 	"go.uber.org/fx"
 
-	"github.com/DefensePoint/keycloak-monitoring/alerts"
-	"github.com/DefensePoint/keycloak-monitoring/amfa"
-	"github.com/DefensePoint/keycloak-monitoring/amfacheck"
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts"
+	"github.com/DefensePoint/keycloak-monitoring/internal/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/internal/amfacheck"
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
-	"github.com/DefensePoint/keycloak-monitoring/keycloak"
-	"github.com/DefensePoint/keycloak-monitoring/notifications"
+	"github.com/DefensePoint/keycloak-monitoring/internal/notifications"
 )
 
 // AmfaCheckModule wires the AMFA risk-alert checker: one per-tenant

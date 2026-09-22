@@ -22,12 +22,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
 
-	"github.com/DefensePoint/keycloak-monitoring/alerts"
-	alertspostgres "github.com/DefensePoint/keycloak-monitoring/alerts/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts"
+	alertspostgres "github.com/DefensePoint/keycloak-monitoring/internal/alerts/postgres"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
+	rbacpostgres "github.com/DefensePoint/keycloak-monitoring/internal/rbac/postgres"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
-	"github.com/DefensePoint/keycloak-monitoring/rbac"
-	rbacpostgres "github.com/DefensePoint/keycloak-monitoring/rbac/postgres"
 )
 
 // blankRealmStack is the real stack: real RBAC over real policy rows, the real

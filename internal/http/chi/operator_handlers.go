@@ -11,8 +11,8 @@ import (
 	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
 	_ "github.com/DefensePoint/keycloak-monitoring/internal/http/dto" // swagger
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
-	"github.com/DefensePoint/keycloak-monitoring/operator"
-	"github.com/DefensePoint/keycloak-monitoring/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/operator"
+	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
 )
 
 // OperatorHandlers handles HTTP requests for operator metrics operations.

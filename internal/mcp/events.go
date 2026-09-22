@@ -13,10 +13,10 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/DefensePoint/keycloak-monitoring/events"
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
-	"github.com/DefensePoint/keycloak-monitoring/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/events"
+	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
 )
 
 const (

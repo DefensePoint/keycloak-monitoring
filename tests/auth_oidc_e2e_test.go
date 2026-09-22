@@ -51,12 +51,12 @@ import (
 	gormpg "gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"github.com/DefensePoint/keycloak-monitoring/auth"
+	"github.com/DefensePoint/keycloak-monitoring/internal/auth"
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
+	userspg "github.com/DefensePoint/keycloak-monitoring/internal/users/postgres"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
-	userspg "github.com/DefensePoint/keycloak-monitoring/users/postgres"
 )
 
 const (

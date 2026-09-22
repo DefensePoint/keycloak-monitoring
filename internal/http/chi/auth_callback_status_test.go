@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/DefensePoint/keycloak-monitoring/auth"
+	"github.com/DefensePoint/keycloak-monitoring/internal/auth"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )

@@ -3,11 +3,11 @@ package fx
 import (
 	"go.uber.org/fx"
 
-	"github.com/DefensePoint/keycloak-monitoring/alerts"
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts"
 	"github.com/DefensePoint/keycloak-monitoring/internal/metrics"
+	"github.com/DefensePoint/keycloak-monitoring/internal/notifications"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
 	"github.com/DefensePoint/keycloak-monitoring/internal/version"
-	"github.com/DefensePoint/keycloak-monitoring/notifications"
-	"github.com/DefensePoint/keycloak-monitoring/tenant"
 )
 
 // MetricsModule provides the Prometheus registry and wires the /metrics endpoint.

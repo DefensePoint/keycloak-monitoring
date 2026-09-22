@@ -13,7 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
-	"github.com/DefensePoint/keycloak-monitoring/keycloak"
+	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
 )
 

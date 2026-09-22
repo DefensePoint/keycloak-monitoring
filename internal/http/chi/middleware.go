@@ -10,11 +10,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/sessions"
 
-	"github.com/DefensePoint/keycloak-monitoring/auth"
+	"github.com/DefensePoint/keycloak-monitoring/internal/auth"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
-	"github.com/DefensePoint/keycloak-monitoring/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
 )
 
 // Context keys for request context.

@@ -3,11 +3,11 @@ package fx
 import (
 	"go.uber.org/fx"
 
-	"github.com/DefensePoint/keycloak-monitoring/apitoken"
-	apitokenpostgres "github.com/DefensePoint/keycloak-monitoring/apitoken/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/apitoken"
+	apitokenpostgres "github.com/DefensePoint/keycloak-monitoring/internal/apitoken/postgres"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/users"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
-	"github.com/DefensePoint/keycloak-monitoring/users"
 )
 
 // APITokenModule provides API token domain dependencies.

@@ -7,17 +7,17 @@ import (
 
 	"go.uber.org/fx"
 
-	"github.com/DefensePoint/keycloak-monitoring/amfa"
-	"github.com/DefensePoint/keycloak-monitoring/amfa/httpclient"
-	amfapg "github.com/DefensePoint/keycloak-monitoring/amfa/postgres"
-	"github.com/DefensePoint/keycloak-monitoring/amfacheck"
+	"github.com/DefensePoint/keycloak-monitoring/internal/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/internal/amfa/httpclient"
+	amfapg "github.com/DefensePoint/keycloak-monitoring/internal/amfa/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/amfacheck"
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	chihttp "github.com/DefensePoint/keycloak-monitoring/internal/http/chi"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/saferequest"
-	"github.com/DefensePoint/keycloak-monitoring/rbac"
-	"github.com/DefensePoint/keycloak-monitoring/tenant"
 )
 
 // AMFA enrichment cache TTLs. Successful Keycloak user lookups are cached

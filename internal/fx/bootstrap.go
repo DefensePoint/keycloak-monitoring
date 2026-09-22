@@ -7,13 +7,13 @@ import (
 
 	"go.uber.org/fx"
 
-	"github.com/DefensePoint/keycloak-monitoring/auth"
+	"github.com/DefensePoint/keycloak-monitoring/internal/auth"
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/internal/users"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
-	"github.com/DefensePoint/keycloak-monitoring/rbac"
-	"github.com/DefensePoint/keycloak-monitoring/tenant"
-	"github.com/DefensePoint/keycloak-monitoring/users"
 )
 
 // BootstrapModule provides the bootstrap lifecycle hooks for seeding initial data.

@@ -8,13 +8,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/DefensePoint/keycloak-monitoring/events"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/events"
 	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
 	_ "github.com/DefensePoint/keycloak-monitoring/internal/http/dto" // swagger
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
 	"github.com/DefensePoint/keycloak-monitoring/internal/version"
-	"github.com/DefensePoint/keycloak-monitoring/tenant"
 )
 
 // EventRepository defines the interface for event operations needed by system handlers.

@@ -9,8 +9,8 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/DefensePoint/keycloak-monitoring/amfa"
-	"github.com/DefensePoint/keycloak-monitoring/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
 )
 
 // AmfaStatsReader is the slice of amfa.Service this package needs. It carries

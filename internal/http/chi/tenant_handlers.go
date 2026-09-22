@@ -12,8 +12,8 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/http/dto"
 	"github.com/DefensePoint/keycloak-monitoring/internal/http/dto/requests"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
-	"github.com/DefensePoint/keycloak-monitoring/rbac"
-	"github.com/DefensePoint/keycloak-monitoring/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
 )
 
 var _ = dto.ErrorResponse{}     // ensure dto import for swagger

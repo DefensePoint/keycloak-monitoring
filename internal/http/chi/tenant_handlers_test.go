@@ -10,7 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
-	"github.com/DefensePoint/keycloak-monitoring/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
 )
 
 // stubTenantHandlerService is a minimal tenant.Service for handler tests.

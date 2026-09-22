@@ -11,7 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/sessions"
 
-	"github.com/DefensePoint/keycloak-monitoring/auth"
+	"github.com/DefensePoint/keycloak-monitoring/internal/auth"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
 	_ "github.com/DefensePoint/keycloak-monitoring/internal/http/dto" // swagger

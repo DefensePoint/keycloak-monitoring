@@ -5,7 +5,7 @@ import (
 
 	"go.uber.org/fx"
 
-	"github.com/DefensePoint/keycloak-monitoring/configcheck"
+	"github.com/DefensePoint/keycloak-monitoring/internal/configcheck"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 

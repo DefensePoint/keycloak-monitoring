@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/DefensePoint/keycloak-monitoring/apitoken"
+	"github.com/DefensePoint/keycloak-monitoring/internal/apitoken"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )

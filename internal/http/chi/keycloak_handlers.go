@@ -12,8 +12,8 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
 	_ "github.com/DefensePoint/keycloak-monitoring/internal/http/dto" // swagger
+	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
-	"github.com/DefensePoint/keycloak-monitoring/keycloak"
 )
 
 // KeycloakTenantService defines the tenant interface needed by keycloak handlers.

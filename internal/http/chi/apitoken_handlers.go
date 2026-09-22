@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/DefensePoint/keycloak-monitoring/apitoken"
+	"github.com/DefensePoint/keycloak-monitoring/internal/apitoken"
 	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
 	"github.com/DefensePoint/keycloak-monitoring/internal/http/dto"
 	"github.com/DefensePoint/keycloak-monitoring/internal/http/dto/requests"

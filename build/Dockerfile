@@ -102,7 +102,7 @@ COPY --chown=nonroot:nonroot --chmod=0555 --from=backend-builder /build/kmt-serv
 COPY --chown=nonroot:nonroot assets /app/assets
 
 # Copy HTML templates for reports
-COPY --chown=nonroot:nonroot reports/templates /app/reports/templates
+COPY --chown=nonroot:nonroot internal/reports/templates /app/internal/reports/templates
 
 # GODEBUG improves memory release behavior
 ENV GODEBUG=madvdontneed=1

@@ -3,13 +3,13 @@ package fx
 import (
 	"go.uber.org/fx"
 
-	"github.com/DefensePoint/keycloak-monitoring/configcheck"
-	"github.com/DefensePoint/keycloak-monitoring/eventscheck"
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/configcheck"
+	"github.com/DefensePoint/keycloak-monitoring/internal/eventscheck"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
-	"github.com/DefensePoint/keycloak-monitoring/metricscheck"
-	"github.com/DefensePoint/keycloak-monitoring/notifications"
-	notificationspostgres "github.com/DefensePoint/keycloak-monitoring/notifications/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/metricscheck"
+	"github.com/DefensePoint/keycloak-monitoring/internal/notifications"
+	notificationspostgres "github.com/DefensePoint/keycloak-monitoring/internal/notifications/postgres"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 

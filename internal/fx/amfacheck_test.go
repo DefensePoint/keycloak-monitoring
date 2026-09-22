@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DefensePoint/keycloak-monitoring/amfa"
-	"github.com/DefensePoint/keycloak-monitoring/amfacheck"
+	"github.com/DefensePoint/keycloak-monitoring/internal/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/internal/amfacheck"
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )

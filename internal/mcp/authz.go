@@ -7,7 +7,7 @@ import (
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
-	"github.com/DefensePoint/keycloak-monitoring/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
 )
 
 // PermissionService is the slice of rbac.Service this package needs.

@@ -4,9 +4,9 @@ import (
 	"go.uber.org/fx"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
+	rbacpostgres "github.com/DefensePoint/keycloak-monitoring/internal/rbac/postgres"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
-	"github.com/DefensePoint/keycloak-monitoring/rbac"
-	rbacpostgres "github.com/DefensePoint/keycloak-monitoring/rbac/postgres"
 )
 
 // RBACModule provides RBAC domain dependencies.

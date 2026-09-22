@@ -13,7 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
-	"github.com/DefensePoint/keycloak-monitoring/operator"
+	"github.com/DefensePoint/keycloak-monitoring/internal/operator"
 )
 
 // stubOperatorService records the realm filter every query ran with, so a test

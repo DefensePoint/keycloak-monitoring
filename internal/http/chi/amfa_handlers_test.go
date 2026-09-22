@@ -11,8 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/DefensePoint/keycloak-monitoring/amfa"
-	"github.com/DefensePoint/keycloak-monitoring/amfacheck"
+	"github.com/DefensePoint/keycloak-monitoring/internal/amfa"
+	"github.com/DefensePoint/keycloak-monitoring/internal/amfacheck"
 )
 
 // stubAmfaService is a minimal in-memory amfa.Service for handler tests.

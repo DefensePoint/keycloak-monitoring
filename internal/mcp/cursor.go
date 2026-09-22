@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/DefensePoint/keycloak-monitoring/events"
+	"github.com/DefensePoint/keycloak-monitoring/internal/events"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 

@@ -11,7 +11,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 
-	"github.com/DefensePoint/keycloak-monitoring/apitoken"
+	"github.com/DefensePoint/keycloak-monitoring/internal/apitoken"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )

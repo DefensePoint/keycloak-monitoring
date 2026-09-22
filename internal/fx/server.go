@@ -7,13 +7,13 @@ import (
 
 	"go.uber.org/fx"
 
-	"github.com/DefensePoint/keycloak-monitoring/auth"
+	"github.com/DefensePoint/keycloak-monitoring/internal/auth"
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	chihttp "github.com/DefensePoint/keycloak-monitoring/internal/http/chi"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/metrics"
-	"github.com/DefensePoint/keycloak-monitoring/tenant"
-	"github.com/DefensePoint/keycloak-monitoring/users"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/internal/users"
 )
 
 // ServerModule provides the HTTP server

@@ -3,8 +3,8 @@ package fx
 import (
 	"go.uber.org/fx"
 
-	"github.com/DefensePoint/keycloak-monitoring/alerts"
-	alertspostgres "github.com/DefensePoint/keycloak-monitoring/alerts/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts"
+	alertspostgres "github.com/DefensePoint/keycloak-monitoring/internal/alerts/postgres"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )

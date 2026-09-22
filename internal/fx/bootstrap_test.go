@@ -8,7 +8,7 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
-	"github.com/DefensePoint/keycloak-monitoring/tenant"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
 )
 
 // stubTenantService records the calls syncTenant makes so the config-sync

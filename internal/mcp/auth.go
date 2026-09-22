@@ -8,7 +8,7 @@ import (
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/DefensePoint/keycloak-monitoring/apitoken"
+	"github.com/DefensePoint/keycloak-monitoring/internal/apitoken"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 

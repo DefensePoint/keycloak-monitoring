@@ -25,8 +25,8 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
-	"github.com/DefensePoint/keycloak-monitoring/keycloak"
-	kcpg "github.com/DefensePoint/keycloak-monitoring/keycloak/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
+	kcpg "github.com/DefensePoint/keycloak-monitoring/internal/keycloak/postgres"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 

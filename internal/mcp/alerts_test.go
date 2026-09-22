@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DefensePoint/keycloak-monitoring/alerts"
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 

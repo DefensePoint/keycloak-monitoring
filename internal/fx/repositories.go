@@ -4,11 +4,11 @@ import (
 	"go.uber.org/fx"
 	"gorm.io/gorm"
 
-	"github.com/DefensePoint/keycloak-monitoring/events"
-	eventspostgres "github.com/DefensePoint/keycloak-monitoring/events/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/events"
+	eventspostgres "github.com/DefensePoint/keycloak-monitoring/internal/events/postgres"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
-	"github.com/DefensePoint/keycloak-monitoring/users"
-	userspostgres "github.com/DefensePoint/keycloak-monitoring/users/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/users"
+	userspostgres "github.com/DefensePoint/keycloak-monitoring/internal/users/postgres"
 )
 
 // RepositoriesModule provides all repositories

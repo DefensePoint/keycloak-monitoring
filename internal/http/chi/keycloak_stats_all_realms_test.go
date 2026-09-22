@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
-	"github.com/DefensePoint/keycloak-monitoring/keycloak"
+	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
 )
 
 // The dashboard KPI strip runs in All Realms mode by default, because

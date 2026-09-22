@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
-	"github.com/DefensePoint/keycloak-monitoring/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
 )
 
 // mockRealmReader implements RealmReader for testing.
