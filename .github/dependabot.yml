@@ -5,32 +5,32 @@ updates:
     directory: "/"
     target-branch: "main"
     schedule:
-      interval: "daily"
+      interval: "weekly"
 
   # Root package.json (commitlint/husky tooling)
   - package-ecosystem: "npm"
     directory: "/"
     target-branch: "main"
     schedule:
-      interval: "daily"
+      interval: "weekly"
 
   # Web frontend
   - package-ecosystem: "npm"
     directory: "/web"
     target-branch: "main"
     schedule:
-      interval: "daily"
+      interval: "weekly"
 
   # Base images in build/Dockerfile
   - package-ecosystem: "docker"
     directory: "/build"
     target-branch: "main"
     schedule:
-      interval: "daily"
+      interval: "weekly"
 
   # Keeps GitHub Actions up to date once you add workflows
   - package-ecosystem: "github-actions"
     directory: "/"
     target-branch: "main"
     schedule:
-      interval: "daily"
+      interval: "weekly"
