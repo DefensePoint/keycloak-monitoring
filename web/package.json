@@ -25,7 +25,7 @@
     "@mui/material": "^7.3.6",
     "@tanstack/react-query": "^5.12.0",
     "axios": "^1.12.2",
-    "date-fns": "^2.30.0",
+    "date-fns": "^4.4.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.47.0",
     "material-react-table": "^3.2.1",
@@ -40,9 +40,9 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/react": "^16.3.0",
-    "@testing-library/user-event": "^14.6.1",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
     "@types/leaflet": "^1.9.21",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
