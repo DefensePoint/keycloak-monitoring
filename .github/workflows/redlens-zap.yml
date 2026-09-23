@@ -1,0 +1,78 @@
+# Nightly ZAP baseline against the public demo. Passive rules only.
+# Schedule and workflow_dispatch only.
+# Secrets: REDLENS_API_URL, REDLENS_API_KEY, REDLENS_WORKSPACE_ID,
+# REDLENS_PROJECT_ID, HARBOR_USERNAME, HARBOR_PASSWORD.
+
+name: ZAP Scan
+
+on:
+  schedule:
+    - cron: '0 14 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ZAP_TARGET: https://keycloak-monitoring-demo.defensepoint.com
+  REDLENS_CLI_IMAGE: registry.defensepoint.com/redlens/redlens-cli:v1.8.0
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: ZAP baseline
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          # The image writes the report as uid 1000. The runner workspace is a
+          # different uid, so the mount has to be writable by that user.
+          chmod 777 reports
+          # baseline = spider + passive rules. -I = do not fail on warnings.
+          docker run --rm -v "$PWD/reports:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t "$ZAP_TARGET" -x zap-report.xml -I || true
+          test -s reports/zap-report.xml
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: reports/zap-report.xml
+          if-no-files-found: error
+
+  ingest:
+    needs: scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: zap-report
+          path: reports
+
+      - name: Ingest ZAP report
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+          REDLENS_API_URL: ${{ secrets.REDLENS_API_URL }}
+          REDLENS_API_KEY: ${{ secrets.REDLENS_API_KEY }}
+          REDLENS_WORKSPACE_ID: ${{ secrets.REDLENS_WORKSPACE_ID }}
+          REDLENS_PROJECT_ID: ${{ secrets.REDLENS_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          for name in HARBOR_USERNAME HARBOR_PASSWORD REDLENS_API_URL REDLENS_API_KEY REDLENS_WORKSPACE_ID REDLENS_PROJECT_ID; do
+            test -n "${!name}" || { echo "missing secret $name"; exit 1; }
+          done
+          echo "$HARBOR_PASSWORD" | docker login registry.defensepoint.com -u "$HARBOR_USERNAME" --password-stdin
+          docker pull --quiet "$REDLENS_CLI_IMAGE"
+          run_cli() {
+            timeout 180 docker run --rm \
+              -v "$PWD:$PWD" \
+              -w "$PWD" \
+              -e REDLENS_API_URL -e REDLENS_API_KEY \
+              -e REDLENS_WORKSPACE_ID -e REDLENS_PROJECT_ID \
+              "$REDLENS_CLI_IMAGE" "$@"
+          }
+          run_cli whoami --check
+          run_cli scans upload zap reports/zap-report.xml
