@@ -77,7 +77,7 @@ RUN GOOS=linux GOARCH=amd64 go build \
 # For web: use distroless for minimal size
 
 # Server runtime with Chrome
-FROM debian:12-slim AS runtime-server
+FROM debian:13-slim AS runtime-server
 
 # Install Chrome and dependencies for PDF generation
 RUN apt-get update && apt-get install -y \
