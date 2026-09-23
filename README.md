@@ -342,3 +342,11 @@ export MONITORING_DATABASE_PASSWORD=secure_password
 export MONITORING_KEYCLOAK_SERVER_URL=https://keycloak.example.com
 export MONITORING_AUTH_SESSION_SECRET=$(openssl rand -base64 32)
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding guidelines, and how to submit pull requests.
+
+## License
+
+Apache-2.0 -- see [LICENSE](LICENSE).
