@@ -29,13 +29,32 @@ jobs:
           set -euo pipefail
           mkdir -p reports
           # kics exits 40/50 when findings exist. The report is the result.
+          # -w /src is required. The image's workdir is /app/bin, and without
+          # this every file_name is relative to that directory
+          # (../../src/build/Dockerfile). RedLens rejects a path that escapes
+          # the repository.
+          # docs/swagger is generated OpenAPI, not infrastructure.
           docker run --rm \
             -v "$PWD:/src:ro" \
             -v "$PWD/reports:/out" \
+            -w /src \
             checkmarx/kics:latest \
-            scan -p /src --report-formats json -o /out \
+            scan -p . --exclude-paths docs/swagger \
+            --report-formats json -o /out \
             --output-name kics-results --no-progress || true
           test -s reports/kics-results.json
+          python3 -c 'import json,sys
+          d=json.load(open(sys.argv[1]))
+          q=d.get("queries")
+          assert isinstance(q, list), "no queries array"
+          bad=[]
+          for query in q:
+            for f in query.get("files") or []:
+              p=str(f.get("file_name") or "")
+              if p.startswith("/") or p.startswith("..") or "/../" in p:
+                bad.append(p)
+          assert not bad, "paths are not repo-relative: %s" % bad[:3]
+          print("kics:", len(q), "queries")' reports/kics-results.json
 
       - uses: actions/upload-artifact@v4
         with:

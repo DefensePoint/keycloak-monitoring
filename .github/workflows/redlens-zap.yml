@@ -34,6 +34,14 @@ jobs:
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py -t "$ZAP_TARGET" -x zap-report.xml -I || true
           test -s reports/zap-report.xml
+          # A scan that never reached the demo still writes a small XML file.
+          # Uploading that would look like a clean baseline.
+          python3 -c 'import sys,xml.etree.ElementTree as ET
+          root=ET.parse(sys.argv[1]).getroot()
+          assert root.tag.endswith("OWASPZAPReport"), root.tag
+          sites=[e for e in root.iter() if e.tag.endswith("site")]
+          assert sites, "ZAP report has no site; the target was not reached"
+          print("zap sites:", len(sites))' reports/zap-report.xml
 
       - uses: actions/upload-artifact@v4
         with:
