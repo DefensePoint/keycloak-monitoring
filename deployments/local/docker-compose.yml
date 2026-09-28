@@ -1,0 +1,253 @@
+# Docker Compose for local development and testing
+# Includes TWO Keycloak instances to simulate multi-tenant monitoring
+#
+# Usage:
+#   docker compose -f deployments/local/docker-compose.yml up -d
+#   docker compose -f deployments/local/docker-compose.yml up -d --build
+#
+# Access:
+#   - API Server:    http://localhost:7888
+#   - Web UI:        http://localhost:7880
+#   - MCP Server:    http://127.0.0.1:7889/mcp  (disabled unless mcp.enabled)
+#   - Keycloak 1:    http://localhost:8080  (admin/admin) - simulates "prod"
+#   - Keycloak 2:    http://localhost:8081  (admin/admin) - simulates "staging"
+#   - PostgreSQL:    localhost:5432
+#
+# After this change, drop the old shared project once:
+#   docker compose -p local -f deployments/local/docker-compose.yml down -v
+
+name: kmt-local
+
+services:
+  # ==========================================================================
+  # DATABASE - TimescaleDB for the monitoring platform
+  # ==========================================================================
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: kmt-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: monitoring
+      POSTGRES_USER: monitoring
+      POSTGRES_PASSWORD: monitoring_password
+    volumes:
+      - kmt-postgres-data:/var/lib/postgresql/data
+    networks:
+      - kmt-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monitoring -d monitoring"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: >
+      postgres
+      -c shared_preload_libraries=timescaledb
+      -c max_connections=200
+      -c shared_buffers=512MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=128MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=10MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+
+  # ==========================================================================
+  # KEYCLOAK 1 - First tenant (Production simulation)
+  # ==========================================================================
+  keycloak-db-1:
+    image: postgres:16-alpine
+    container_name: kmt-keycloak-db-1
+    profiles: ["bundled-kc"]
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: keycloak
+    volumes:
+      - kmt-keycloak-db-1-data:/var/lib/postgresql/data
+    networks:
+      - kmt-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  keycloak-1:
+    image: quay.io/keycloak/keycloak:26.7
+    container_name: kmt-keycloak-1
+    profiles: ["bundled-kc"]
+    ports:
+      - "8080:8080"
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db-1:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+    command: start-dev
+    networks:
+      - kmt-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && exit 0 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    depends_on:
+      keycloak-db-1:
+        condition: service_healthy
+
+  # ==========================================================================
+  # KEYCLOAK 2 - Second tenant (Staging simulation)
+  # ==========================================================================
+  keycloak-db-2:
+    image: postgres:16-alpine
+    container_name: kmt-keycloak-db-2
+    profiles: ["bundled-kc"]
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: keycloak
+    volumes:
+      - kmt-keycloak-db-2-data:/var/lib/postgresql/data
+    networks:
+      - kmt-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  keycloak-2:
+    image: quay.io/keycloak/keycloak:26.7
+    container_name: kmt-keycloak-2
+    profiles: ["bundled-kc"]
+    ports:
+      - "8081:8080"
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db-2:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+    command: start-dev
+    networks:
+      - kmt-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && exit 0 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    depends_on:
+      keycloak-db-2:
+        condition: service_healthy
+
+  # ==========================================================================
+  # API SERVER - Keycloak Monitoring Tool
+  # ==========================================================================
+  api-server:
+    build:
+      context: ../..
+      dockerfile: build/Dockerfile
+      args:
+        SERVICE: server
+    image: kmt-server:latest
+    container_name: kmt-server
+    ports:
+      - "7888:7888"
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: monitoring
+      DATABASE_PASSWORD: monitoring_password
+      DATABASE_NAME: monitoring
+      LOG_LEVEL: debug
+    volumes:
+      - ../../config.yaml:/app/config.yaml:ro
+    networks:
+      - kmt-network
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ==========================================================================
+  # MCP SERVER - Read-only Model Context Protocol endpoint
+  # ==========================================================================
+  # Bound to loopback so a local MCP client can reach it without the endpoint
+  # being visible on the network.
+  mcp-server:
+    build:
+      context: ../..
+      dockerfile: build/Dockerfile
+      args:
+        SERVICE: mcp-server
+    image: kmt-mcp-server:latest
+    container_name: kmt-mcp-server
+    ports:
+      - "127.0.0.1:7889:7889"
+    env_file:
+      - ../../.env
+    volumes:
+      - ../../config.yaml:/app/config.yaml:ro
+    networks:
+      - kmt-network
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ==========================================================================
+  # WEB UI - Keycloak Monitoring Tool Frontend
+  # ==========================================================================
+  web:
+    build:
+      context: ../..
+      dockerfile: build/Dockerfile
+      args:
+        SERVICE: web
+    image: kmt-web:latest
+    container_name: kmt-web
+    ports:
+      - "7880:3000"
+    volumes:
+      - ../../config.yaml:/app/config.yaml:ro
+    env_file:
+      - ../../.env
+    networks:
+      - kmt-network
+    restart: unless-stopped
+    depends_on:
+      - api-server
+
+volumes:
+  kmt-postgres-data:
+  kmt-keycloak-db-1-data:
+  kmt-keycloak-db-2-data:
+
+networks:
+  kmt-network:
+    driver: bridge

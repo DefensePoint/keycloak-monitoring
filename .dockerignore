@@ -1,0 +1,72 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.out
+
+# Dependency directories
+vendor/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+*.md
+!README.md
+docs/*
+!docs/swagger/
+
+# CI/CD
+.github/
+
+# Docker
+docker-compose.yml
+Dockerfile*
+.dockerignore
+
+# Config (will be mounted)
+config.yaml
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Frontend files
+# ** is required: these patterns match against the path relative to the build
+# context root, so a bare "node_modules/" would miss web/node_modules.
+**/node_modules
+**/dist
+
+# Sensitive files
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+credentials/
+*.credentials
+*.secret
