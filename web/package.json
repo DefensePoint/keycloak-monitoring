@@ -31,7 +31,7 @@
     "material-react-table": "^3.2.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-hook-form": "^7.69.0",
+    "react-hook-form": "^7.88.0",
     "react-leaflet": "^4.2.1",
     "react-leaflet-cluster": "^2.1.0",
     "react-router-dom": "^7.18.4",
