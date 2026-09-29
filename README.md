@@ -94,10 +94,14 @@ cd keycloak-monitoring
 cp config.yaml.example config.yaml
 # Edit config.yaml and add your Keycloak connection details
 
-# 3. Set required admin credentials via environment variables
-export MONITORING_AUTH_SIMPLE_DEFAULT_USER="admin"
-export MONITORING_AUTH_SIMPLE_DEFAULT_PASS="YourS3cur3P@ssw0rd!"  # REQUIRED: Use a strong password
-export MONITORING_AUTH_SIMPLE_DEFAULT_EMAIL="admin@example.com"
+# 3. Create the environment file the compose stack reads
+#    Exporting these in your shell is not enough: the services load env_file,
+#    so the values have to be in .env itself.
+cp .env.example .env
+#    Then edit .env and set at least MONITORING_AUTH_SIMPLE_DEFAULT_PASS,
+#    MONITORING_AUTH_SESSION_SECRET and MONITORING_SECURITY_ENCRYPTION_KEY.
+#    The password may not contain admin, password, secret, default, changeme
+#    or welcome, as substrings.
 
 # 4. Build and start services
 make docker-build
