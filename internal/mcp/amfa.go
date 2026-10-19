@@ -40,7 +40,7 @@ func registerGetAmfaStats(srv *mcpsdk.Server, authz *Authorizer, reader AmfaStat
 			return nil, amfaStatsOutput{}, Invalidf("realm is required")
 		}
 		caller := CallerFromRequest(req)
-		tenantID, err := TenantArg(caller, in.Tenant)
+		tenantID, err := TenantArg(ctx, caller, in.Tenant)
 		if err != nil {
 			return nil, amfaStatsOutput{}, err
 		}

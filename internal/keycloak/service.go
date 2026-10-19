@@ -3,6 +3,7 @@ package keycloak
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -173,23 +174,30 @@ func (s *service) CountEventsByType(ctx context.Context, tenantID, realmName, ev
 
 // GetEventStats returns aggregated event statistics for a realm.
 func (s *service) GetEventStats(ctx context.Context, tenantID, realmName string, from, to time.Time) (*EventStats, error) {
-	loginCount, _ := s.eventRepo.CountEventsByType(ctx, tenantID, realmName, "LOGIN", from, to)
-	loginErrorCount, _ := s.eventRepo.CountEventsByType(ctx, tenantID, realmName, "LOGIN_ERROR", from, to)
-	logoutCount, _ := s.eventRepo.CountEventsByType(ctx, tenantID, realmName, "LOGOUT", from, to)
-	registerCount, _ := s.eventRepo.CountEventsByType(ctx, tenantID, realmName, "REGISTER", from, to)
-	codeToTokenCount, _ := s.eventRepo.CountEventsByType(ctx, tenantID, realmName, "CODE_TO_TOKEN", from, to)
+	stats := &EventStats{Realm: realmName, Start: from, End: to}
 
-	return &EventStats{
-		Realm:            realmName,
-		Start:            from,
-		End:              to,
-		LoginCount:       loginCount,
-		LoginErrorCount:  loginErrorCount,
-		LogoutCount:      logoutCount,
-		RegisterCount:    registerCount,
-		CodeToTokenCount: codeToTokenCount,
-		TotalEvents:      loginCount + loginErrorCount + logoutCount + registerCount + codeToTokenCount,
-	}, nil
+	// A failed count is returned, never read as zero: these counts are the
+	// first numbers a dashboard shows, and a silent zero reads as "no logins"
+	// rather than "the query failed".
+	for _, c := range []struct {
+		eventType string
+		into      *int64
+	}{
+		{"LOGIN", &stats.LoginCount},
+		{"LOGIN_ERROR", &stats.LoginErrorCount},
+		{"LOGOUT", &stats.LogoutCount},
+		{"REGISTER", &stats.RegisterCount},
+		{"CODE_TO_TOKEN", &stats.CodeToTokenCount},
+	} {
+		count, err := s.eventRepo.CountEventsByType(ctx, tenantID, realmName, c.eventType, from, to)
+		if err != nil {
+			return nil, fmt.Errorf("count %s events for realm %q: %w", c.eventType, realmName, err)
+		}
+		*c.into = count
+		stats.TotalEvents += count
+	}
+
+	return stats, nil
 }
 
 // GetLatestMetrics returns the latest metrics for a tenant.
@@ -408,6 +416,8 @@ func (s *service) GetDashboard(ctx context.Context, tenantID string, realmName s
 			EventsEnabled:   realm.EventsEnabled,
 			EventsListeners: realm.EventsListeners,
 			Metrics:         metrics,
+			LastChecked:     realm.LastChecked,
+			UnreadableSince: realm.UnreadableSince,
 		}
 		realmsSummary = append(realmsSummary, summary)
 	}

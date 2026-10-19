@@ -176,8 +176,8 @@ func (a tenantVisibilityAdapter) IsAdmin(ctx context.Context, userID uint) (bool
 	return a.svc.IsAdmin(ctx, userID)
 }
 
-func (a tenantVisibilityAdapter) GetUserRoles(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
-	roles, err := a.svc.GetUserRoles(ctx, userID)
+func (a tenantVisibilityAdapter) GetEffectiveUserRoles(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
+	roles, err := a.svc.GetEffectiveUserRoles(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -395,6 +395,14 @@ func (h *TenantHandlers) updateTenant(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if errors.Is(err, tenant.ErrClientSecretRequired) {
+			h.log.Warn("Rejected tenant update that moves its credentials without the client secret",
+				logger.Str("tenant_id", tenantID))
+			httputil.RespondJSON(w, h.log, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
 		h.log.Error("Failed to update tenant",
 			logger.Str("tenant_id", tenantID),
 			logger.Err(err))
@@ -533,13 +541,14 @@ func (h *TenantHandlers) testConnection(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		// Check if this is a client creation error (should return 400)
 		if clientErr, ok := err.(ClientCreationError); ok && clientErr.IsClientCreationError() {
+			// The error stays in the log. It can describe the target server's
+			// reply, and the caller chose that server.
 			h.log.Warn("Failed to create test Keycloak client",
 				logger.Str("server_url", dto.ServerURL),
 				logger.Err(err))
 			httputil.RespondJSON(w, h.log, http.StatusBadRequest, map[string]interface{}{
 				"status":  "error",
 				"message": "Failed to create Keycloak client",
-				"error":   err.Error(),
 			})
 			return
 		}

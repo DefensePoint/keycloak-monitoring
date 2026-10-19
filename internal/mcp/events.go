@@ -151,7 +151,7 @@ func eventFilterDigest(in *listEventsInput) []byte {
 func registerListEvents(srv *mcpsdk.Server, authz *Authorizer, realms RealmReader, reader EventReader, signer *cursorSigner, cfg *config.MCPConfig, g *toolGuard, clock Clock) {
 	handler := func(ctx context.Context, req *mcpsdk.CallToolRequest, in listEventsInput) (*mcpsdk.CallToolResult, listEventsOutput, error) {
 		caller := CallerFromRequest(req)
-		tenantID, err := TenantArg(caller, in.Tenant)
+		tenantID, err := TenantArg(ctx, caller, in.Tenant)
 		if err != nil {
 			return nil, listEventsOutput{}, err
 		}
@@ -235,7 +235,7 @@ func registerGetEvent(srv *mcpsdk.Server, authz *Authorizer, reader EventReader,
 			return nil, eventSummary{}, Invalidf("event_id is required")
 		}
 		caller := CallerFromRequest(req)
-		tenantID, err := TenantArg(caller, in.Tenant)
+		tenantID, err := TenantArg(ctx, caller, in.Tenant)
 		if err != nil {
 			return nil, eventSummary{}, err
 		}
@@ -273,7 +273,7 @@ func registerGetEvent(srv *mcpsdk.Server, authz *Authorizer, reader EventReader,
 func registerGetEventStats(srv *mcpsdk.Server, authz *Authorizer, realms RealmReader, reader EventReader, g *toolGuard, clock Clock) {
 	handler := func(ctx context.Context, req *mcpsdk.CallToolRequest, in eventStatsInput) (*mcpsdk.CallToolResult, eventStatsOutput, error) {
 		caller := CallerFromRequest(req)
-		tenantID, err := TenantArg(caller, in.Tenant)
+		tenantID, err := TenantArg(ctx, caller, in.Tenant)
 		if err != nil {
 			return nil, eventStatsOutput{}, err
 		}

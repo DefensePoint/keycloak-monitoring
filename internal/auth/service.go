@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
+	"golang.org/x/oauth2"
+
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/users"
@@ -13,12 +16,10 @@ import (
 
 // Service defines the interface for authentication operations.
 type Service interface {
-	// Login initiates the OAuth2 login flow and returns the redirect URL.
-	Login(ctx context.Context) (string, string, error)
-
-	// Callback handles the OAuth2 callback and creates a session.
-	// Returns both the session and the complete user object.
-	Callback(ctx context.Context, code, state, expectedState string) (*Session, *domain.User, error)
+	// Login initiates the OAuth2 login flow. It returns the redirect URL and
+	// the login attempt whose state, nonce and PKCE verifier the callback must
+	// match.
+	Login(ctx context.Context) (string, LoginAttempt, error)
 
 	// Logout terminates a user session.
 	Logout(ctx context.Context, sessionID string) error
@@ -77,91 +78,23 @@ func NewService(
 	}
 }
 
-// Login initiates the OAuth2 login flow.
-func (s *service) Login(ctx context.Context) (string, string, error) {
-	state := generateState()
-	url := s.provider.GetAuthCodeURL(state)
-	return url, state, nil
-}
-
-// Callback handles the OAuth2 callback.
-func (s *service) Callback(ctx context.Context, code, state, expectedState string) (*Session, *domain.User, error) {
-	if state != expectedState {
-		return nil, nil, &AuthError{
-			Code:    ErrCodeInvalidState,
-			Message: "invalid state parameter",
+// Login initiates the OAuth2 login flow. The authorization request carries the
+// PKCE challenge (S256) and the nonce; the attempt keeps what the callback needs
+// to check them.
+func (s *service) Login(ctx context.Context) (string, LoginAttempt, error) {
+	if r, ok := s.provider.(interface{ Ready(context.Context) error }); ok {
+		if err := r.Ready(ctx); err != nil {
+			return "", LoginAttempt{}, err
 		}
 	}
-
-	token, err := s.provider.Exchange(ctx, code)
+	attempt, err := NewLoginAttempt()
 	if err != nil {
-		return nil, nil, &AuthError{
-			Code:    ErrCodeExchangeFailed,
-			Message: "failed to exchange authorization code",
-			Err:     err,
-		}
+		return "", LoginAttempt{}, err
 	}
-
-	idToken, _ := token.Extra("id_token").(string)
-	userInfo, err := s.provider.VerifyIDToken(ctx, idToken)
-	if err != nil {
-		return nil, nil, &AuthError{
-			Code:    ErrCodeInvalidToken,
-			Message: "failed to verify ID token",
-			Err:     err,
-		}
-	}
-
-	// Find or create user.
-	//
-	// EmailVerified carries whatever the IdP asserted, never an assumption. An
-	// OIDC provider is free to issue a token for an address nobody has
-	// confirmed, and Keycloak does exactly that for a user created by an admin.
-	// Storing true regardless made every account look confirmed, which is the
-	// one claim account-linking by email would have to rely on.
-	user := &domain.User{
-		Subject:           userInfo.Subject,
-		Email:             userInfo.Email,
-		EmailVerified:     userInfo.EmailVerified,
-		Name:              userInfo.Name,
-		GivenName:         userInfo.GivenName,
-		FamilyName:        userInfo.FamilyName,
-		PreferredUsername: userInfo.PreferredUsername,
-		Locale:            userInfo.Locale,
-		AuthMethod:        domain.AuthMethodOAuth,
-		IsActive:          true,
-	}
-
-	dbUser, err := s.userRepository.FindOrCreateBySubject(ctx, user)
-	if err != nil {
-		if authErr := s.refuseDeletedAccount(err, userInfo); authErr != nil {
-			return nil, nil, authErr
-		}
-		return nil, nil, fmt.Errorf("failed to find or create user: %w", err)
-	}
-
-	if err := s.refuseUnusableAccount(dbUser); err != nil {
-		return nil, nil, err
-	}
-
-	// Create session
-	sessionID := generateSessionID()
-	session := &Session{
-		UserID:       dbUser.ID,
-		Subject:      dbUser.Subject,
-		Email:        dbUser.Email,
-		Name:         dbUser.Name,
-		AccessToken:  token.AccessToken,
-		RefreshToken: token.RefreshToken,
-		IDToken:      idToken,
-		TokenExpiry:  token.Expiry,
-	}
-
-	if err := s.sessionStore.Save(ctx, sessionID, session); err != nil {
-		return nil, nil, fmt.Errorf("failed to save session: %w", err)
-	}
-
-	return session, dbUser, nil
+	url := s.provider.GetAuthCodeURL(attempt.State,
+		oauth2.S256ChallengeOption(attempt.CodeVerifier),
+		oidc.Nonce(attempt.Nonce))
+	return url, attempt, nil
 }
 
 // Logout terminates a user session.
@@ -267,6 +200,38 @@ func (s *service) refuseDeletedAccount(err error, userInfo *UserInfo) *AuthError
 	}
 }
 
+// refuseEmailInUse turns the repository's "another account holds this address"
+// into a refusal, and returns nil for every other error.
+//
+// Logged with the id of the account holding the address and what an
+// administrator can do about it. If this is the same person after a realm
+// rebuild, linking by verified email relinks them; if it is not, the refusal is
+// the point.
+func (s *service) refuseEmailInUse(err error, userInfo *UserInfo) *AuthError {
+	if !errors.Is(err, users.ErrEmailInUse) {
+		return nil
+	}
+
+	fields := []logger.Field{
+		logger.Str("subject", userInfo.Subject),
+		logger.Str("email", userInfo.Email),
+		logger.Bool("email_verified", userInfo.EmailVerified),
+	}
+	var inUseErr *users.EmailInUseError
+	if errors.As(err, &inUseErr) {
+		fields = append(fields, logger.Uint("user_id", inUseErr.UserID))
+	}
+	s.logger.Warn("Authentication failed - the email address belongs to an account with a different "+
+		"identity provider subject; if this is the same person after a realm rebuild or migration, "+
+		"enable auth.oauth2.link_by_verified_email until they have signed in", fields...)
+
+	return &AuthError{
+		Code:    ErrCodeUnauthorized,
+		Message: "an account with this email address already exists; ask an administrator to link it",
+		Err:     err,
+	}
+}
+
 func (s *service) refuseUnusableAccount(user *domain.User) error {
 	if user == nil || (user.IsActive && !user.IsBlocked) {
 		return nil
@@ -286,10 +251,20 @@ func (s *service) refuseUnusableAccount(user *domain.User) error {
 
 // FindOrCreateUser finds or creates a user from OAuth2 user info.
 func (s *service) FindOrCreateUser(ctx context.Context, userInfo *UserInfo) (*domain.User, error) {
+	// EmailVerified carries whatever the IdP asserted, never an assumption. An
+	// OIDC provider is free to issue a token for an address nobody has
+	// confirmed, and Keycloak does exactly that for a user created by an admin.
+	// Storing true regardless made every account look confirmed, which is the
+	// one claim account-linking by email would have to rely on.
+	//
+	// LastLoginAt records this SSO sign-in. FindOrCreateBySubject writes the
+	// value it is given, so leaving it unset stored NULL on every sign-in. The
+	// MCP token check and the email_verified migration both read it.
+	now := time.Now()
 	user := &domain.User{
 		Subject:           userInfo.Subject,
 		Email:             userInfo.Email,
-		EmailVerified:     userInfo.EmailVerified, // See Callback.
+		EmailVerified:     userInfo.EmailVerified,
 		Name:              userInfo.Name,
 		GivenName:         userInfo.GivenName,
 		FamilyName:        userInfo.FamilyName,
@@ -297,11 +272,16 @@ func (s *service) FindOrCreateUser(ctx context.Context, userInfo *UserInfo) (*do
 		Locale:            userInfo.Locale,
 		AuthMethod:        domain.AuthMethodOAuth,
 		IsActive:          true,
+		LastLoginAt:       &now,
+		LastAccessedAt:    &now,
 	}
 
 	dbUser, err := s.userRepository.FindOrCreateBySubject(ctx, user)
 	if err != nil {
 		if authErr := s.refuseDeletedAccount(err, userInfo); authErr != nil {
+			return nil, authErr
+		}
+		if authErr := s.refuseEmailInUse(err, userInfo); authErr != nil {
 			return nil, authErr
 		}
 		return nil, fmt.Errorf("failed to find or create user: %w", err)
@@ -312,24 +292,4 @@ func (s *service) FindOrCreateUser(ctx context.Context, userInfo *UserInfo) (*do
 	}
 
 	return dbUser, nil
-}
-
-// generateState generates a random state for OAuth2 flow.
-func generateState() string {
-	state, err := GenerateRandomState()
-	if err != nil {
-		// Fallback to a less secure but functional state
-		return fmt.Sprintf("state_%d", time.Now().UnixNano())
-	}
-	return state
-}
-
-// generateSessionID generates a random session ID.
-func generateSessionID() string {
-	sessionID, err := GenerateSessionID()
-	if err != nil {
-		// Fallback to a less secure but functional ID
-		return fmt.Sprintf("session_%d", time.Now().UnixNano())
-	}
-	return sessionID
 }

@@ -66,7 +66,7 @@ func concurrentSignIns(r *Repository, logins []struct{ subject, email string }) 
 // the same claims, so no interleaving can make them disagree about who is
 // signing in.
 func TestLinkConcurrency_TheSamePersonTwiceIsStillOneAccount(t *testing.T) {
-	r, db := newDeletedAccountRepo(t)
+	r, db := newLinkingRepo(t)
 
 	first, err := signInAs(r, "del-conc-old", "del-conc@example.invalid", true)
 	if err != nil {
@@ -99,7 +99,7 @@ func TestLinkConcurrency_TheSamePersonTwiceIsStillOneAccount(t *testing.T) {
 // a provider that does not — but it is the interleaving with something at stake,
 // because the two logins disagree about who they are.
 func TestLinkConcurrency_TwoSubjectsOneAddressStaysConsistent(t *testing.T) {
-	r, db := newDeletedAccountRepo(t)
+	r, db := newLinkingRepo(t)
 
 	first, err := signInAs(r, "del-race-old", "del-race@example.invalid", true)
 	if err != nil {
@@ -169,4 +169,38 @@ func TestLinkConcurrency_SimultaneousFirstLoginsMakeOneAccount(t *testing.T) {
 		t.Errorf("simultaneous first logins produced %d accounts", n)
 	}
 
+}
+
+// With linking off, two different subjects racing for an existing account's
+// address must both be refused, and the account must keep its subject.
+func TestLinkConcurrency_OffByDefault_NeitherSubjectTakesTheAccount(t *testing.T) {
+	r, db := newDeletedAccountRepo(t)
+
+	first, err := signInAs(r, "del-offrace-old", "del-offrace@example.invalid", true)
+	if err != nil {
+		t.Fatalf("first sign-in: %v", err)
+	}
+
+	got, errs := concurrentSignIns(r, []struct{ subject, email string }{
+		{"del-offrace-a", "del-offrace@example.invalid"},
+		{"del-offrace-b", "del-offrace@example.invalid"},
+	})
+	for i, err := range errs {
+		if err == nil {
+			t.Errorf("login %d was let in as account %d", i, got[i].ID)
+		}
+	}
+
+	var stored database.User
+	if err := db.Where("id = ?", first.ID).First(&stored).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if stored.Subject != "del-offrace-old" {
+		t.Errorf("the account was taken over: subject is now %q", stored.Subject)
+	}
+	var n int64
+	db.Model(&database.User{}).Where("email = ?", "del-offrace@example.invalid").Count(&n)
+	if n != 1 {
+		t.Errorf("the address ended up on %d accounts", n)
+	}
 }

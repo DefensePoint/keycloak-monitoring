@@ -26,11 +26,13 @@ import {
   type MRT_Row,
   type MRT_Cell,
 } from "material-react-table";
-import { useTenant } from "@/shared/context";
+import { useAuth, useTenant } from "@/shared/context";
 import {
   useKeycloakDashboard,
   useRealmSelector,
+  useEvent,
   useEvents,
+  isEventNotFoundError,
   useAmfaStats,
   useAmfaGeo,
   useAmfaRealms,
@@ -53,7 +55,9 @@ import {
 import { Refresh } from "@mui/icons-material";
 import { MRT_OPTIONS_WITH_TOOLBAR } from "@/shared/constants";
 import { hasEventLocation } from "@/shared/utils";
+import type { EventFilters as EventFilterValues } from "@/shared/services";
 import type { Event as EventType } from "../types";
+import { EventFilters } from "../components/EventFilters";
 
 type SeverityColor = "error" | "warning" | "info";
 
@@ -61,8 +65,11 @@ type EventWithFormattedDate = EventType & {
   formattedTimestamp: string;
 };
 
-function getSeverityColor(severity: string): SeverityColor {
+// Exported for its unit test. critical shares error's red, as it does on the
+// alert badges; left to the default it rendered in info's blue.
+export function getSeverityColor(severity: string): SeverityColor {
   switch (severity) {
+    case "critical":
     case "error":
       return "error";
     case "warning":
@@ -94,6 +101,7 @@ export function EventsPage() {
   const [offset, setOffset] = useState(0);
   const [startTime, setStartTime] = useState<string | undefined>(undefined);
   const [endTime, setEndTime] = useState<string | undefined>(undefined);
+  const [filters, setFilters] = useState<EventFilterValues>({});
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Read initial time range from URL
@@ -127,11 +135,29 @@ export function EventsPage() {
     [setSearchParams],
   );
 
-  const { data: keycloakDashboard } = useKeycloakDashboard({
-    tenantId: selectedTenant?.tenant_id,
-  });
+  const { data: keycloakDashboard, isSuccess: dashboardLoaded } =
+    useKeycloakDashboard({
+      tenantId: selectedTenant?.tenant_id,
+    });
 
   const realms = keycloakDashboard?.realms ?? [];
+
+  // Events are only listed for the tenant's synced realms, so with none the
+  // table is empty for a reason the page should name. The realm list is
+  // narrowed to the caller's scope, so an empty one means "nothing synced"
+  // only for a caller whose access is not limited here; for anyone else it
+  // may be their own access, which the caller may be told about.
+  const { isAdmin, user } = useAuth();
+  const noRealms = dashboardLoaded && realms.length === 0;
+  // Limited as the server reads policies: some row for this tenant, and none
+  // of them unrestricted (a row with no realm list grants every realm).
+  const tenantPolicies = (user?.tenant_policies ?? []).filter(
+    (policy) => policy.tenant_id === selectedTenant?.tenant_id,
+  );
+  const realmAccessLimited =
+    !isAdmin() &&
+    tenantPolicies.length > 0 &&
+    !tenantPolicies.some((policy) => policy.realms_unrestricted);
 
   const { selectedRealm, handleRealmChange: handleRealmChangeFromHook } =
     useRealmSelector({
@@ -154,6 +180,17 @@ export function EventsPage() {
   // events the AMFA sections above the table are about.
   const realmFilter = selectedRealm !== "all" ? selectedRealm : undefined;
 
+  // Realms whose Keycloak browser flow uses the AMFA authenticator. Drives
+  // whether the AMFA-only sections (KPI cards, geo map, Risk column) show:
+  // for a specific realm, only if it is AMFA-enabled; for "all realms", if any
+  // realm in the tenant is AMFA-enabled.
+  const { data: amfaRealms } = useAmfaRealms(selectedTenant?.tenant_id);
+  const amfaRealmSet = amfaRealms ?? [];
+  const currentRealmHasAmfa =
+    selectedRealm !== "all" && amfaRealmSet.includes(selectedRealm);
+  const showAmfaSections =
+    selectedRealm === "all" ? amfaRealmSet.length > 0 : currentRealmHasAmfa;
+
   const {
     data: eventsResponse,
     isLoading,
@@ -165,19 +202,18 @@ export function EventsPage() {
     startTime,
     endTime,
     realm: realmFilter,
+    type: filters.type,
+    severity: filters.severity,
+    // The min-risk control hides with the Risk column, and a filter the user
+    // can no longer see must not keep narrowing the table.
+    minRisk: showAmfaSections ? filters.minRisk : undefined,
     refetchInterval: 30000, // 30 seconds instead of default 10 seconds
   });
 
-  // Realms whose Keycloak browser flow uses the AMFA authenticator. Drives
-  // whether the AMFA-only sections (KPI cards, geo map, Risk column) show:
-  // for a specific realm, only if it is AMFA-enabled; for "all realms", if any
-  // realm in the tenant is AMFA-enabled.
-  const { data: amfaRealms } = useAmfaRealms(selectedTenant?.tenant_id);
-  const amfaRealmSet = amfaRealms ?? [];
-  const currentRealmHasAmfa =
-    selectedRealm !== "all" && amfaRealmSet.includes(selectedRealm);
-  const showAmfaSections =
-    selectedRealm === "all" ? amfaRealmSet.length > 0 : currentRealmHasAmfa;
+  const handleFiltersChange = useCallback((next: EventFilterValues) => {
+    setFilters(next);
+    setOffset(0);
+  }, []);
 
   // AMFA KPI counters for the selected realm. AMFA stats are per-realm, so the
   // strip only populates once a specific realm is chosen (dashes for "all").
@@ -216,6 +252,13 @@ export function EventsPage() {
     }));
   }, [eventsResponse]);
 
+  // Type suggestions come from the rows on screen; any other type can still
+  // be typed in.
+  const typeOptions = useMemo(
+    () => [...new Set(events.map((e) => e.type).filter(Boolean))].sort(),
+    [events],
+  );
+
   const currentPage = Math.floor(offset / limit) + 1;
   const totalPages = eventsResponse
     ? Math.ceil(eventsResponse.total / limit)
@@ -240,12 +283,34 @@ export function EventsPage() {
     return undefined;
   }, [searchParams, events]);
 
+  // A link can name an event the loaded page does not hold: older, outside
+  // the time window, or past the first page. Fetch that one directly once the
+  // list has loaded without it.
+  const urlEventId = searchParams.get("event") ?? undefined;
+  const { data: fetchedUrlEvent, error: urlEventError } = useEvent(
+    selectedTenant?.tenant_id,
+    urlEventId,
+    !isLoading && !eventFromUrl,
+  );
+
   // Handle URL-based event selection
   useEffect(() => {
     if (eventFromUrl) {
       setSelectedEvent(eventFromUrl);
+    } else if (fetchedUrlEvent) {
+      setSelectedEvent(fetchedUrlEvent);
     }
-  }, [eventFromUrl]);
+  }, [eventFromUrl, fetchedUrlEvent]);
+
+  // A failed lookup keeps its error after the list later brings the event in
+  // (a wider time range, say), so the banner also checks the event is not
+  // already on screen. Only a 404 means "not found or not yours"; any other
+  // failure says the lookup itself failed.
+  const urlEventUnavailable =
+    !!urlEventId &&
+    !!urlEventError &&
+    !eventFromUrl &&
+    selectedEvent?.event_id !== urlEventId;
 
   const handleEventClick = useCallback(
     (event: EventType) => {
@@ -465,6 +530,12 @@ export function EventsPage() {
           initialStart={initialStart}
           initialEnd={initialEnd}
         />
+        <EventFilters
+          value={filters}
+          onChange={handleFiltersChange}
+          showMinRisk={showAmfaSections}
+          typeOptions={typeOptions}
+        />
         <PageSizeSelector
           value={limit}
           onChange={(value) => {
@@ -489,6 +560,28 @@ export function EventsPage() {
           uses AMFA). Empty/dashes when a specific AMFA realm has no data yet.
           When "All Realms" is selected and the numbers can't cover every realm,
           say which of the two reasons applies, or which realm they do cover. */}
+      {urlEventUnavailable && (
+        <AlertBanner
+          severity="warning"
+          message={
+            isEventNotFoundError(urlEventError)
+              ? "The linked event was not found, or it is in a realm you do not have access to."
+              : "The linked event could not be loaded. Try again, or refresh the page."
+          }
+          sx={{ mb: 3 }}
+        />
+      )}
+      {noRealms && (
+        <AlertBanner
+          severity="info"
+          message={
+            realmAccessLimited
+              ? "None of this tenant's realms are available to you. Your access is limited to specific realms, so ask an administrator if you expect to see events here."
+              : "No realms have been synced for this tenant yet, so there are no events to show. Realms appear after the monitor first reaches this tenant's Keycloak; if this persists, check the tenant's connection."
+          }
+          sx={{ mb: 3 }}
+        />
+      )}
       {showAmfaSections &&
         (amfaAllRealmsUnsupported ? (
           <AlertBanner

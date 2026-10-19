@@ -73,27 +73,29 @@ keycloak:
       owner: "platform-team"
 ```
 
-**Security Note**: For production, use environment variables for sensitive data:
+**Security Note**: For production, keep the secret out of the file. Write `client_secret: "${MY_KEYCLOAK_CLIENT_SECRET}"` in the tenant block and set the variable in the root `.env` (created in Step 4), which the containers read. A shell `export` does not reach them:
 
 ```bash
-export MONITORING_KEYCLOAK_TENANTS_MY_KEYCLOAK_CLIENT_SECRET=your-client-secret
+# In .env
+MY_KEYCLOAK_CLIENT_SECRET=your-client-secret
 ```
 
 ### Step 4: Configure Initial Admin Credentials
 
-**REQUIRED**: Set the initial admin credentials via environment variables:
+**REQUIRED**: Set the initial admin credentials in `.env`. The Docker containers read this file; shell exports do not reach them.
 
 ```bash
-export MONITORING_AUTH_SIMPLE_DEFAULT_USER="admin"
-export MONITORING_AUTH_SIMPLE_DEFAULT_PASS="YourS3cur3P@ssw0rd!"  # Use a strong password
-export MONITORING_AUTH_SIMPLE_DEFAULT_EMAIL="admin@example.com"
+cp .env.example .env
+# Edit .env and set MONITORING_AUTH_SIMPLE_DEFAULT_PASS (and the user and email if you like)
 ```
+
+The example user is `operator`, with email `operator@example.com`. The password has no default: the server refuses to start until you set one that meets the requirements below.
 
 **Password Requirements:**
 
 - Minimum 12 characters
 - At least one uppercase letter, lowercase letter, number, and special character
-- Cannot be a common weak password (admin123, password123, etc.)
+- Cannot contain a common weak word such as admin, password, secret or 123456
 
 ### Step 5: Build and Start Services
 
@@ -117,7 +119,7 @@ Open your browser to **<http://localhost:7880>**
 - Username: The value you set in `MONITORING_AUTH_SIMPLE_DEFAULT_USER`
 - Password: The value you set in `MONITORING_AUTH_SIMPLE_DEFAULT_PASS`
 
-**IMPORTANT**: Change your password after first login. The initial password is supplied via environment variable and remains valid until changed.
+**IMPORTANT**: Change your password after first login. The initial password comes from `.env` and remains valid until changed.
 
 ### Step 7: Verify Monitoring
 
@@ -141,7 +143,7 @@ docker run -d --name postgres -p 5432:5432 \
   -e POSTGRES_DB=monitoring \
   -e POSTGRES_USER=monitoring \
   -e POSTGRES_PASSWORD=monitoring_password \
-  timescale/timescaledb:latest-pg17
+  timescale/timescaledb:2.30.2-pg16
 ```
 
 ### Step 2: Configure Application
@@ -156,6 +158,11 @@ cp config.yaml.example config.yaml
 ```bash
 # Install Go dependencies
 go mod download
+
+# The Postgres from step 1: config.yaml has no database password, and this
+# container has no TLS
+export MONITORING_DATABASE_PASSWORD=monitoring_password
+export MONITORING_DATABASE_SSL_MODE=disable
 
 # Run the server
 make run
@@ -441,11 +448,14 @@ Example alert distribution:
        default_pass: "YOUR_SECURE_PASSWORD"
    ```
 
-2. **Use environment variables** for sensitive data:
+2. **Keep secrets in `.env`**, which the containers read, not in `config.yaml`:
 
    ```bash
-   export MONITORING_AUTH_SIMPLE_DEFAULT_PASS=secure_password
-   export MONITORING_KEYCLOAK_TENANTS_PROD_CLIENT_SECRET=keycloak_client_secret
+   # In .env. The password must pass the checker: 12+ characters with upper
+   # and lower case, a digit and a special character, and no common word.
+   MONITORING_AUTH_SIMPLE_DEFAULT_PASS='<a strong password you choose>'
+   # referenced from the tenant block as client_secret: "${MY_KEYCLOAK_CLIENT_SECRET}"
+   MY_KEYCLOAK_CLIENT_SECRET=keycloak_client_secret
    ```
 
 3. **Enable HTTPS** in production (see [deployment guide](deployment.md))

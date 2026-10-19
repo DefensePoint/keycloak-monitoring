@@ -2,7 +2,6 @@ package database
 
 import (
 	"io"
-	"os"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -13,6 +12,20 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
 )
+
+// closeOnCleanup closes db's pool when the test ends. Register it straight
+// after opening, before any cleanup that still queries db: cleanups run last
+// registered first, so this one then runs after them. Left open, each test's
+// pool outlived it, and pkg/database alone held some fifty connections by the
+// end of a run, which is the whole connection limit on the TimescaleDB image.
+func closeOnCleanup(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+}
 
 // newTestClient opens a postgres-backed GORM connection for migration tests.
 //
@@ -35,11 +48,9 @@ func newTestClient(t *testing.T) *Client {
 		t.Skip("skipping database test in short mode")
 	}
 
-	dsn := os.Getenv("KMT_DESTRUCTIVE_TEST_DATABASE_DSN")
-	if dsn == "" {
-		t.Skip("KMT_DESTRUCTIVE_TEST_DATABASE_DSN not set; skipping destructive integration test")
-	}
+	dsn := testdb.DSN(t, "KMT_DESTRUCTIVE_TEST_DATABASE_DSN")
 	testdb.RequireDisposable(t, dsn)
+	testdb.Lock(t, dsn)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger:                 gormlogger.Default.LogMode(gormlogger.Silent),
@@ -48,9 +59,10 @@ func newTestClient(t *testing.T) *Client {
 	if err != nil {
 		t.Fatalf("failed to open test database: %v", err)
 	}
+	closeOnCleanup(t, db)
 
 	// Migrate just the tables we need for these tests.
-	if err := db.AutoMigrate(&Role{}, &Permission{}, &RolePermission{}); err != nil {
+	if err := db.AutoMigrate(&Role{}, &Permission{}, &RolePermission{}, &DataMigration{}); err != nil {
 		t.Fatalf("failed to auto-migrate RBAC tables: %v", err)
 	}
 
@@ -60,12 +72,14 @@ func newTestClient(t *testing.T) *Client {
 		db.Exec("DELETE FROM role_permissions WHERE permission_id IN (SELECT id FROM permissions WHERE name = ?)", "amfa:read")
 		db.Exec("DELETE FROM permissions WHERE name = ?", "amfa:read")
 		db.Exec("DELETE FROM roles WHERE name IN (?, ?, ?)", "admin", "operator", "viewer")
+		db.Exec("DELETE FROM data_migrations WHERE key = ?", amfaReadGrantKey)
 	})
 
 	// Pre-clean to avoid contamination from prior test runs.
 	db.Exec("DELETE FROM role_permissions WHERE permission_id IN (SELECT id FROM permissions WHERE name = ?)", "amfa:read")
 	db.Exec("DELETE FROM permissions WHERE name = ?", "amfa:read")
 	db.Exec("DELETE FROM roles WHERE name IN (?, ?, ?)", "admin", "operator", "viewer")
+	db.Exec("DELETE FROM data_migrations WHERE key = ?", amfaReadGrantKey)
 
 	log := logger.New(zerolog.New(io.Discard))
 	return &Client{db: db, logger: log}

@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback } from "react";
+import React, { useMemo, useCallback, useEffect, useState } from "react";
 import { Box, Chip, IconButton, alpha, useTheme } from "@mui/material";
 import { ChevronRight } from "@mui/icons-material";
 import {
@@ -15,12 +15,21 @@ export const UserEventsTable: React.FC<UserEventsTableProps> = ({
   events,
   loading,
   onEventClick,
+  pageSize = 10,
 }) => {
+  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize });
+  // A new page size starts from the first page again.
+  useEffect(() => {
+    setPagination({ pageIndex: 0, pageSize });
+  }, [pageSize]);
+
   const theme = useTheme();
 
   const getSeverityColor = useCallback(
     (severity: string): { bgcolor: string; color: string } => {
       switch (severity.toLowerCase()) {
+        // critical shares error's red; left to the default it was info's blue.
+        case "critical":
         case "error":
           return {
             bgcolor: alpha(theme.palette.error.main, 0.2),
@@ -148,10 +157,9 @@ export const UserEventsTable: React.FC<UserEventsTableProps> = ({
         enablePagination
         enableSorting
         enableColumnFilters
-        initialState={{
-          density: "compact",
-          pagination: { pageSize: 10, pageIndex: 0 },
-        }}
+        initialState={{ density: "compact" }}
+        state={{ pagination }}
+        onPaginationChange={setPagination}
         muiTableBodyRowProps={({ row }: { row: MRT_Row<UserEvent> }) => ({
           onClick: () => onEventClick(row.original),
           sx: { cursor: "pointer" },

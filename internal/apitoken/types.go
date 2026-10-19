@@ -26,6 +26,12 @@ var (
 	ErrUserInactive  = errors.New("api token user is inactive")
 	ErrUserBlocked   = errors.New("api token user is blocked")
 	ErrExpiryInPast  = errors.New("api token expiry is in the past")
+	ErrNoActor       = errors.New("api token change has no acting user")
+
+	// ErrSSOSignInTooOld refuses a token whose SSO owner has not signed in
+	// through SSO within the configured limit. A user disabled in the IdP
+	// cannot sign in, so their tokens stop here; signing in again restores them.
+	ErrSSOSignInTooOld = errors.New("api token user has not signed in through SSO recently enough")
 )
 
 // Token represents API token metadata. It never carries the token digest;

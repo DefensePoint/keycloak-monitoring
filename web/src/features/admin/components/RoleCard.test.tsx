@@ -34,6 +34,7 @@ describe("RoleCard", () => {
     display_name: "Admin",
     description: "Administrator role with full access",
     is_system: false,
+    is_active: true,
     permissions: [],
   };
 
@@ -124,5 +125,55 @@ describe("RoleCard", () => {
   it("should render different badge colors based on role name", () => {
     const { container } = renderWithTheme(<RoleCard {...defaultProps} />);
     expect(container).toBeInTheDocument();
+  });
+
+  describe("active state", () => {
+    it("shows no Inactive chip for an active role", () => {
+      renderWithTheme(<RoleCard {...defaultProps} />);
+      expect(screen.queryByText("Inactive")).not.toBeInTheDocument();
+    });
+
+    it("shows an Inactive chip for an inactive role", () => {
+      renderWithTheme(
+        <RoleCard {...defaultProps} role={{ ...mockRole, is_active: false }} />,
+      );
+      expect(screen.getByText("Inactive")).toBeInTheDocument();
+    });
+
+    it("deactivates an active role and activates an inactive one", async () => {
+      const user = userEvent.setup();
+      const onToggleActive = vi.fn();
+      const { rerender } = renderWithTheme(
+        <RoleCard {...defaultProps} onToggleActive={onToggleActive} />,
+      );
+      await user.click(screen.getByRole("button", { name: "Deactivate role" }));
+      expect(onToggleActive).toHaveBeenCalledWith(mockRole);
+
+      const inactive = { ...mockRole, is_active: false };
+      rerender(
+        <ThemeProvider theme={theme}>
+          <RoleCard
+            {...defaultProps}
+            role={inactive}
+            onToggleActive={onToggleActive}
+          />
+        </ThemeProvider>,
+      );
+      await user.click(screen.getByRole("button", { name: "Activate role" }));
+      expect(onToggleActive).toHaveBeenLastCalledWith(inactive);
+    });
+
+    it("offers no toggle on a system role", () => {
+      renderWithTheme(
+        <RoleCard
+          {...defaultProps}
+          role={{ ...mockRole, is_system: true }}
+          onToggleActive={vi.fn()}
+        />,
+      );
+      expect(
+        screen.queryByRole("button", { name: /activate role/i }),
+      ).not.toBeInTheDocument();
+    });
   });
 });

@@ -10,7 +10,17 @@
 #   MONITORING_DATABASE_HOST=localhost
 #   MONITORING_HTTP_SERVER_PORT=7888
 #
-# Environment variables take precedence over values in this file.
+# Environment variables take precedence over values in this file. A variable
+# only applies to a key that has a built-in default or is present in this file;
+# see docs/configuration.md#environment-variables.
+#
+# Values in this file may reference environment variables as ${NAME}, which
+# is how per-tenant secrets such as client_secret are kept out of the file:
+#   client_secret: "${KC_STAGING_CLIENT_SECRET}"
+# Only the braced form is expanded, so a bare $ in a value is kept as is.
+# Write $${NAME} for a literal ${NAME}. A referenced variable that is not set
+# keeps the literal ${NAME} text and is logged as a warning at startup;
+# comments are never expanded.
 #
 ################################################################################
 
@@ -57,6 +67,22 @@ http:
     # The API server will listen on this port for incoming requests
     port: 7888
 
+  # CIDRs of reverse proxies allowed to set X-Forwarded-For. Empty (default)
+  # trusts no forwarded headers; the TCP peer is the client IP. Per
+  # environment: set this in that environment's config, not as a global list.
+  trusted_proxies: []
+
+  # Browser origins, besides KMT's own, allowed to call the API with the
+  # session cookie. Empty (default): only KMT's own web UI can. Listed origins
+  # get credentialed CORS and may send POST, PUT and DELETE; any other origin
+  # gets no CORS headers and its state-changing requests are refused with 403.
+  # One origin per entry (scheme://host[:port], http or https). Entries are
+  # lowercased and a default port (:80, :443) is dropped, to match what
+  # browsers send; wildcards, paths and user info are rejected at startup.
+  # API tokens and the MCP server do not need an entry.
+  cors:
+    allowed_origins: []
+
   # ===========================================================================
   # RESPONSE SECURITY HEADERS
   # ===========================================================================
@@ -82,11 +108,14 @@ http:
     # Master switch for the security headers middleware.
     enabled: true
 
-    # Strict-Transport-Security tells browsers to only use HTTPS for the
-    # configured duration. Leave empty until ALL traffic is exclusively
-    # served over HTTPS (with HTTP -> HTTPS redirects).
-    # Recommended once HTTPS-only: "max-age=31536000; includeSubDomains"
-    hsts: ""
+    # Strict-Transport-Security tells browsers to use only HTTPS for this
+    # host for the given time, from the first request: a typed or linked
+    # http:// address is upgraded before anything, the session cookie
+    # included, is sent. The API and the web server both send it. Browsers
+    # ignore it on a plain HTTP response, so local development is unaffected.
+    # Recommended for deployments: "max-age=31536000" (one year, the
+    # default). Empty disables it.
+    hsts: "max-age=31536000"
 
     # Content-Security-Policy restricts the sources from which scripts,
     # styles and other resources can be loaded. The default is restrictive;
@@ -157,10 +186,7 @@ keycloak:
       # - "myrealm"
       # - "another-realm"
 
-    # Default realm to display in the UI
-    # Leave empty to show all realms by default
-    # Example:
-    # default_realm: "master"
+    # Legacy global field; the UI uses each tenant's config.default_realm instead.
     default_realm: ""
 
     # InfiniSpan clustering enabled
@@ -194,6 +220,10 @@ keycloak:
       # Event types to collect (empty = collect all)
       # Common types: LOGIN, LOGOUT, REGISTER, CODE_TO_TOKEN, REFRESH_TOKEN,
       #               LOGIN_ERROR, REGISTER_ERROR, CLIENT_LOGIN, etc.
+      # Names are not case-sensitive and spaces around them are ignored. A
+      # name the Keycloak server does not list is left out with a warning
+      # (repeated hourly) and the others are collected; if none is known,
+      # nothing is collected and an error is logged on every poll.
       types: []
       # Example:
       # types:
@@ -202,14 +232,30 @@ keycloak:
       #   - "LOGOUT"
       #   - "REGISTER"
 
-      # Maximum number of events to fetch per poll
-      # This prevents overwhelming the database with too many events at once
+      # Number of events in each request to Keycloak. A poll reads more pages
+      # while events remain: from Keycloak 26.2 up to 10, and the rest at the
+      # next poll. Before 26.2 Keycloak lists events newest first, so a poll
+      # reads back up to 50 pages to the last event it saw, and a backlog
+      # bigger than that loses its oldest events, with a warning.
       max_events_per_poll: 1000
 
-      # Lookback duration - how far back to look for events on each poll
-      # Should be slightly larger than events_interval to avoid gaps
+      # Each poll reads only the events after the last one it saw. After a
+      # start, new events are fetched at once while the day so far, from the
+      # start of the day this long ago, is backfilled a few pages per poll.
+      # Events whose write failed are retried until they are older than that.
       # Valid time units: ns, us/µs, ms, s, m, h
       lookback_duration: 1m
+
+      # Keycloak's transaction timeout (its transaction-default-timeout
+      # option, 5m by default). Keycloak stores a successful event only when
+      # the request's transaction commits, up to this long after the event's
+      # time, so every 5 minutes one poll reads back this far (plus the time
+      # since the last such sweep and a minute's margin for clocks). Set it to
+      # the Keycloak value when that is raised; a tenant can override it.
+      # The event_visibility_delay_seconds metric shows how late events
+      # actually become visible, and a warning is logged when one passes half
+      # of this window.
+      late_commit_window: 5m
 
     # Connection settings
     connection:
@@ -254,6 +300,13 @@ keycloak:
     # The configuration checker continuously validates Keycloak configurations
     # and generates alerts for misconfigurations or security issues.
     config_checker:
+      # MASTER SWITCH - off by default; nothing below runs until it is on.
+      # When on, every tenant enabled at startup gets the checks enabled below
+      # (a tenant added later is checked after a restart); per-tenant
+      # config_checker overrides are not applied yet. The realm and client
+      # security checks are enabled by default and did not run in KMT 1.0.x,
+      # so expect a first wave of alerts for existing misconfigurations.
+      enabled: false
       # How often to run configuration checks
       # Valid time units: ns, us/µs, ms, s, m, h
       # Recommended: 5m to 15m (balance between responsiveness and load)
@@ -410,11 +463,18 @@ keycloak:
     # The event checker monitors Keycloak events for error patterns and creates
     # alerts when thresholds are exceeded. Events are already collected by the
     # polling worker (every 30s) and stored in the keycloak_events table.
+    # Disabled by default. A single IdP or code-to-token error alerts on first
+    # occurrence, so operators opt in.
     event_checker:
+      enabled: false            # MASTER SWITCH - off by default
       # How often to run event-based checks
       # Valid time units: ns, us/µs, ms, s, m, h
       # Recommended: 5m (balance between responsiveness and performance)
       poll_interval: 5m
+      # How long a condition must go undetected before its alert resolves on
+      # its own, with a resolution notification. Longer than poll_interval, so
+      # one quiet poll does not resolve an alert only to reopen it on the next.
+      resolve_after: 15m
 
       # Configuration for individual event-based checks
       checks:
@@ -471,9 +531,10 @@ keycloak:
     amfa_checker:
       enabled: false            # MASTER SWITCH - off by default
       poll_interval: 1m
+      resolve_after: 15m        # threshold-rule alerts (all but rules 1 and 3) resolve after this long undetected
       checks:
         risk_rejected:      { enabled: true }                                        # rule 1: risk-engine rejections (critical)
-        repeated_risky:     { enabled: true, threshold: 3, window: 24h, min_risk_level: 2 }  # rule 2: repeated risky attempts per user/day
+        repeated_risky:     { enabled: true, threshold: 3, window: 24h, min_risk_level: 2 }  # rule 2: repeated risky attempts per user, while still active
         vpn_risky:          { enabled: true }                                        # rule 3: risky login from VPN/anonymizing IP
         login_error:        { enabled: true, threshold: 5, window: 5m }              # rule 4a: LOGIN_ERROR burst
         client_login_error: { enabled: true, threshold: 5, window: 5m }              # rule 4b: CLIENT_LOGIN_ERROR burst
@@ -540,10 +601,12 @@ keycloak:
   # The key (e.g., "prod-keycloak") is the tenant_id used throughout the system.
   # Choose meaningful IDs for easy identification.
   #
-  # SECURITY: For production, use environment variables for credentials:
-  #   MONITORING_KEYCLOAK_TENANTS_<TENANT_ID>_ADMIN_PASSWORD
-  # Example:
-  #   MONITORING_KEYCLOAK_TENANTS_PROD_KEYCLOAK_ADMIN_PASSWORD=secret123
+  # SECURITY: For production, keep client secrets out of this file with a
+  # placeholder, as the staging tenant below does:
+  #   client_secret: "${PROD_KMT_CLIENT_SECRET}"
+  # Do not use MONITORING_KEYCLOAK_TENANTS_<TENANT_ID>_* overrides: for an ID
+  # with a hyphen such as prod-keycloak, the underscore spelling is silently
+  # ignored, and the hyphenated one cannot be exported from a shell.
   tenants:
     # Example: Production Keycloak instance
     prod-keycloak:
@@ -578,9 +641,10 @@ keycloak:
       # Create a dedicated client in Keycloak — see docs/keycloak-setup.md
       client_id: "monitoring-service"
 
-      # Client secret — WARNING: use environment variables in production
-      # Example: MONITORING_KEYCLOAK_TENANTS_PROD_KEYCLOAK_CLIENT_SECRET=secret
-      client_secret: "change_me_in_production"
+      # Client secret, from the environment: set PROD_KEYCLOAK_CLIENT_SECRET
+      # (for a Compose server, in kmt.env). Never write the secret
+      # itself here.
+      client_secret: "${PROD_KEYCLOAK_CLIENT_SECRET}"
 
       # Tags for organization and filtering (optional)
       # Use tags to group tenants by environment, region, team, etc.
@@ -594,13 +658,20 @@ keycloak:
       owner: "platform-team"
 
       # Tenant-specific configuration overrides (optional)
-      # These settings override the global defaults for this specific tenant
+      # These settings override keycloak.global for this tenant only, using the
+      # same keys. Settings left out keep the global value; a list replaces the
+      # global list. realms, polling, events, connection and infinispan_port
+      # apply per tenant. config_checker, event_checker, amfa_checker,
+      # amfa_mirror, version_checker, infinispan_enabled and
+      # connection.allow_private_ranges are only read from keycloak.global;
+      # setting them here logs a warning at startup and has no effect.
       config:
-        # Override InfiniSpan clustering for this tenant
-        # Set to true if THIS specific tenant uses InfiniSpan clustering
-        # When enabled, the High Availability dashboard will show cluster metrics
-        # including node count, replication status, and cache statistics
-        infinispan_enabled: true
+        # Realm the Dashboard and Events pages open on when the browser tab
+        # has no saved choice. Leave empty to open on All Realms.
+        # default_realm: "master"
+
+        # Realms to monitor on this tenant, instead of keycloak.global.realms
+        # realms: ["master", "production"]
 
         # Custom port for InfiniSpan metrics endpoint (optional)
         # By default, metrics are fetched from the same port as server_url
@@ -616,9 +687,8 @@ keycloak:
       # Tenants with invalid or unreachable AMFA configuration are logged and skipped
       # at startup; they do NOT abort boot.
       # SECURITY: Use a dedicated read-only Postgres role for `user`. KMT monitoring 
-      # never writes to AMFA. Pass `password` via an env var in production
-      # (the env-var name follows the existing MONITORING_KEYCLOAK_TENANTS_*
-      # convention used for admin credentials above).
+      # never writes to AMFA. Pass `password` via a placeholder in production,
+      # such as password: "${AMFA_DB_PASSWORD}", as in the example below.
       #
       # amfa:
       #   enabled: false
@@ -631,9 +701,10 @@ keycloak:
       #   # below, and none of those database settings are required or read.
       #   # No credentials belong here: requests carry a service-account token
       #   # obtained from this tenant's own Keycloak using the client_id /
-      #   # client_secret already configured above for the Admin API. AMFA
-      #   # verifies it against that realm and rejects any token whose realm
-      #   # does not match the one being queried.
+      #   # client_secret already configured above for the Admin API, so it
+      #   # is issued by admin_realm. To read any other realm, AMFA must list
+      #   # this client in MONITORING_TRUSTED_READERS; otherwise every realm
+      #   # but admin_realm answers 403 (see docs/amfa-integration.md).
       #   api:
       #     base_url: "https://amfa.internal:8000"
       #     # Per-request timeout. Defaults to 30s when omitted.
@@ -649,9 +720,11 @@ keycloak:
       #     database: "adaptive_mfa"
       #     user: "kmt_ro"
       #     password: "${AMFA_DB_PASSWORD}"
-      #     # sslmode defaults to "require" when omitted. Supported values:
+      #     # ssl_mode defaults to "require" when omitted. Supported values:
       #     # disable, require, verify-ca, verify-full.
-      #     sslmode: "require"
+      #     # The older spelling "sslmode" is still accepted; setting both to
+      #     # different values is rejected at startup.
+      #     ssl_mode: "require"
       #     # Connection pool sizing for this tenant's AMFA database.
       #     max_conns: 5
       #     min_conns: 1
@@ -696,6 +769,13 @@ notifications:
   # Example: "https://monitoring.example.com"
   # Leave empty to disable links in notifications
   base_url: "https://monitoring.example.com"
+
+  # How often to retry a failed send of a tenant down/degraded, event storage
+  # or Keycloak event alert, while the alert stays active and unacknowledged.
+  # Only channels whose send failed are retried; a channel that already
+  # received the alert is not sent it again. The checkers' alerts retry with
+  # their hourly re-notification instead. Default: 5m
+  retry_interval: 5m
 
   # =============================================================================
   # GITLAB ISSUE INTEGRATION
@@ -877,7 +957,7 @@ alert_silences:
   - id: "silence-test-realm"
     name: "Test Realm Alerts"
     description: "Silence all alerts from test realm - used for development only"
-    enabled: true
+    enabled: false                    # An example: set true to use it
     matchers:
       realm_name: "test-realm"        # Matches realm name exactly
     # duration: ""                    # Empty = permanent silence
@@ -907,7 +987,7 @@ alert_silences:
   - id: "silence-dev-info-alerts"
     name: "Development Environment Info Alerts"
     description: "Silence info-level alerts from development realm"
-    enabled: true
+    enabled: false                    # An example: set true to use it
     matchers:
       realm_name: "development"
       severity: "info"                # Only silence info level
@@ -1003,18 +1083,23 @@ database:
   # Database user for authentication
   user: "monitoring"
 
-  # Database password for authentication
-  # WARNING: In production, use environment variables or secrets management
-  # Example: MONITORING_DATABASE_PASSWORD=your_secure_password
-  password: "monitoring_password"
+  # Database password. Required: there is no built-in password, and startup
+  # refuses an empty one. Set it here, or leave this key empty and set
+  # MONITORING_DATABASE_PASSWORD in the environment.
+  password: ""
 
   # SSL mode for database connection
   # Options: disable, require, verify-ca, verify-full
   #   - disable: No SSL (use only in development)
   #   - require: Use SSL without certificate verification
   #   - verify-ca: Verify server certificate against CA
-  # Default: disable
-  ssl_mode: "disable"
+  #   - verify-full: Verify server certificate and hostname
+  # Code default when this key is omitted: require.
+  # The local stacks and deployments/server/docker-compose.yml set
+  # MONITORING_DATABASE_SSL_MODE=disable for their own Postgres, which has no
+  # TLS and is reachable only on the internal Docker network. Any other
+  # database should keep require or stricter.
+  ssl_mode: "require"
 
   # Maximum number of connections in the pool
   # Higher values allow more concurrent queries but use more resources
@@ -1024,7 +1109,10 @@ database:
   # Keeping idle connections improves response time for incoming requests
   min_conns: 5
 
-  # Connection timeout for database operations
+  # How long to wait for a new database connection to open, and for the
+  # startup check. A database that accepts the connection but never answers
+  # fails startup after this long instead of hanging. It is not a query
+  # timeout, and pooled connections are kept regardless of it.
   # Valid time units: ns, us/µs, ms, s, m, h
   timeout: 30s
 
@@ -1049,13 +1137,7 @@ auth:
     # CRITICAL: You MUST set the initial admin password via environment variable in production
     # Example: MONITORING_AUTH_SIMPLE_DEFAULT_PASS='YourS3cur3P@ssw0rd!'
     #
-    # Password requirements:
-    #   - Minimum 12 characters
-    #   - At least one uppercase letter
-    #   - At least one lowercase letter
-    #   - At least one number
-    #   - At least one special character
-    #   - Cannot be a common weak password (e.g., admin123, password123, etc.)
+    # Password rules: docs/configuration.md#deployment-variable-requirements
     #
     # NEVER commit the actual password to version control. Leave these blank and
     # set via environment variables:
@@ -1081,10 +1163,10 @@ auth:
     # This is the client ID you created in Keycloak for this application
     client_id: "monitoring-dashboard"
 
-    # OAuth2 Client Secret (from Keycloak client configuration)
-    # WARNING: In production, use environment variables or secrets management
-    # Example: MONITORING_AUTH_OAUTH2_CLIENT_SECRET=your_client_secret
-    client_secret: "your-client-secret-here"
+    # OAuth2 Client Secret (from Keycloak client configuration). Leave it
+    # empty here and set MONITORING_AUTH_OAUTH2_CLIENT_SECRET in the
+    # environment.
+    client_secret: ""
 
     # OAuth2 Redirect URL (callback URL)
     # This must match the redirect URL configured in Keycloak
@@ -1104,7 +1186,10 @@ auth:
     # Initial Admin Users (OAuth2/Keycloak only)
     # List of email addresses that should be granted admin privileges on first login
     # When these users authenticate via OAuth2/Keycloak for the first time,
-    # they will automatically be assigned the admin role and full permissions
+    # they will automatically be assigned the admin role and full permissions,
+    # provided the identity provider has verified the address (email_verified).
+    # An unverified address signs in without the admin role and logs a
+    # SECURITY NOTICE. In Keycloak, set "Email verified" on the user.
     #
     # Example:
     #   admin_users:
@@ -1124,18 +1209,35 @@ auth:
     # Skip token expiry check (set to true only for development/testing)
     skip_expiry_check: false
 
+    # Link a login to an existing account by verified email address.
+    # When the identity provider issues a person a new subject (a realm rebuilt
+    # or migrated, a user re-provisioned), their login no longer matches their
+    # account. With this off, that login is refused and the log names the
+    # account. With it on, the login takes over the SSO account holding the
+    # same verified address, roles and tenant policies included.
+    #
+    # Keep it off outside a planned rebuild or migration. A verified address is
+    # not proof of being the same person: a realm allowing duplicate emails, an
+    # identity broker trusted to vouch for addresses, or anyone able to create
+    # realm users and mark them verified can produce a second identity with the
+    # same address, and with this on it would inherit the account. Accounts
+    # with a local password are never taken over.
+    # Can also be set via environment variable:
+    #   MONITORING_AUTH_OAUTH2_LINK_BY_VERIFIED_EMAIL=true
+    link_by_verified_email: false
+
   session:
     # Session secret key for cookie encryption
-    # REQUIRED: with no secret every login answers 500 and the server logs
-    # "securecookie: hash key is not set"
-    # IMPORTANT: Use a strong random string (at least 32 characters)
-    # Generate with: openssl rand -base64 32
-    # WARNING: In production, use environment variables or secrets management
-    # Example: MONITORING_AUTH_SESSION_SECRET=your-32-chars-key
+    # REQUIRED: the server refuses to start while it is empty or one of the
+    # example values this project has published, since anyone knowing it can
+    # forge a session cookie, an administrator's included.
+    # Set it with MONITORING_AUTH_SESSION_SECRET (see .env.example for the
+    # local stack). Use a strong random string, at least 32 characters:
+    #   openssl rand -base64 32
     # Keep the key in this file when the value comes from that variable: no
     # default is registered for it, so AutomaticEnv binds it only for a key
     # config.yaml already carries
-    secret: "change-this-to-a-random-secret-key-at-least-32-chars"
+    secret: ""
 
     # Session cookie name
     name: "monitoring_session"
@@ -1144,10 +1246,13 @@ auth:
     # Valid time units: ns, us/µs, ms, s, m, h
     max_age: 24h
 
-    # Use secure cookies (HTTPS only)
-    # Set to true in production when using HTTPS
-    # Set to false in development when using HTTP
-    secure: false
+    # Mark the session cookie Secure, so the browser only sends it over HTTPS
+    # and never on a plain HTTP request a network observer could read.
+    # Keep true wherever KMT is served over HTTPS (the default). Over HTTPS
+    # the cookie is Secure whatever this says; set false only for local
+    # development over plain HTTP, where a browser drops a Secure cookie.
+    # The short-lived single sign-on login cookie follows the same setting.
+    secure: true
 
     # SameSite cookie attribute for CSRF protection
     # Options:
@@ -1179,16 +1284,11 @@ logging:
   #   - console: Human-readable console logs (better for development)
   format: "json"
 
-  # Log output configuration
+  # Log output configuration (logs are written to stdout)
   output:
-    stdout:
-      # Enable or disable logging to stdout (standard output)
-      enabled: true
-
-      # Pretty-print logs (only applies to JSON format)
-      # When true, JSON logs are indented and formatted for readability
-      # Set to false in production for compact logs
-      pretty: false
+    # Human-readable console lines instead of JSON lines
+    # Set to false in production for compact logs
+    pretty: false
 
 # =============================================================================
 # MCP SERVER CONFIGURATION
@@ -1247,6 +1347,15 @@ mcp:
   # the 1 MiB default; the cap cannot be disabled.
   max_response_bytes: 1048576
 
+  # How long an SSO user's tokens keep working after their last SSO sign-in.
+  # A user disabled in the IdP cannot sign in, so their tokens stop within
+  # this time; signing in again makes them work again. Tokens of local users
+  # are not affected. Go duration syntax (336h is 14 days); 0 turns it off.
+  # An SSO user with no recorded sign-in is let through until the API server
+  # records a start time at its next startup, so no token stops on upgrade
+  # whichever server starts first.
+  sso_signin_max_age: 336h
+
   # Required: the read-only database role the MCP server connects with. Same
   # shape as the top-level database block. There is no fallback to that block,
   # because it names the read-write application role; the MCP server refuses
@@ -1260,7 +1369,11 @@ mcp:
     database: "monitoring"
     user: "monitoring_readonly"
     password: ""
-    ssl_mode: "disable"
+    # As database.ssl_mode; the Compose stacks set
+    # MONITORING_MCP_DATABASE_SSL_MODE=disable for their own Postgres.
+    ssl_mode: "require"
     max_conns: 10
     min_conns: 2
+    # As database.timeout: how long to wait for a new connection to open.
+    # Default when omitted: 10s.
     timeout: 30s

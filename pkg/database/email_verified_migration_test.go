@@ -2,14 +2,10 @@ package database
 
 import (
 	"io"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/rs/zerolog"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
@@ -30,22 +26,22 @@ func newEmailVerifiedTestClient(t *testing.T) *Client {
 		t.Skip("skipping database test in short mode")
 	}
 
-	dsn := os.Getenv("KMT_DESTRUCTIVE_TEST_DATABASE_DSN")
-	if dsn == "" {
-		t.Skip("KMT_DESTRUCTIVE_TEST_DATABASE_DSN not set; skipping destructive integration test")
-	}
+	dsn := testdb.DSN(t, "KMT_DESTRUCTIVE_TEST_DATABASE_DSN")
 	testdb.RequireDisposable(t, dsn)
+	testdb.Lock(t, dsn)
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger:                 gormlogger.Default.LogMode(gormlogger.Silent),
-		SkipDefaultTransaction: true,
-	})
+	// Boot the real client rather than auto-migrating the model alone. The
+	// model's username index is plain unique; the migrations narrow it to
+	// non-empty usernames. On a fresh database AutoMigrate alone leaves the
+	// plain one, and the second OAuth user seeded here, whose username is empty
+	// like the first's, collides on it. That passed only when another suite
+	// had booted the real client first.
+	client, err := NewClient(testdb.DatabaseConfig(t, dsn), logger.NewNoop())
 	if err != nil {
-		t.Fatalf("failed to open test database: %v", err)
+		t.Fatalf("NewClient: %v", err)
 	}
-	if err := db.AutoMigrate(&User{}); err != nil {
-		t.Fatalf("failed to auto-migrate users: %v", err)
-	}
+	t.Cleanup(func() { _ = client.Close() })
+	db := client.DB()
 
 	clean := func() { db.Exec("DELETE FROM users WHERE email LIKE ?", "ev-migration-%@example.com") }
 	clean()

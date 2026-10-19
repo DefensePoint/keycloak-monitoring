@@ -408,12 +408,22 @@
                 <li>Assess the security posture of Keycloak realms</li>
                 <li>Provide detailed recommendations for identified issues</li>
             </ul>
+            {{if .Omitted}}
+            <p><strong>Not included in this report</strong>, because the account that generated it lacks the permission:</p>
+            <ul style="margin: 15px 0; padding-left: 30px;">
+                {{range .Omitted}}<li>{{.Name}} (requires {{.Permission}})</li>
+                {{end}}
+            </ul>
+            {{end}}
         </div>
     </div>
 
     <div class="content-page">
         <h1 class="section-title">4. High Level Assessment Overview</h1>
         <div class="section-content">
+            {{if .AlertsOmitted}}
+            <p>Not included: alert findings require the alerts:read permission.</p>
+            {{else}}
             <p>The security monitoring assessment of <strong>{{.TenantName}}</strong> revealed <strong>{{.TotalAlerts}}</strong> security alerts across various severity levels.</p>
 
             {{if gt .TotalAlerts 0}}
@@ -495,6 +505,7 @@
                 <strong style="color: #3b82f6;">Low</strong>
             {{end}}{{end}}{{end}}
             </p>
+            {{end}}
         </div>
     </div>
 
@@ -545,7 +556,9 @@
     <div class="content-page">
         <h1 class="section-title">6. Findings Overview</h1>
         <div class="section-content">
-            {{if .AlertList}}
+            {{if .AlertsOmitted}}
+            <p>Not included: alert findings require the alerts:read permission.</p>
+            {{else if .AlertList}}
             <p>The following table summarizes all security findings:</p>
 
             <table class="findings-table">

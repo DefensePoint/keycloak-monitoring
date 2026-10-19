@@ -4,16 +4,19 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"go.uber.org/fx"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/auth"
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
 	chihttp "github.com/DefensePoint/keycloak-monitoring/internal/http/chi"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/metrics"
 	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
 	"github.com/DefensePoint/keycloak-monitoring/internal/users"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
 // ServerModule provides the HTTP server
@@ -87,6 +90,7 @@ func (a *userLookupAdapter) GetUserBySubject(ctx context.Context, subject string
 		Locale:             user.Locale,
 		UpdatedAt:          user.UpdatedAt,
 		MustChangePassword: user.MustChangePassword,
+		SessionEpoch:       user.SessionEpoch,
 	}, nil
 }
 
@@ -99,10 +103,19 @@ type HTTPServerParams struct {
 	AuthMiddleware *chihttp.AuthMiddleware
 	Logger         *logger.Logger
 	Metrics        *metrics.Registry
+	// Database, when present, is what /ready requires to answer.
+	Database *database.Client `optional:"true"`
 }
 
-func provideHTTPServer(p HTTPServerParams) *http.Server {
-	// Apply global middleware BEFORE registering routes (Chi requirement)
+func provideHTTPServer(p HTTPServerParams) (*http.Server, error) {
+	if p.Database != nil {
+		p.Router.SetReadinessCheck(p.Database.Health)
+	}
+	clientIP, err := chihttp.ClientIPMiddleware(p.Config.HTTP.TrustedProxies)
+	if err != nil {
+		return nil, err
+	}
+	p.Router.Use(clientIP)
 	if p.Config.HTTP.SecurityHeaders.Enabled {
 		p.Router.Use(chihttp.SecurityHeadersMiddleware(chihttp.SecurityHeaders{
 			HSTS:                  p.Config.HTTP.SecurityHeaders.HSTS,
@@ -113,9 +126,13 @@ func provideHTTPServer(p HTTPServerParams) *http.Server {
 		}))
 	}
 	p.Router.SetMetrics(p.Metrics, p.Config.HTTP.Metrics)
-	p.Router.Use(chihttp.CORSMiddleware)
+	crossOrigin, err := chihttp.CrossOriginMiddleware(p.Config.HTTP.CORS.AllowedOrigins, p.Logger)
+	if err != nil {
+		return nil, err
+	}
 	p.Router.Use(chihttp.RecoveryMiddleware(p.Logger))
 	p.Router.Use(chihttp.LoggingMiddleware(p.Logger))
+	p.Router.Use(crossOrigin)
 
 	// Register all routes AFTER middleware
 	p.Router.RegisterAllRoutes()
@@ -123,10 +140,26 @@ func provideHTTPServer(p HTTPServerParams) *http.Server {
 	addr := fmt.Sprintf(":%d", p.Config.HTTP.Server.Port)
 
 	return &http.Server{
-		Addr:    addr,
-		Handler: p.Router.Handler(),
-	}
+		Addr:              addr,
+		Handler:           p.Router.Handler(),
+		ReadHeaderTimeout: apiReadHeaderTimeout,
+		ReadTimeout:       httputil.DefaultReadTimeout,
+		WriteTimeout:      apiWriteTimeout,
+		IdleTimeout:       httputil.DefaultIdleTimeout,
+	}, nil
 }
+
+const (
+	// apiReadHeaderTimeout closes a connection that sends its headers too
+	// slowly, so idle sockets cannot be held open to exhaust the server.
+	apiReadHeaderTimeout = 10 * time.Second
+
+	// apiWriteTimeout bounds a whole request, from the end of its headers to
+	// the last byte of the response. It must outlast the slowest legitimate
+	// request: a PDF report aggregates its data and then gives the browser
+	// that renders it up to 30 seconds.
+	apiWriteTimeout = 2 * time.Minute
+)
 
 func registerServerHooks(lc fx.Lifecycle, server *http.Server, log *logger.Logger, sd fx.Shutdowner) {
 	lc.Append(fx.Hook{

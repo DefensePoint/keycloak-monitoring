@@ -74,6 +74,10 @@ export function useAlertStats(tenantId: string | undefined) {
     queryKey: ["alert-stats", tenantId],
     queryFn: () => alertsService.getAlertStats(tenantId!),
     enabled: !!tenantId,
+    // Polled like the dashboard's other status displays: nothing else
+    // refetches these counts, so a failed request or a new alert would
+    // otherwise only show after a page reload.
+    refetchInterval: 10000,
   });
 }
 

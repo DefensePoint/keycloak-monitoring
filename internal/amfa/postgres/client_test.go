@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 )
 
@@ -53,6 +55,26 @@ func TestBuildDSN_UsesPrimaryWhenNoReplica(t *testing.T) {
 	}
 	if !strings.Contains(dsn, "sslmode=disable") {
 		t.Errorf("expected DSN to contain sslmode=disable, got %q", dsn)
+	}
+}
+
+func TestBuildDSN_EmptyPasswordKeepsReadOnlyOption(t *testing.T) {
+	dsn := buildDSN(config.AmfaDatabaseConfig{
+		Host: "primary.internal", Port: 5432, Database: "adaptive_mfa", User: "ro", Password: "",
+		SSLMode: "require",
+	})
+	cfg, err := pgconn.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse: %v\ndsn: %s", err, dsn)
+	}
+	if cfg.Password != "" {
+		t.Errorf("password = %q, want empty", cfg.Password)
+	}
+	if got := cfg.RuntimeParams["options"]; got != "-c default_transaction_read_only=on" {
+		t.Errorf("options = %q", got)
+	}
+	if len(cfg.Fallbacks) != 0 {
+		t.Errorf("sslmode fell back (%d fallbacks)", len(cfg.Fallbacks))
 	}
 }
 

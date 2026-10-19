@@ -1,8 +1,8 @@
 {
   "name": "kmt-web-dashboard",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "engines": {
-    "node": "20.x"
+    "node": "26.x"
   },
   "private": true,
   "type": "module",

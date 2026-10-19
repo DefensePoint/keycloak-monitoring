@@ -22,6 +22,7 @@ var NotificationsModule = fx.Module("notifications",
 		provideEventscheckNotificationService,
 		provideMetricscheckNotificationService,
 	),
+	fx.Invoke(registerNotificationRetrier),
 )
 
 func provideNotificationsRepository(db *database.Client) notifications.Repository {

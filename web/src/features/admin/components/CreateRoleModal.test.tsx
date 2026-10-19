@@ -13,6 +13,7 @@ vi.mock("./PermissionsSelector", () => ({
   }) => (
     <div data-testid="permissions-selector">
       <button onClick={() => onTogglePermission(1)}>Toggle Permission 1</button>
+      <button onClick={() => onTogglePermission(2)}>Toggle Permission 2</button>
       <div data-testid="selected-permissions">
         {selectedPermissionIds.join(",")}
       </div>
@@ -154,9 +155,35 @@ describe("CreateRoleModal", () => {
         name: "incident_responder",
         display_name: "Incident Responder",
         description: "Can respond to incidents",
-        permission_ids: [1],
+        permissions: ["users:read"],
+        is_active: true,
       });
     });
+  });
+
+  // The API reads permission names; it ignored the IDs the modal used to send,
+  // so every role was created with no permissions.
+  it("sends the names of exactly the selected permissions", async () => {
+    const user = userEvent.setup();
+    render(<CreateRoleModal {...defaultProps} />);
+
+    await user.click(screen.getByText("Toggle Permission 2"));
+    await user.type(
+      screen.getByRole("textbox", { name: /role name/i }),
+      "writer",
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: /display name/i }),
+      "Writer",
+    );
+    await user.click(screen.getByRole("textbox", { name: /description/i }));
+    await user.paste("Writes users");
+    await user.click(screen.getByRole("button", { name: /create role/i }));
+
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalledTimes(1));
+    const sent = mockOnSubmit.mock.calls[0][0];
+    expect(sent.permissions).toEqual(["users:write"]);
+    expect(sent).not.toHaveProperty("permission_ids");
   });
 
   it("should disable submit button when no permissions are selected", () => {

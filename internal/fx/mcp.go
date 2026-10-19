@@ -42,8 +42,13 @@ var MCPModule = fx.Module("mcp",
 		provideMCPEventReader,
 		provideMCPServer,
 	),
-	fx.Invoke(registerMCPServerHooks),
+	fx.Invoke(registerMCPReadiness, registerMCPServerHooks),
 )
+
+// registerMCPReadiness makes /ready require the read-only database to answer.
+func registerMCPReadiness(server *mcpserver.Server, db *database.Client) {
+	server.SetReadinessCheck(db.Health)
+}
 
 // provideReadOnlyDatabase opens the database without migrations, under the
 // role the required mcp.database block names. Falling back to the main
@@ -53,6 +58,10 @@ func provideReadOnlyDatabase(lc fx.Lifecycle, cfg *config.AppConfig, log *logger
 	if cfg.MCP.Database == nil {
 		return nil, fmt.Errorf("SECURITY ERROR: mcp.database must name a read-only database role; " +
 			"create it with deployments/postgres/mcp-readonly-role.sql")
+	}
+
+	if err := checkDatabasePassword(log, "mcp.database.password", cfg.MCP.Database.Password); err != nil {
+		return nil, err
 	}
 
 	dbCfg := *cfg.MCP.Database
@@ -182,6 +191,15 @@ func provideMCPServer(
 	if cfg.MCP.Metrics.Enabled && cfg.MCP.Metrics.AuthToken == "" {
 		return nil, fmt.Errorf("SECURITY ERROR: mcp.metrics.auth_token must be set when mcp.metrics.enabled is true; " +
 			"the endpoint is served without authentication otherwise")
+	}
+	// The limit is what cuts off a user disabled in the IdP, and nothing else
+	// shows the value in force, so say it once at startup.
+	if cfg.MCP.SSOSignInMaxAge > 0 {
+		log.Info("MCP tokens of SSO users stop working after this long without an SSO sign-in",
+			logger.Str("sso_signin_max_age", cfg.MCP.SSOSignInMaxAge.String()))
+	} else {
+		log.Warn("MCP SSO sign-in limit is off (mcp.sso_signin_max_age is 0): tokens of users " +
+			"disabled in the IdP keep working until they expire or are revoked")
 	}
 	return mcpserver.New(cfg, log, tokens, rbacService, tenants, realms, alertReader, amfaStats, eventReader, m), nil
 }

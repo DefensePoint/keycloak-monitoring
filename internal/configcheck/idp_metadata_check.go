@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts/clearing"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/saferequest"
 )
 
 // IdentityProviderMetadataCheck checks if SAML identity providers have
@@ -25,6 +27,8 @@ type IdentityProviderMetadataCheck struct {
 }
 
 // NewIdentityProviderMetadataCheck creates a new identity provider metadata checker.
+// policy guards the metadata fetch; pass the SSRF policy the Keycloak clients
+// use (see NewSAMLMetadataFetcher). certCheckTimeout replaces its timeout.
 func NewIdentityProviderMetadataCheck(
 	keycloakClient KeycloakClient,
 	log *logger.Logger,
@@ -32,6 +36,7 @@ func NewIdentityProviderMetadataCheck(
 	tenantID string,
 	certWarningDays int,
 	certCheckTimeout time.Duration,
+	policy saferequest.Policy,
 ) *IdentityProviderMetadataCheck {
 	// Default values
 	if certWarningDays <= 0 {
@@ -40,6 +45,7 @@ func NewIdentityProviderMetadataCheck(
 	if certCheckTimeout <= 0 {
 		certCheckTimeout = 30 * time.Second // Default to 30 seconds
 	}
+	policy.Timeout = certCheckTimeout
 
 	return &IdentityProviderMetadataCheck{
 		keycloakClient:    keycloakClient,
@@ -47,7 +53,7 @@ func NewIdentityProviderMetadataCheck(
 		realms:            realms,
 		tenantID:          tenantID,
 		certWarningDays:   certWarningDays,
-		metadataFetcher:   NewSAMLMetadataFetcher(certCheckTimeout, log),
+		metadataFetcher:   NewSAMLMetadataFetcher(policy, log),
 		checkCertificates: true,
 	}
 }
@@ -64,66 +70,51 @@ func (c *IdentityProviderMetadataCheck) GetDescription() string {
 
 // Execute performs the configuration check.
 func (c *IdentityProviderMetadataCheck) Execute(ctx context.Context) ([]*domain.Alert, error) {
+	eval, err := c.Evaluate(ctx)
+	return eval.Alerts, err
+}
+
+// Evaluate performs the configuration check and reports what it read: every
+// realm whose identity providers it listed, less each provider whose SAML
+// metadata it could not fetch. That provider's certificate alerts stay as
+// they are, since nobody saw the certificate; its fetch-error alert is raised
+// instead, and resolves once the metadata can be read again.
+func (c *IdentityProviderMetadataCheck) Evaluate(ctx context.Context) (Evaluation, error) {
 	c.logger.Debug("Executing identity provider metadata check")
+	eval := Evaluation{Evaluation: clearing.Evaluation{TenantID: c.tenantID}}
 
 	// Get realms to check
-	realms, err := c.getRealmsToCheck(ctx)
+	realms, scope, err := scopeRealms(ctx, c.keycloakClient, c.realms)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get realms: %w", err)
+		return eval, fmt.Errorf("failed to get realms: %w", err)
 	}
-
-	var alerts []*domain.Alert
+	eval.scope = scope
 
 	// Check each realm
 	for _, realm := range realms {
-		realmAlerts, err := c.checkRealm(ctx, realm)
-		if err != nil {
+		if err := c.checkRealm(ctx, realm, &eval.Evaluation); err != nil {
 			c.logger.Error("Failed to check realm",
 				logger.Str("realm", realm),
 				logger.Err(err))
 			continue
 		}
-
-		alerts = append(alerts, realmAlerts...)
+		eval.MarkRealmEvaluated(realm)
 	}
 
 	c.logger.Info("Identity provider metadata check completed",
-		logger.Int("total_alerts", len(alerts)))
+		logger.Int("total_alerts", len(eval.Alerts)))
 
-	return alerts, nil
+	return eval, nil
 }
 
-// getRealmsToCheck returns the list of realms to check.
-func (c *IdentityProviderMetadataCheck) getRealmsToCheck(ctx context.Context) ([]string, error) {
-	if len(c.realms) > 0 {
-		return c.realms, nil
-	}
-
-	// Fetch all realms
-	allRealms, err := c.keycloakClient.GetAllRealms(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch all realms: %w", err)
-	}
-
-	realmNames := make([]string, 0, len(allRealms))
-	for _, realm := range allRealms {
-		if realm.Enabled {
-			realmNames = append(realmNames, realm.Realm)
-		}
-	}
-
-	return realmNames, nil
-}
-
-// checkRealm checks all identity providers in a realm.
-func (c *IdentityProviderMetadataCheck) checkRealm(ctx context.Context, realmName string) ([]*domain.Alert, error) {
+// checkRealm checks all identity providers in a realm, adding their alerts to
+// eval and marking each one whose metadata it could not fetch.
+func (c *IdentityProviderMetadataCheck) checkRealm(ctx context.Context, realmName string, eval *clearing.Evaluation) error {
 	// Get identity providers for this realm
 	idps, err := c.keycloakClient.GetIdentityProviders(ctx, realmName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get identity providers: %w", err)
+		return fmt.Errorf("failed to get identity providers: %w", err)
 	}
-
-	var alerts []*domain.Alert
 
 	for _, idp := range idps {
 		// Check if this is a SAML identity provider
@@ -139,7 +130,7 @@ func (c *IdentityProviderMetadataCheck) checkRealm(ctx context.Context, realmNam
 		metadataURL, exists := idp.Config["metadataDescriptorUrl"]
 		if !exists || metadataURL == "" {
 			alert := c.createMissingMetadataAlert(realmName, idp)
-			alerts = append(alerts, alert)
+			eval.Alerts = append(eval.Alerts, alert)
 
 			c.logger.Warn("SAML identity provider missing metadata descriptor URL",
 				logger.Str("realm", realmName),
@@ -149,12 +140,15 @@ func (c *IdentityProviderMetadataCheck) checkRealm(ctx context.Context, realmNam
 
 		// If certificate checking is enabled, validate certificates
 		if c.checkCertificates {
-			certAlerts := c.checkCertificateExpiration(ctx, realmName, idp, metadataURL)
-			alerts = append(alerts, certAlerts...)
+			certAlerts, fetched := c.checkCertificateExpiration(ctx, realmName, idp, metadataURL)
+			eval.Alerts = append(eval.Alerts, certAlerts...)
+			if !fetched {
+				eval.MarkUnread(realmName, idp.Alias)
+			}
 		}
 	}
 
-	return alerts, nil
+	return nil
 }
 
 // getIDPDisplayName returns the display name if available, otherwise falls back to alias.
@@ -220,15 +214,24 @@ func (c *IdentityProviderMetadataCheck) generateCertAlertID(realmName, idpAlias,
 	return fmt.Sprintf("idp-cert-%x", hash[:16])
 }
 
-// checkCertificateExpiration checks if certificates in the SAML metadata are expired or expiring soon.
+// generateExpiredCertAlertID generates the alert ID for an expired certificate.
+// It differs from the "expiring soon" ID so an expiry is a new alert, not an
+// update of a warning that may have been acknowledged or resolved.
+func (c *IdentityProviderMetadataCheck) generateExpiredCertAlertID(realmName, idpAlias, certSerialNum string) string {
+	input := fmt.Sprintf("%s:%s:cert-expired:%s:%s:%s", c.tenantID, c.GetCheckType(), realmName, idpAlias, certSerialNum)
+	hash := sha256.Sum256([]byte(input))
+	return fmt.Sprintf("idp-cert-expired-%x", hash[:16])
+}
+
+// checkCertificateExpiration checks if certificates in the SAML metadata are
+// expired or expiring soon. fetched is false when the metadata could not be
+// fetched or parsed; the only alert is then the fetch error.
 func (c *IdentityProviderMetadataCheck) checkCertificateExpiration(
 	ctx context.Context,
 	realmName string,
 	idp *keycloakadmin.IdentityProviderRepresentation,
 	metadataURL string,
-) []*domain.Alert {
-	var alerts []*domain.Alert
-
+) (alerts []*domain.Alert, fetched bool) {
 	c.logger.Debug("Checking certificate expiration for SAML IDP",
 		logger.Str("realm", realmName),
 		logger.Str("idp_alias", idp.Alias),
@@ -245,7 +248,7 @@ func (c *IdentityProviderMetadataCheck) checkCertificateExpiration(
 
 		// Create alert for metadata fetch failure
 		alert := c.createMetadataFetchErrorAlert(realmName, idp, metadataURL, err)
-		return []*domain.Alert{alert}
+		return []*domain.Alert{alert}, false
 	}
 
 	// Check each certificate for expiration
@@ -282,7 +285,7 @@ func (c *IdentityProviderMetadataCheck) checkCertificateExpiration(
 		}
 	}
 
-	return alerts
+	return alerts, true
 }
 
 // createExpiredCertificateAlert creates an alert for an expired certificate.
@@ -293,7 +296,7 @@ func (c *IdentityProviderMetadataCheck) createExpiredCertificateAlert(
 	cert *CertificateInfo,
 	status CertificateExpirationStatus,
 ) *domain.Alert {
-	alertID := c.generateCertAlertID(realmName, idp.Alias, cert.SerialNum)
+	alertID := c.generateExpiredCertAlertID(realmName, idp.Alias, cert.SerialNum)
 	idpName := c.getIDPDisplayName(idp)
 
 	metadata := map[string]interface{}{
@@ -329,6 +332,7 @@ func (c *IdentityProviderMetadataCheck) createExpiredCertificateAlert(
 		CheckType:      c.GetCheckType(),
 		Recommendation: fmt.Sprintf("Update the SAML metadata for '%s' with a renewed certificate. Contact your SAML identity provider administrator to obtain updated metadata with a valid certificate. Then update the metadata descriptor URL or manually upload the new metadata in Keycloak.", idpName),
 		Metadata:       string(metadataJSON),
+		Supersedes:     []string{c.generateCertAlertID(realmName, idp.Alias, cert.SerialNum)},
 	}
 }
 

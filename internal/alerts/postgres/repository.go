@@ -3,7 +3,9 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -93,6 +95,56 @@ func (r *Repository) ListByRealm(ctx context.Context, tenantID, realmName string
 	}
 	opts.RealmName = realmName
 	return r.List(ctx, tenantID, opts)
+}
+
+// ListOpenByCheck returns the tenant's open alerts, active or acknowledged,
+// raised by checkType. Unpaged: a check's open alerts are bounded by the
+// realms and keys it evaluates.
+// ListUnresolved returns every alert of the tenant that is not resolved.
+func (r *Repository) ListUnresolved(ctx context.Context, tenantID string) ([]*domain.Alert, error) {
+	var dbAlerts []*database.ConfigurationAlert
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND status <> ?", tenantID, string(domain.AlertStatusResolved)).
+		Order("id ASC").
+		Find(&dbAlerts).Error; err != nil {
+		return nil, fmt.Errorf("failed to list unresolved alerts: %w", err)
+	}
+	return convertAlertList(dbAlerts), nil
+}
+
+func (r *Repository) ListOpenByCheck(ctx context.Context, tenantID, checkType string) ([]*domain.Alert, error) {
+	var dbAlerts []*database.ConfigurationAlert
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND check_type = ? AND status IN ?", tenantID, checkType,
+			[]string{string(domain.AlertStatusActive), string(domain.AlertStatusAcknowled)}).
+		Order("id ASC").
+		Find(&dbAlerts).Error; err != nil {
+		return nil, fmt.Errorf("failed to list open alerts for check %s: %w", checkType, err)
+	}
+	return convertAlertList(dbAlerts), nil
+}
+
+// LatestFirstDetected implements alerts.Repository. Unscoped, so a deleted
+// alert still marks its event as handled.
+func (r *Repository) LatestFirstDetected(ctx context.Context, tenantID, checkType, realmName string) (time.Time, bool, error) {
+	var latest sql.NullTime
+	if err := r.db.WithContext(ctx).Unscoped().Model(&database.ConfigurationAlert{}).
+		Where("tenant_id = ? AND check_type = ? AND realm_name = ?", tenantID, checkType, realmName).
+		Select("MAX(first_detected)").Scan(&latest).Error; err != nil {
+		return time.Time{}, false, fmt.Errorf("failed to find latest %s alert: %w", checkType, err)
+	}
+	return latest.Time, latest.Valid, nil
+}
+
+// ExistsIncludingDeleted implements alerts.Repository.
+func (r *Repository) ExistsIncludingDeleted(ctx context.Context, tenantID, alertID string) (bool, error) {
+	var found bool
+	if err := r.db.WithContext(ctx).Raw(
+		`SELECT EXISTS (SELECT 1 FROM configuration_alerts WHERE tenant_id = ? AND alert_id = ?)`,
+		tenantID, alertID).Scan(&found).Error; err != nil {
+		return false, fmt.Errorf("failed to check alert %s: %w", alertID, err)
+	}
+	return found, nil
 }
 
 // CountActive returns the total number of active alerts.
@@ -200,15 +252,89 @@ func (r *Repository) GetStatistics(ctx context.Context, tenantID string, realmNa
 // TargetWhere — a plain ON CONFLICT (tenant_id, alert_id) doesn't match a
 // partial index and errors with "no unique or exclusion constraint matching
 // the ON CONFLICT specification".
+//
+// A resolved alert saved as active again starts a new occurrence, so
+// occurrence_started_at moves to now. In ON CONFLICT DO UPDATE the unqualified
+// column names below refer to the row as it was before this save, which is
+// what lets one CASE see the transition. An alert that stays open keeps its
+// occurrence; a row from before the column existed falls back to first_detected.
+//
+// A save of an existing alert is a re-detection, so it also writes what was
+// detected now: the severity, the description, the metadata and updated_at. It
+// used to write only the status columns, which left every notification
+// describing the first detection, and left metadata.last_notified_at at the
+// first notification, so from an hour later every poll re-notified. The
+// metadata is the detection's, but last_notified_at carries over when this save
+// does not set it: a checker records a notification only on the save that sends
+// one.
+//
+// last_seen moves to the later of the stored and the saved time, never back:
+// a save can describe an older sighting than one already recorded, as when the
+// event poller re-reads its window. first_detected keeps the first save's.
+//
+// The acknowledgement carries over too, while the alert stays acknowledged (or
+// resolved). A re-detection is built fresh and carries none, and writing that
+// through wiped who acknowledged the alert and when on the next poll, though
+// the checkers keep it acknowledged. It is replaced when the save brings its
+// own, and cleared when the save makes the alert active: a reopened alert is a
+// new occurrence nobody has acknowledged, and a producer that saves every
+// re-detection as active, as the event converter does, un-acknowledges it.
+// The resolution time carries over the same way while the alert stays resolved.
 func (r *Repository) Save(ctx context.Context, alert *domain.Alert) error {
 	dbAlert := convertToDBAlert(alert)
+	now := time.Now()
+	dbAlert.OccurrenceStartedAt = &now
+
+	updates := clause.AssignmentColumns([]string{
+		"status", "severity", "description", "event_id", "resource_id", "updated_at",
+	})
+	becomesActive := `EXCLUDED.status = '` + string(domain.AlertStatusActive) + `'`
+	updates = append(updates,
+		// last_seen only moves forward. The event poller re-reads its whole
+		// window on every poll, newest first, so the oldest event is saved
+		// last; taking its time would turn back the alert's last sighting.
+		clause.Assignment{
+			Column: clause.Column{Name: "last_seen"},
+			Value:  gorm.Expr(`GREATEST(configuration_alerts.last_seen, EXCLUDED.last_seen)`),
+		},
+		clause.Assignment{
+			Column: clause.Column{Name: "metadata"},
+			Value: gorm.Expr(`CASE
+				WHEN EXCLUDED.metadata IS NULL THEN configuration_alerts.metadata
+				WHEN jsonb_typeof(EXCLUDED.metadata) = 'object' AND NOT (EXCLUDED.metadata ? 'last_notified_at')
+				     AND jsonb_typeof(configuration_alerts.metadata) = 'object' AND configuration_alerts.metadata ? 'last_notified_at'
+				THEN EXCLUDED.metadata || jsonb_build_object('last_notified_at', configuration_alerts.metadata -> 'last_notified_at')
+				ELSE EXCLUDED.metadata END`),
+		},
+		clause.Assignment{
+			Column: clause.Column{Name: "acknowledged_at"},
+			Value: gorm.Expr(`CASE WHEN ` + becomesActive + ` THEN EXCLUDED.acknowledged_at
+				ELSE COALESCE(EXCLUDED.acknowledged_at, configuration_alerts.acknowledged_at) END`),
+		},
+		clause.Assignment{
+			Column: clause.Column{Name: "acknowledged_by"},
+			Value: gorm.Expr(`CASE WHEN ` + becomesActive + ` THEN EXCLUDED.acknowledged_by
+				ELSE COALESCE(NULLIF(EXCLUDED.acknowledged_by, ''), configuration_alerts.acknowledged_by) END`),
+		},
+		clause.Assignment{
+			Column: clause.Column{Name: "resolved_at"},
+			Value: gorm.Expr(`CASE WHEN EXCLUDED.status = '` + string(domain.AlertStatusResolved) + `'
+				THEN COALESCE(EXCLUDED.resolved_at, configuration_alerts.resolved_at)
+				ELSE EXCLUDED.resolved_at END`),
+		},
+	)
+	updates = append(updates, clause.Assignment{
+		Column: clause.Column{Name: "occurrence_started_at"},
+		Value: gorm.Expr(`CASE WHEN configuration_alerts.status = ? AND EXCLUDED.status <> ?
+			THEN EXCLUDED.occurrence_started_at
+			ELSE COALESCE(configuration_alerts.occurrence_started_at, configuration_alerts.first_detected) END`,
+			string(domain.AlertStatusResolved), string(domain.AlertStatusResolved)),
+	})
 
 	result := r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:     []clause.Column{{Name: "tenant_id"}, {Name: "alert_id"}},
 		TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "deleted_at IS NULL"}}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"status", "last_seen", "resolved_at", "acknowledged_at", "acknowledged_by",
-		}),
+		DoUpdates:   updates,
 	}).Create(dbAlert)
 
 	if result.Error != nil {
@@ -228,6 +354,15 @@ func (r *Repository) UpdateStatus(ctx context.Context, tenantID, alertID string,
 	if status == domain.AlertStatusAcknowled {
 		updates["acknowledged_at"] = gorm.Expr("NOW()")
 		updates["acknowledged_by"] = acknowledgedBy
+	}
+	// Reopening a resolved alert starts a new occurrence, as in Save. The start
+	// is the application's clock, not NOW(): notification logs are stamped by
+	// the application too, and the dedup compares the two, so mixing in the
+	// database's clock would miscount sends whenever the hosts' clocks differ.
+	if status == domain.AlertStatusActive {
+		updates["occurrence_started_at"] = gorm.Expr(
+			"CASE WHEN status = ? THEN ?::timestamptz ELSE occurrence_started_at END",
+			string(domain.AlertStatusResolved), time.Now())
 	}
 
 	if err := r.db.WithContext(ctx).
@@ -313,6 +448,7 @@ func convertAlert(db *database.ConfigurationAlert) *domain.Alert {
 		Description:    db.Description,
 		ResourceType:   db.ResourceType,
 		ResourceID:     db.ResourceID,
+		EventID:        db.EventID,
 		ResourceName:   db.ResourceName,
 		RealmName:      db.RealmName,
 		CheckType:      db.CheckType,
@@ -360,6 +496,7 @@ func convertToDBAlert(alert *domain.Alert) *database.ConfigurationAlert {
 		Description:    alert.Description,
 		ResourceType:   alert.ResourceType,
 		ResourceID:     alert.ResourceID,
+		EventID:        alert.EventID,
 		ResourceName:   alert.ResourceName,
 		RealmName:      alert.RealmName,
 		CheckType:      alert.CheckType,

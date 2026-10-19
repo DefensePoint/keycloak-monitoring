@@ -15,6 +15,11 @@ type EventReader interface {
 	GetEventsByTimeRange(ctx context.Context, tenantID string, from, to time.Time, limit, offset int) ([]*domain.KeycloakEvent, error)
 	CountEvents(ctx context.Context, tenantID string) (int64, error)
 	CountEventsByType(ctx context.Context, tenantID, realmName, eventType string, from, to time.Time) (int64, error)
+	// StoredEventIDs returns which of ids the tenant has events stored under
+	// with a time from from to to.
+	StoredEventIDs(ctx context.Context, tenantID string, ids []string, from, to time.Time) (map[string]bool, error)
+	// IDlessEventTimes: see MonitorEventRepository.
+	IDlessEventTimes(ctx context.Context, tenantID string, since time.Time) (legacy, hashed time.Time, err error)
 }
 
 // EventWriter provides write operations for events.
@@ -77,6 +82,14 @@ type RealmWriter interface {
 	SaveRealm(ctx context.Context, realm *domain.KeycloakRealmInfo) error
 	SaveRealms(ctx context.Context, realms []*domain.KeycloakRealmInfo) error
 	DeleteRealm(ctx context.Context, tenantID, realmName string) error
+	// RetireRealmsNotIn soft-deletes the tenant's live realms whose Keycloak id
+	// is not in realmIDs (Keycloak's complete current list) and returns how
+	// many it retired. An empty list retires nothing.
+	RetireRealmsNotIn(ctx context.Context, tenantID string, realmIDs []string) (int64, error)
+	// MarkRealmsUnreadable records that the monitoring client cannot read the
+	// tenant's realms named in realmNames, from since on. A realm already
+	// marked keeps the time it was first found unreadable.
+	MarkRealmsUnreadable(ctx context.Context, tenantID string, realmNames []string, since time.Time) error
 }
 
 // RealmRepository combines read and write operations for realms.

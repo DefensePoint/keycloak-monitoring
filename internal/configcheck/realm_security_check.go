@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts/clearing"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
@@ -76,14 +77,22 @@ func (c *RealmSecurityCheck) GetDescription() string {
 
 // Execute performs the configuration check.
 func (c *RealmSecurityCheck) Execute(ctx context.Context) ([]*domain.Alert, error) {
+	eval, err := c.Evaluate(ctx)
+	return eval.Alerts, err
+}
+
+// Evaluate performs the configuration check and reports the realms it read.
+// A realm whose settings could not be read is not marked, so its alerts stay
+// as they are.
+func (c *RealmSecurityCheck) Evaluate(ctx context.Context) (Evaluation, error) {
 	c.logger.Debug("Executing realm security check")
+	eval := Evaluation{Evaluation: clearing.Evaluation{TenantID: c.tenantID}}
 
-	realms, err := c.getRealmsToCheck(ctx)
+	realms, scope, err := scopeRealms(ctx, c.keycloakClient, c.realms)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get realms: %w", err)
+		return eval, fmt.Errorf("failed to get realms: %w", err)
 	}
-
-	var alerts []*domain.Alert
+	eval.scope = scope
 
 	for _, realmName := range realms {
 		realm, err := c.keycloakClient.GetRealmInfo(ctx, realmName)
@@ -93,36 +102,42 @@ func (c *RealmSecurityCheck) Execute(ctx context.Context) ([]*domain.Alert, erro
 				logger.Err(err))
 			continue
 		}
+		// Without view-realm, Keycloak answers 200 with a stub that has no id
+		// and none of the settings checked here.
+		if realm.ID == "" {
+			scope.markUnreadable(realmName)
+			continue
+		}
 
-		realmAlerts := c.checkRealm(realm)
-		alerts = append(alerts, realmAlerts...)
+		eval.Alerts = append(eval.Alerts, c.checkRealm(realm)...)
+		eval.MarkRealmEvaluated(realm.Realm)
 	}
 
 	c.logger.Info("Realm security check completed",
-		logger.Int("total_alerts", len(alerts)))
+		logger.Int("total_alerts", len(eval.Alerts)))
 
-	return alerts, nil
+	return eval, nil
 }
 
-// getRealmsToCheck returns the list of realms to check.
-func (c *RealmSecurityCheck) getRealmsToCheck(ctx context.Context) ([]string, error) {
-	if len(c.realms) > 0 {
-		return c.realms, nil
+// looksFor reports whether the sub-check that raises alertType is on.
+func (c *RealmSecurityCheck) looksFor(alertType string) bool {
+	switch alertType {
+	case "ssl_not_required":
+		return c.config.CheckSSLRequired
+	case "brute_force_disabled":
+		return c.config.CheckBruteForce
+	case "weak_password_length", "no_password_length", "weak_password_complexity":
+		return c.config.CheckPasswordPolicy
+	case "registration_without_verification":
+		return c.config.CheckEmailVerification
+	case "admin_events_disabled":
+		return c.config.CheckAdminEvents
+	case "user_events_disabled", "no_event_listeners":
+		return c.config.CheckUserEvents
+	case "duplicate_emails_allowed":
+		return c.config.CheckDuplicateEmails
 	}
-
-	allRealms, err := c.keycloakClient.GetAllRealms(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch all realms: %w", err)
-	}
-
-	realmNames := make([]string, 0, len(allRealms))
-	for _, realm := range allRealms {
-		if realm.Enabled {
-			realmNames = append(realmNames, realm.Realm)
-		}
-	}
-
-	return realmNames, nil
+	return true
 }
 
 // checkRealm checks all security configurations for a realm.

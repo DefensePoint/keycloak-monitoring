@@ -73,6 +73,12 @@ func (s *OAuth2AdminService) ShouldBeAdmin(email string) bool {
 // EnsureAdminRole ensures that a user has the admin role if they should be an admin.
 // This is called after OAuth2 authentication to automatically assign admin privileges
 // to designated users on their first login.
+//
+// The role is granted only when the identity provider has verified the address.
+// user carries the email and email_verified of this login's ID token: the
+// callback stores both and reloads the row before calling this. An unverified
+// address proves nothing about who holds it: a realm that lets people register,
+// or edit their own profile, lets anyone type in an address from admin_users.
 func (s *OAuth2AdminService) EnsureAdminRole(ctx context.Context, user *domain.User) error {
 	// Check if user should be admin
 	if !s.ShouldBeAdmin(user.Email) {
@@ -95,6 +101,14 @@ func (s *OAuth2AdminService) EnsureAdminRole(ctx context.Context, user *domain.U
 		s.logger.Debug("User already has admin role",
 			logger.Uint("user_id", user.ID),
 			logger.Str("email", user.Email))
+		return nil
+	}
+
+	if !user.EmailVerified {
+		s.logger.Warn("SECURITY NOTICE: Admin role not assigned: the identity provider has not verified this email address",
+			logger.Uint("user_id", user.ID),
+			logger.Str("email", user.Email),
+			logger.Str("message", "The address is in oauth2.admin_users. Mark it verified in the identity provider, then sign in again"))
 		return nil
 	}
 

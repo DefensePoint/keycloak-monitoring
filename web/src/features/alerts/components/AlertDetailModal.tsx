@@ -17,6 +17,7 @@ import { Toast } from "@/shared/components/Toast";
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
 import { useUpdateAlertStatus, useResolveAlert } from "@/shared/hooks";
 import { useTenant, useAuth } from "@/shared/context";
+import { PERMISSIONS } from "@/shared/constants";
 
 interface AlertDetailModalProps {
   open: boolean;
@@ -61,7 +62,11 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
   onClose,
 }) => {
   const { selectedTenant } = useTenant();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  // Acknowledging needs alerts:acknowledge; ignoring and resolving need
+  // alerts:resolve, as the server requires.
+  const canAcknowledge = hasPermission(PERMISSIONS.ALERTS.ACKNOWLEDGE);
+  const canResolve = hasPermission(PERMISSIONS.ALERTS.RESOLVE);
   const { mutate: updateAlertStatus } = useUpdateAlertStatus();
   const { mutate: resolveAlert } = useResolveAlert();
 
@@ -165,7 +170,7 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
       open: true,
       title: "Resolve Alert",
       message:
-        "Mark this alert as resolved? The configuration should already be fixed. The alert will be removed on the next check cycle if the issue no longer exists.",
+        "Mark this alert as resolved? Do this once the problem is fixed. If the problem is detected again, the alert reopens and notifies again.",
       confirmText: "Resolve",
       confirmColor: "success",
       onConfirm: () => {
@@ -453,29 +458,35 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
         </DialogContent>
 
         {/* Actions */}
-        {alert.status === "active" && (
+        {alert.status === "active" && (canAcknowledge || canResolve) && (
           <DialogActions sx={{ px: 3, pb: 3, gap: 1 }}>
-            <Button variant="outlined" onClick={handleIgnoreAlert}>
-              Ignore
-            </Button>
-            <Button
-              variant="outlined"
-              color="warning"
-              onClick={handleAcknowledgeAlert}
-            >
-              Acknowledge
-            </Button>
-            <Button
-              variant="contained"
-              color="success"
-              onClick={handleResolveAlert}
-            >
-              Resolve
-            </Button>
+            {canResolve && (
+              <Button variant="outlined" onClick={handleIgnoreAlert}>
+                Ignore
+              </Button>
+            )}
+            {canAcknowledge && (
+              <Button
+                variant="outlined"
+                color="warning"
+                onClick={handleAcknowledgeAlert}
+              >
+                Acknowledge
+              </Button>
+            )}
+            {canResolve && (
+              <Button
+                variant="contained"
+                color="success"
+                onClick={handleResolveAlert}
+              >
+                Resolve
+              </Button>
+            )}
           </DialogActions>
         )}
 
-        {alert.status === "acknowledged" && (
+        {alert.status === "acknowledged" && canResolve && (
           <DialogActions sx={{ px: 3, pb: 3, gap: 1 }}>
             <Button variant="outlined" onClick={handleIgnoreAlert}>
               Ignore

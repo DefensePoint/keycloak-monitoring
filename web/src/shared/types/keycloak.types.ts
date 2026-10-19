@@ -232,6 +232,8 @@ export interface KeycloakRealmInfo {
   is_healthy: boolean;
   health_message?: string;
   last_checked: string;
+  /** When the monitoring client stopped being able to read the realm; absent while it can. */
+  unreadable_since?: string;
   ssl_required?: string;
   brute_force_protected: boolean;
   verify_email: boolean;
@@ -275,6 +277,10 @@ export interface RealmListItem {
   events_enabled: boolean;
   events_listeners?: string[];
   metrics?: KeycloakMetrics;
+  /** When the realm's settings were last read. */
+  last_checked?: string;
+  /** When the monitoring client stopped being able to read the realm; absent while it can. */
+  unreadable_since?: string;
 }
 
 export interface KeycloakDashboardAll {

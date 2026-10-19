@@ -10,7 +10,11 @@ import (
 // GetClients returns a list of clients in a realm
 // Explicitly sets max=1000 to ensure all clients are returned (Keycloak default may vary)
 func (c *Client) GetClients(ctx context.Context, realmName string) ([]*ClientRepresentation, error) {
-	path := fmt.Sprintf("/admin/realms/%s/clients?first=0&max=1000", realmName)
+	realmSeg, err := pathSegment(realmName)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/admin/realms/%s/clients?first=0&max=1000", realmSeg)
 
 	resp, err := c.get(ctx, path)
 	if err != nil {
@@ -24,7 +28,7 @@ func (c *Client) GetClients(ctx context.Context, realmName string) ([]*ClientRep
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("failed to get clients, status: %d, body: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("failed to get clients, status: %d%s", resp.StatusCode, c.replyDetail("get clients", resp.StatusCode, body))
 	}
 
 	var clients []*ClientRepresentation

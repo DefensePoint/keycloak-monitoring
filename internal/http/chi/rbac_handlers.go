@@ -178,6 +178,10 @@ func (h *RBACHandlers) listRoles(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// errPermissionIDs answers a request still sending permission_ids, which an
+// older UI did. Ignoring it silently saved roles with no permissions.
+const errPermissionIDs = "permission_ids is not accepted; send permission names in permissions"
+
 // createRole handles POST /api/rbac/roles
 //
 //	@Summary		Create a new role
@@ -190,6 +194,7 @@ func (h *RBACHandlers) listRoles(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400		{object}	dto.ErrorResponse
 //	@Failure		401		{object}	dto.ErrorResponse
 //	@Failure		403		{object}	dto.ErrorResponse
+//	@Failure		409		{object}	dto.ErrorResponse	"A role with this name already exists"
 //	@Failure		500		{object}	dto.ErrorResponse
 //	@Security		BearerAuth
 //	@Router			/api/rbac/roles [post]
@@ -200,18 +205,25 @@ func (h *RBACHandlers) createRole(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if req.PermissionIDs != nil {
+		httputil.RespondBadRequest(w, h.log, errPermissionIDs)
+		return
+	}
 
-	role, err := h.service.CreateRole(ctx, req.Name, req.DisplayName, req.Description, false)
+	active := req.IsActive == nil || *req.IsActive
+	role, err := h.service.CreateRoleWithPermissions(ctx, req.Name, req.DisplayName, req.Description, req.Permissions, active)
+	if errors.Is(err, rbac.ErrUnknownPermission) {
+		httputil.RespondBadRequest(w, h.log, err.Error())
+		return
+	}
+	if errors.Is(err, rbac.ErrRoleNameTaken) {
+		httputil.RespondError(w, h.log, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		h.log.Error("Failed to create role", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Failed to create role")
 		return
-	}
-
-	if len(req.Permissions) > 0 {
-		if err := h.service.AssignPermissionsToRole(ctx, role.ID, req.Permissions); err != nil {
-			h.log.Error("Failed to assign permissions to role", logger.Err(err))
-		}
 	}
 
 	httputil.RespondJSON(w, h.log, http.StatusCreated, role)
@@ -260,14 +272,14 @@ func (h *RBACHandlers) getRole(w http.ResponseWriter, r *http.Request) {
 // updateRole handles PUT /api/rbac/roles/{id}
 //
 //	@Summary		Update role
-//	@Description	Updates an existing role. System roles cannot be modified.
+//	@Description	Updates an existing role. System roles cannot be modified. Fields left out are unchanged; a permissions list replaces the role's permissions, so any not listed are removed.
 //	@Tags			rbac
 //	@Accept			json
 //	@Produce		json
 //	@Param			roleID	path		int					true	"Role ID"
 //	@Param			request	body		requests.UpdateRole	true	"Role update request"
 //	@Success		200		{object}	domain.Role
-//	@Failure		400		{object}	dto.ErrorResponse	"Invalid role ID or request"
+//	@Failure		400		{object}	dto.ErrorResponse	"Invalid role ID or request, or an unknown permission"
 //	@Failure		401		{object}	dto.ErrorResponse
 //	@Failure		403		{object}	dto.ErrorResponse	"Cannot modify system roles"
 //	@Failure		404		{object}	dto.ErrorResponse	"Role not found"
@@ -288,6 +300,10 @@ func (h *RBACHandlers) updateRole(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if req.PermissionIDs != nil {
+		httputil.RespondBadRequest(w, h.log, errPermissionIDs)
+		return
+	}
 
 	role, err := h.service.GetRoleWithPermissions(ctx, uint(roleID))
 	if err != nil {
@@ -306,22 +322,46 @@ func (h *RBACHandlers) updateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	role.DisplayName = req.DisplayName
-	role.Description = req.Description
-
-	if err := h.service.UpdateRole(ctx, role); err != nil {
-		h.log.Error("Failed to update role", logger.Err(err))
-		httputil.RespondInternalError(w, h.log, "Failed to update role")
-		return
-	}
-
+	// The permission list replaces the role's permissions, so one left out is
+	// revoked. It is applied first: an unknown name then fails the request
+	// before anything about the role has changed.
 	if req.Permissions != nil {
-		if err := h.service.AssignPermissionsToRole(ctx, role.ID, req.Permissions); err != nil {
+		err := h.service.SetRolePermissions(ctx, role.ID, *req.Permissions)
+		if errors.Is(err, rbac.ErrUnknownPermission) {
+			httputil.RespondBadRequest(w, h.log, err.Error())
+			return
+		}
+		if err != nil {
 			h.log.Error("Failed to update role permissions", logger.Err(err))
+			httputil.RespondInternalError(w, h.log, "Failed to update role permissions")
+			return
 		}
 	}
 
-	httputil.RespondSuccess(w, h.log, role)
+	if req.DisplayName != nil || req.Description != nil || req.IsActive != nil {
+		if req.DisplayName != nil {
+			role.DisplayName = *req.DisplayName
+		}
+		if req.Description != nil {
+			role.Description = *req.Description
+		}
+		if req.IsActive != nil {
+			role.IsActive = *req.IsActive
+		}
+		if err := h.service.UpdateRole(ctx, role); err != nil {
+			h.log.Error("Failed to update role", logger.Err(err))
+			httputil.RespondInternalError(w, h.log, "Failed to update role")
+			return
+		}
+	}
+
+	updated, err := h.service.GetRoleWithPermissions(ctx, role.ID)
+	if err != nil || updated == nil {
+		h.log.Error("Failed to reload role", logger.Err(err))
+		httputil.RespondInternalError(w, h.log, "Failed to reload role")
+		return
+	}
+	httputil.RespondSuccess(w, h.log, updated)
 }
 
 // deleteRole handles DELETE /api/rbac/roles/{id}

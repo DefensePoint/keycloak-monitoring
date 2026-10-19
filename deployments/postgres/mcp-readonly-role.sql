@@ -7,6 +7,9 @@
 --     -v mcp_password='<strong-password>' \
 --     -f mcp-readonly-role.sql
 --
+-- On a Compose server, run it through the postgres container instead; see
+-- "Running the scripts" in README.md.
+--
 -- Then point the mcp.database block of the deployed config.yaml at this role.
 --
 -- Grants are table-level, not column-level. The MCP server reads rows through
@@ -18,15 +21,18 @@
 -- password_hash is a bcrypt hash, and the MCP server never returns either
 -- field to clients.
 --
--- The data tables below cover every shipped tool; the remaining tables are the
--- authentication and RBAC tables the server needs to resolve a token to a user
--- and that user to an effective scope.
+-- The shipped tools read events, keycloak_realms, configuration_alerts and
+-- keycloak_tenants; the authentication and RBAC tables let the server resolve
+-- a token to a user and that user to an effective scope. Three granted data
+-- tables (keycloak_health, keycloak_events, keycloak_metrics) are not queried
+-- by any shipped tool; they are pre-provisioned for tools not yet built.
 --
 -- No ALTER DEFAULT PRIVILEGES on purpose: a table added by a future migration
 -- must not become readable implicitly, since it may hold data the MCP server
--- has no business seeing. When the MCP server needs a table beyond this set,
--- add it to the GRANT list below and run just that GRANT per environment (the
--- script is not idempotent; CREATE ROLE fails on an existing role).
+-- has no business seeing. When the MCP server needs a table beyond the
+-- pre-provisioned set, add it to the GRANT list below and run just that GRANT
+-- per environment (the script is not idempotent; CREATE ROLE fails on an
+-- existing role).
 
 \set ON_ERROR_STOP on
 

@@ -74,7 +74,7 @@ func TestEveryRequestCarriesTheBearerToken(t *testing.T) {
 		writeJSON(t, w, eventsPage{})
 	})
 
-	if _, err := c.ListEventsSince(context.Background(), "acme", time.Now(), 10); err != nil {
+	if _, err := c.ListEventsSince(context.Background(), "realm-a", time.Now(), 10); err != nil {
 		t.Fatalf("ListEventsSince: %v", err)
 	}
 	if got := rec.auth[0]; got != "Bearer test-token" {
@@ -88,10 +88,10 @@ func TestRealmIsPathScoped(t *testing.T) {
 		writeJSON(t, w, eventsPage{})
 	})
 
-	if _, err := c.ListEventsSince(context.Background(), "acme", time.Now(), 10); err != nil {
+	if _, err := c.ListEventsSince(context.Background(), "realm-a", time.Now(), 10); err != nil {
 		t.Fatalf("ListEventsSince: %v", err)
 	}
-	if want := "/acme/monitoring/events"; rec.paths[0] != want {
+	if want := "/realm-a/monitoring/events"; rec.paths[0] != want {
 		t.Errorf("path = %q, want %q", rec.paths[0], want)
 	}
 }
@@ -121,10 +121,10 @@ func TestOrdinaryRealmNamesArePreserved(t *testing.T) {
 		writeJSON(t, w, eventsPage{})
 	})
 
-	if _, err := c.ListEventsSince(context.Background(), "acme-prod_1", time.Now(), 10); err != nil {
+	if _, err := c.ListEventsSince(context.Background(), "realm-a-prod_1", time.Now(), 10); err != nil {
 		t.Fatalf("ListEventsSince: %v", err)
 	}
-	if want := "/acme-prod_1/monitoring/events"; rec.paths[0] != want {
+	if want := "/realm-a-prod_1/monitoring/events"; rec.paths[0] != want {
 		t.Errorf("path = %q, want %q", rec.paths[0], want)
 	}
 }
@@ -167,7 +167,7 @@ func TestEventRowMapsEveryField(t *testing.T) {
 		})
 	})
 
-	rows, err := c.ListEventsSince(context.Background(), "acme", time.Now(), 10)
+	rows, err := c.ListEventsSince(context.Background(), "realm-a", time.Now(), 10)
 	if err != nil {
 		t.Fatalf("ListEventsSince: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestNullableFieldsStayNil(t *testing.T) {
 		})
 	})
 
-	rows, err := c.ListEventsSince(context.Background(), "acme", time.Now(), 10)
+	rows, err := c.ListEventsSince(context.Background(), "realm-a", time.Now(), 10)
 	if err != nil {
 		t.Fatalf("ListEventsSince: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestListEventsSinceReturnsOnlyOnePage(t *testing.T) {
 		})
 	})
 
-	rows, err := c.ListEventsSince(context.Background(), "acme", time.Now(), 10)
+	rows, err := c.ListEventsSince(context.Background(), "realm-a", time.Now(), 10)
 	if err != nil {
 		t.Fatalf("ListEventsSince: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestAlertRulePullsDrainEveryPage(t *testing.T) {
 		writeJSON(t, w, eventsPage{Items: []eventRow{{EventID: "b", EventTime: time.Now()}}})
 	})
 
-	rows, err := c.ListRejectedEventsSince(context.Background(), "acme", time.Now())
+	rows, err := c.ListRejectedEventsSince(context.Background(), "realm-a", time.Now())
 	if err != nil {
 		t.Fatalf("ListRejectedEventsSince: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestPageDrainIsBounded(t *testing.T) {
 		})
 	})
 
-	if _, err := c.ListRejectedEventsSince(context.Background(), "acme", time.Now()); err != nil {
+	if _, err := c.ListRejectedEventsSince(context.Background(), "realm-a", time.Now()); err != nil {
 		t.Fatalf("ListRejectedEventsSince: %v", err)
 	}
 	if len(rec.paths) != maxPagesPerCall {
@@ -313,7 +313,7 @@ func TestRejectedEventsFilterOnExactRiskLevel(t *testing.T) {
 		writeJSON(t, w, eventsPage{})
 	})
 
-	if _, err := c.ListRejectedEventsSince(context.Background(), "acme", time.Now()); err != nil {
+	if _, err := c.ListRejectedEventsSince(context.Background(), "realm-a", time.Now()); err != nil {
 		t.Fatalf("ListRejectedEventsSince: %v", err)
 	}
 	q := rec.queries[0]
@@ -331,7 +331,7 @@ func TestVPNRiskyPullSetsBothFilters(t *testing.T) {
 		writeJSON(t, w, eventsPage{})
 	})
 
-	if _, err := c.ListVPNRiskyEventsSince(context.Background(), "acme", time.Now(), 3); err != nil {
+	if _, err := c.ListVPNRiskyEventsSince(context.Background(), "realm-a", time.Now(), 3); err != nil {
 		t.Fatalf("ListVPNRiskyEventsSince: %v", err)
 	}
 	q := rec.queries[0]
@@ -348,10 +348,10 @@ func TestIncrementalPullsWalkForwardInTime(t *testing.T) {
 	})
 
 	for _, call := range []func() error{
-		func() error { _, e := c.ListEventsSince(context.Background(), "acme", time.Now(), 10); return e },
-		func() error { _, e := c.ListRejectedEventsSince(context.Background(), "acme", time.Now()); return e },
+		func() error { _, e := c.ListEventsSince(context.Background(), "realm-a", time.Now(), 10); return e },
+		func() error { _, e := c.ListRejectedEventsSince(context.Background(), "realm-a", time.Now()); return e },
 		func() error {
-			_, e := c.ListVPNRiskyEventsSince(context.Background(), "acme", time.Now(), 3)
+			_, e := c.ListVPNRiskyEventsSince(context.Background(), "realm-a", time.Now(), 3)
 			return e
 		},
 	} {
@@ -372,7 +372,7 @@ func TestUIListingIsNewestFirst(t *testing.T) {
 		writeJSON(t, w, eventsPage{})
 	})
 
-	if _, err := c.ListEvents(context.Background(), amfa.ListEventsOptions{RealmID: "acme"}); err != nil {
+	if _, err := c.ListEvents(context.Background(), amfa.ListEventsOptions{RealmID: "realm-a"}); err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
 	if rec.queries[0].Get("ascending") != "false" {
@@ -406,7 +406,7 @@ func TestListEventsOffsetSpanningAPageBoundaryReturnsTheRightWindow(t *testing.T
 	})
 
 	res, err := c.ListEvents(context.Background(), amfa.ListEventsOptions{
-		RealmID: "acme", Limit: 25, Offset: 10,
+		RealmID: "realm-a", Limit: 25, Offset: 10,
 	})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
@@ -434,7 +434,7 @@ func TestListEventsFirstPageMakesOneRequest(t *testing.T) {
 		writeJSON(t, w, pageOfEvents(0, 25, &next, 100))
 	})
 
-	if _, err := c.ListEvents(context.Background(), amfa.ListEventsOptions{RealmID: "acme", Limit: 25}); err != nil {
+	if _, err := c.ListEvents(context.Background(), amfa.ListEventsOptions{RealmID: "realm-a", Limit: 25}); err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
 	if len(rec.paths) != 1 {
@@ -457,7 +457,7 @@ func TestListEventsContinuationPagesSkipTheTotal(t *testing.T) {
 	})
 
 	if _, err := c.ListEvents(context.Background(), amfa.ListEventsOptions{
-		RealmID: "acme", Limit: 25, Offset: 10,
+		RealmID: "realm-a", Limit: 25, Offset: 10,
 	}); err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -480,7 +480,7 @@ func TestListEventsOffsetTooDeepFailsFastInsteadOfWalkingForever(t *testing.T) {
 	})
 
 	_, err := c.ListEvents(context.Background(), amfa.ListEventsOptions{
-		RealmID: "acme", Limit: 25, Offset: 49_000,
+		RealmID: "realm-a", Limit: 25, Offset: 49_000,
 	})
 	if !errors.Is(err, amfa.ErrOffsetTooLarge) {
 		t.Errorf("expected ErrOffsetTooLarge, got %v", err)
@@ -503,7 +503,7 @@ func TestStatsAndGeoDecode(t *testing.T) {
 		}})
 	})
 
-	stats, err := c.GetStats(context.Background(), amfa.StatsOptions{RealmID: "acme"})
+	stats, err := c.GetStats(context.Background(), amfa.StatsOptions{RealmID: "realm-a"})
 	if err != nil {
 		t.Fatalf("GetStats: %v", err)
 	}
@@ -511,7 +511,7 @@ func TestStatsAndGeoDecode(t *testing.T) {
 		t.Errorf("stats did not round-trip: %+v", stats)
 	}
 
-	buckets, err := c.GetGeoBuckets(context.Background(), amfa.GeoOptions{RealmID: "acme"})
+	buckets, err := c.GetGeoBuckets(context.Background(), amfa.GeoOptions{RealmID: "realm-a"})
 	if err != nil {
 		t.Fatalf("GetGeoBuckets: %v", err)
 	}
@@ -557,7 +557,7 @@ func TestRiskyUsersAndEventCountsDecode(t *testing.T) {
 		writeJSON(t, w, map[string]any{"event_type": "LOGIN_ERROR", "count": 42})
 	})
 
-	counts, err := c.CountRepeatedRiskyByUser(context.Background(), "acme", time.Now(), 2, 5)
+	counts, err := c.CountRepeatedRiskyByUser(context.Background(), "realm-a", time.Now(), 2, 5)
 	if err != nil {
 		t.Fatalf("CountRepeatedRiskyByUser: %v", err)
 	}
@@ -574,7 +574,7 @@ func TestRiskyUsersAndEventCountsDecode(t *testing.T) {
 	}
 
 	start := time.Now().Add(-time.Hour)
-	total, err := c.CountByEventTypeInWindow(context.Background(), "acme", "LOGIN_ERROR", start, time.Now())
+	total, err := c.CountByEventTypeInWindow(context.Background(), "realm-a", "LOGIN_ERROR", start, time.Now())
 	if err != nil {
 		t.Fatalf("CountByEventTypeInWindow: %v", err)
 	}
@@ -593,7 +593,7 @@ func TestServerErrorsAreUnavailable(t *testing.T) {
 			_, _ = w.Write([]byte("upstream failure"))
 		})
 
-		_, err := c.ListEventsSince(context.Background(), "acme", time.Now(), 10)
+		_, err := c.ListEventsSince(context.Background(), "realm-a", time.Now(), 10)
 		if err == nil {
 			t.Fatalf("status %d: expected an error", status)
 		}
@@ -614,7 +614,7 @@ func TestAuthFailuresAreNotReportedAsUnavailable(t *testing.T) {
 			_, _ = w.Write([]byte("token realm does not match request realm"))
 		})
 
-		_, err := c.ListEventsSince(context.Background(), "acme", time.Now(), 10)
+		_, err := c.ListEventsSince(context.Background(), "realm-a", time.Now(), 10)
 		if err == nil {
 			t.Fatalf("status %d: expected an error", status)
 		}
@@ -633,7 +633,7 @@ func TestUnreachableServerIsUnavailable(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	_, err = c.ListEventsSince(context.Background(), "acme", time.Now(), 10)
+	_, err = c.ListEventsSince(context.Background(), "realm-a", time.Now(), 10)
 	if err == nil {
 		t.Fatal("expected an error against a closed port")
 	}
@@ -651,7 +651,7 @@ func TestCancelledContextIsUnavailable(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := c.ListEventsSince(ctx, "acme", time.Now(), 10)
+	_, err := c.ListEventsSince(ctx, "realm-a", time.Now(), 10)
 	if err == nil {
 		t.Fatal("expected an error for a cancelled context")
 	}
@@ -669,7 +669,7 @@ func TestMalformedJSONIsNotSilentlyEmpty(t *testing.T) {
 		_, _ = w.Write([]byte("{not json"))
 	})
 
-	if _, err := c.ListEventsSince(context.Background(), "acme", time.Now(), 10); err == nil {
+	if _, err := c.ListEventsSince(context.Background(), "realm-a", time.Now(), 10); err == nil {
 		t.Fatal("expected a decode error")
 	}
 }
@@ -681,7 +681,7 @@ func TestWindowIsAlwaysBounded(t *testing.T) {
 		writeJSON(t, w, amfa.Stats{})
 	})
 
-	if _, err := c.GetStats(context.Background(), amfa.StatsOptions{RealmID: "acme"}); err != nil {
+	if _, err := c.GetStats(context.Background(), amfa.StatsOptions{RealmID: "realm-a"}); err != nil {
 		t.Fatalf("GetStats: %v", err)
 	}
 	q := rec.queries[0]
@@ -736,7 +736,7 @@ func TestCountByEventTypeAndClientInWindowAggregatesAndFiltersByThreshold(t *tes
 	})
 
 	start := time.Now().Add(-time.Hour)
-	counts, err := c.CountByEventTypeAndClientInWindow(context.Background(), "acme", "LOGIN_ERROR", start, time.Now(), 3)
+	counts, err := c.CountByEventTypeAndClientInWindow(context.Background(), "realm-a", "LOGIN_ERROR", start, time.Now(), 3)
 	if err != nil {
 		t.Fatalf("CountByEventTypeAndClientInWindow: %v", err)
 	}
@@ -766,7 +766,7 @@ func TestCountByEventTypeByUserAggregatesAndFiltersByThreshold(t *testing.T) {
 		}})
 	})
 
-	counts, err := c.CountByEventTypeByUser(context.Background(), "acme", "LOGIN_ERROR", time.Now().Add(-time.Hour), 2)
+	counts, err := c.CountByEventTypeByUser(context.Background(), "realm-a", "LOGIN_ERROR", time.Now().Add(-time.Hour), 2)
 	if err != nil {
 		t.Fatalf("CountByEventTypeByUser: %v", err)
 	}
@@ -795,7 +795,7 @@ func TestCountDistinctRejectedUsersSinceCountsDistinctUsersOnly(t *testing.T) {
 		}})
 	})
 
-	count, err := c.CountDistinctRejectedUsersSince(context.Background(), "acme", time.Now().Add(-time.Hour))
+	count, err := c.CountDistinctRejectedUsersSince(context.Background(), "realm-a", time.Now().Add(-time.Hour))
 	if err != nil {
 		t.Fatalf("CountDistinctRejectedUsersSince: %v", err)
 	}

@@ -16,7 +16,7 @@ import { FormTextField } from "@/shared/components";
 import { loginSchema, type LoginFormData } from "../schemas";
 
 export function LoginPage() {
-  const { authConfig, loginOAuth2 } = useAuth();
+  const { authConfig, loginOAuth2, sessionExpired } = useAuth();
   const { mutate: login, isPending: isLoading, error } = useLoginSimple();
 
   const { control, handleSubmit } = useForm<LoginFormData>({
@@ -85,6 +85,12 @@ export function LoginPage() {
               MONITORING TOOL
             </Typography>
           </Box>
+
+          {sessionExpired && !error && (
+            <Alert severity="info" sx={{ mb: 3 }}>
+              Your session has expired. Sign in again to continue.
+            </Alert>
+          )}
 
           {error && (
             <Alert severity="error" sx={{ mb: 3 }}>

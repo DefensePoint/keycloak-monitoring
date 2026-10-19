@@ -8,6 +8,7 @@ import {
   usePermissions,
   useCreateRole,
   useDeleteRole,
+  useSetRoleActive,
 } from "../hooks";
 
 vi.mock("../hooks", () => ({
@@ -16,6 +17,7 @@ vi.mock("../hooks", () => ({
   usePermissions: vi.fn(),
   useCreateRole: vi.fn(),
   useDeleteRole: vi.fn(),
+  useSetRoleActive: vi.fn(),
 }));
 
 const mockShowToast = vi.fn();
@@ -140,6 +142,10 @@ describe("AdminRolesPage", () => {
       mutate: mockMutate,
       isPending: false,
     } as unknown as ReturnType<typeof useDeleteRole>);
+    vi.mocked(useSetRoleActive).mockReturnValue({
+      mutate: mockMutate,
+      isPending: false,
+    } as unknown as ReturnType<typeof useSetRoleActive>);
   });
 
   it("should render loading state initially", () => {

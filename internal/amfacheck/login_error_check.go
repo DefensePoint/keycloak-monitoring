@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts/clearing"
 	"github.com/DefensePoint/keycloak-monitoring/internal/amfa"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
@@ -38,6 +39,13 @@ func (c *LoginErrorCheck) GetDescription() string {
 }
 
 func (c *LoginErrorCheck) Execute(ctx context.Context) ([]*domain.Alert, error) {
+	ev, err := c.Evaluate(ctx)
+	return ev.Alerts, err
+}
+
+// Evaluate runs the check and reports every realm it counted, so a burst that
+// ended there can resolve.
+func (c *LoginErrorCheck) Evaluate(ctx context.Context) (clearing.Evaluation, error) {
 	return runEventTypeThresholdCheck(ctx, eventTypeThresholdParams{
 		tenantID:       c.tenantID,
 		realmsFn:       c.realmsFn,

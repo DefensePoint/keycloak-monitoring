@@ -100,9 +100,9 @@ ERROR: extension "timescaledb" does not exist
 2. **For Docker, use TimescaleDB image**:
 
    ```yaml
-   # docker-compose.yml
+   # docker-compose.yml: TimescaleDB, not a plain postgres image
    postgres:
-     image: timescale/timescaledb:latest-pg16  # Not postgres:17
+     image: timescale/timescaledb:2.30.2-pg16@sha256:6f139d56042989bd35f50ba5986e492cd32e35cc6778c50be2659add298dc09f
    ```
 
 ### Database Migrations Failed
@@ -302,8 +302,24 @@ authentication failed: unauthorized_client / invalid_client
 
 3. **If the token issues but Admin API calls return 403**, the service account
    is missing roles:
-   - Assign the master `admin` role (cross-realm), or the scoped read roles
-     (`view-users`, `view-events`, …) per realm
+   - Assign the master `admin` role (cross-realm), or the four scoped read roles
+     `view-realm`, `view-users`, `view-clients` and `view-events` for each
+     monitored realm, from that realm's `<realm>-realm` client in the admin
+     realm
+   - Health DOWN with a 403 from `/admin/serverinfo` means the service account
+     has no roles at all. **Test connection** still passes, because it only
+     checks that a token is issued
+   - A missing role does not always give a 403. Without `view-clients` the
+     client count is 0 and the realm page's Clients panel shows "No clients
+     found". Without `view-users`, or with `query-users` in its place, the
+     Users panel shows "No users found" rather than an error. Without
+     `view-realm` the realm drops out of monitoring, or, if the client has
+     `view-realm` on no other realm, stays listed as Disabled while `No realms
+     to monitor` is logged on every metrics and events poll. Each role's symptom
+     is in
+     [What each scoped role powers](keycloak-setup.md#what-each-scoped-role-powers)
+   - Role changes apply with the next token, up to the token lifespan minus 30
+     seconds after the change
    - See [keycloak-setup.md](keycloak-setup.md#step-4-assign-service-account-roles)
 
 ### No Events Being Collected
@@ -356,6 +372,13 @@ authentication failed: unauthorized_client / invalid_client
        - "master"  # Include your realm
    ```
 
+6. **Check the `view-events` role**: without it, each events poll logs
+   `Failed to fetch events from Keycloak API` for the realm and stores no new
+   events. Grant `view-events` for that realm (see
+   [What each scoped role powers](keycloak-setup.md#what-each-scoped-role-powers)).
+   Once the platform has a new token, events from earlier the same day are
+   fetched again.
+
 ## Authentication Issues
 
 ### Cannot Login to Dashboard
@@ -395,7 +418,7 @@ Session expired
    # config.yaml
    auth:
      session:
-       secret: "must-be-at-least-32-characters-long"
+       secret: ""  # Set by MONITORING_AUTH_SESSION_SECRET (openssl rand -base64 32)
        max_age: 24h
    ```
 
@@ -428,10 +451,11 @@ Session expired
 2. **Check session secret**:
 
    ```yaml
-   # Must be consistent across restarts
+   # Must be consistent across restarts: generate it once
+   # (openssl rand -base64 32), set MONITORING_AUTH_SESSION_SECRET, keep it
    auth:
      session:
-       secret: "same-secret-every-time-32-chars-minimum"
+       secret: ""  # Set by MONITORING_AUTH_SESSION_SECRET
    ```
 
 3. **Verify cookie settings**:
@@ -773,6 +797,8 @@ api-server cannot connect to postgres
 3. **Check browser console** (F12):
    - Look for CORS errors
    - Check network tab for failed requests
+
+4. **403 "Cross-origin request refused"**: the API only accepts state-changing requests from KMT's own origin. Open the UI on the same host that serves `/api`. A reverse proxy in front of the API must keep the original `Host` header. For a separate trusted app, see `http.cors.allowed_origins` in [configuration.md](configuration.md#cross-origin-requests).
 
 ## Logging and Debugging
 

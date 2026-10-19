@@ -7,6 +7,7 @@ Complete guide for deploying the Keycloak Monitoring Tool to production environm
 - [Overview](#overview)
 - [Deployment Options](#deployment-options)
 - [Docker Compose Deployment](#docker-compose-deployment)
+- [Pinned Images](#pinned-images)
 - [Kubernetes Deployment](#kubernetes-deployment)
 - [Manual Deployment](#manual-deployment)
 - [Systemd Services](#systemd-services)
@@ -157,8 +158,14 @@ database:
   max_conns: 50
 
 keycloak:
-  server_url: "https://keycloak.example.com"
-  # Use environment variables for credentials
+  tenants:
+    prod-keycloak:
+      name: "Production Keycloak"
+      server_url: "https://keycloak.example.com"
+      admin_realm: "master"
+      client_id: "monitoring-service"
+      # Filled in from the PROD_KEYCLOAK_CLIENT_SECRET environment variable
+      client_secret: "${PROD_KEYCLOAK_CLIENT_SECRET}"
 
 auth:
   simple:
@@ -167,7 +174,16 @@ auth:
     enabled: true
     provider_url: "https://keycloak.example.com/realms/production"
     client_id: "monitoring-dashboard"
-    # Use environment variable for secret
+    # Set by MONITORING_AUTH_OAUTH2_CLIENT_SECRET; the key must stay present
+    # (empty is fine) or the override is ignored.
+    client_secret: ""
+    redirect_url: "https://monitoring.example.com/auth/callback"
+    admin_users:
+      - "operator@example.com"
+  session:
+    # Set by MONITORING_AUTH_SESSION_SECRET; the key must stay present
+    # (empty is fine) or the override is ignored.
+    secret: ""
 
 logging:
   level: "info"
@@ -178,16 +194,11 @@ logging:
 
 ```bash
 # Create .env file for secrets
-# Initial-admin password must not substring-match the weak list
-# (admin, password, secret, default, changeme, welcome, …).
 cat > .env <<EOF
 MONITORING_DATABASE_PASSWORD=your_secure_db_password
-MONITORING_KEYCLOAK_CLIENT_SECRET=keycloak_client_secret
+PROD_KEYCLOAK_CLIENT_SECRET=keycloak_client_secret
 MONITORING_AUTH_OAUTH2_CLIENT_SECRET=oauth2_client_secret
 MONITORING_AUTH_SESSION_SECRET=$(openssl rand -base64 32)
-MONITORING_AUTH_SIMPLE_DEFAULT_USER=operator
-MONITORING_AUTH_SIMPLE_DEFAULT_EMAIL=operator@example.com
-MONITORING_AUTH_SIMPLE_DEFAULT_PASS='Init!2026-Qx7nK2'
 EOF
 
 # Secure the file
@@ -242,7 +253,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: timescale/timescaledb:latest-pg16
+    image: timescale/timescaledb:2.30.2-pg16@sha256:6f139d56042989bd35f50ba5986e492cd32e35cc6778c50be2659add298dc09f
     container_name: kmt-postgres
     restart: unless-stopped
     environment:
@@ -268,11 +279,9 @@ services:
         condition: service_healthy
     environment:
       - MONITORING_DATABASE_PASSWORD=${MONITORING_DATABASE_PASSWORD}
-      - MONITORING_KEYCLOAK_CLIENT_SECRET=${MONITORING_KEYCLOAK_CLIENT_SECRET}
+      - PROD_KEYCLOAK_CLIENT_SECRET=${PROD_KEYCLOAK_CLIENT_SECRET}
+      - MONITORING_AUTH_OAUTH2_CLIENT_SECRET=${MONITORING_AUTH_OAUTH2_CLIENT_SECRET}
       - MONITORING_AUTH_SESSION_SECRET=${MONITORING_AUTH_SESSION_SECRET}
-      - MONITORING_AUTH_SIMPLE_DEFAULT_USER=${MONITORING_AUTH_SIMPLE_DEFAULT_USER}
-      - MONITORING_AUTH_SIMPLE_DEFAULT_EMAIL=${MONITORING_AUTH_SIMPLE_DEFAULT_EMAIL}
-      - MONITORING_AUTH_SIMPLE_DEFAULT_PASS=${MONITORING_AUTH_SIMPLE_DEFAULT_PASS}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     networks:
@@ -291,7 +300,7 @@ services:
       api-server:
         condition: service_healthy
     ports:
-      - "7880:7880"
+      - "127.0.0.1:7880:7880"  # host only; put a reverse proxy in front
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     networks:
@@ -305,6 +314,115 @@ networks:
   monitoring_network:
     driver: bridge
 ```
+
+### Compose servers (`deployments/server`)
+
+`deployments/server/docker-compose.yml` is the server manifest. No pipeline deploys it. Set `KMT_API_IMAGE`, `KMT_WEB_IMAGE` and `KMT_MCP_IMAGE` to your image references (they default to the local `kmt-server:latest`, `kmt-web:latest` and `kmt-mcp-server:latest` tags), and put `config.yaml` next to it. The `api-server`, `mcp-server` and `web` services all load their environment from `kmt.env` in the same directory. Use it for the variables that `config.yaml`'s `${NAME}` placeholders reference, and for `MONITORING_*` overrides:
+
+```bash
+# On the server, in the deploy directory
+sudo tee kmt.env >/dev/null <<'EOF'
+PROD_KEYCLOAK_CLIENT_SECRET='value-with-$-kept'
+MONITORING_AUTH_SIMPLE_DEFAULT_PASS='Init!2026-Qx7nK2'
+EOF
+sudo chown root:docker kmt.env
+sudo chmod 640 kmt.env
+```
+
+- Create the file, even empty, before the first `docker compose up`: Compose refuses to start a service whose `env_file` is missing. After editing it, run `docker compose up -d --force-recreate`.
+- Docker Compose substitutes `$` in env-file values: an unquoted or double-quoted `kc-$ecret` reaches the container as `kc-`. Single-quote any value that contains `$`, or write `$$`.
+- All three services load the same `config.yaml`, which is why all three read the file. A placeholder whose variable is missing keeps its literal `${NAME}` text and is logged as a warning at startup.
+
+The `postgres` service does not read `kmt.env`. Compose fills its `${POSTGRES_USER}` and `${POSTGRES_PASSWORD}` from the shell or from a `.env` file next to the compose file. Without them Postgres refuses to start ("You must specify POSTGRES_PASSWORD"). Create `.env` before the first start:
+
+```bash
+# On the server, in the deploy directory
+sudo tee .env >/dev/null <<'EOF'
+POSTGRES_USER=monitoring
+POSTGRES_PASSWORD='a-strong-password'
+EOF
+sudo chown root:docker .env
+sudo chmod 640 .env
+```
+
+Compose reads `.env` for every command, `ps` and `logs` included. Depending on its version, it reads `kmt.env` for some or all commands too, so the `docker` group needs to read both. Membership of that group already gives root on the host, so this exposes nothing new. An admin outside the group runs every `docker compose` command with `sudo`.
+
+`config.yaml`'s `database.user` and `database.password` must match these. Supply the password to the application through `MONITORING_DATABASE_PASSWORD` in `kmt.env`, with the same value.
+
+The Compose file runs the web server on 7880, the port it publishes and Traefik routes to, by setting `MONITORING_WEB_SERVER_PORT` on the `web` service; `config.yaml.example` defaults it to 3000.
+
+Only Traefik is public. The file does not publish Postgres or the MCP server, and binds the API (7888) and the web server (7880) to `127.0.0.1`, so other machines can't reach them (see [Firewall Rules](#1-firewall-rules) for why ufw alone does not do this). On the server itself:
+
+```bash
+curl -fsS http://127.0.0.1:7888/health          # API health; /metrics is on the same port
+curl -fsS -o /dev/null http://127.0.0.1:7880/   # web server, bypassing Traefik
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" monitoring'
+```
+
+The single quotes leave `$POSTGRES_USER` to the container, where it is set. Unquoted, the admin's own shell expands it, normally to nothing, and psql connects as `root` and fails.
+
+A metrics scraper on the host reads `http://127.0.0.1:7888/metrics`. One in a container joins `kmt-network` and reads `http://api-server:7888/metrics`. An admin on another machine uses an SSH tunnel: `ssh -L 7888:127.0.0.1:7888 <server>`.
+
+## Pinned Images
+
+Every image this repository ships or tells you to run is pinned to a release tag and the digest that tag resolved to. The tag says which version it is, the digest is what actually gets pulled, so the same file gives the same software on any day and on any host. The pins live in `deployments/server/docker-compose.yml`, the three files under `deployments/local` and `build/Dockerfile`.
+
+### Moving to a newer pinned version
+
+1. Read the release notes for the version you are moving to.
+2. Resolve its digest and confirm the index covers the platforms you build for:
+
+   ```bash
+   docker buildx imagetools inspect timescale/timescaledb:2.31.0-pg16
+   ```
+
+3. Replace both halves of the reference, the tag and the digest, everywhere the old one appears. A tag that no longer matches its digest is the one mistake this convention cannot catch for you:
+
+   ```bash
+   grep -rn "timescale/timescaledb:" deployments build docs
+   ```
+
+4. Open a pull request, so CI builds and tests on the new pin before anyone deploys it.
+
+### Moving an existing server to a newer TimescaleDB
+
+A PostgreSQL data directory is compatible across PostgreSQL 16 minor releases, so the database starts on the new image without `pg_upgrade`. The TimescaleDB extension is different: restarting on a newer image leaves the extension at the version the data was created with until you update it explicitly.
+
+Never move a database onto a TimescaleDB older than the one its data was created with. It can refuse to start.
+
+1. Check what the server runs today, before changing anything:
+
+   ```bash
+   docker compose exec postgres psql -U monitoring -d monitoring \
+     -c "SELECT extversion FROM pg_extension WHERE extname='timescaledb'" \
+     -c "SHOW server_version"
+   ```
+
+   If that extension version is newer than the one in the Compose file, stop. Pin the Compose file forward to at least what the server already runs.
+
+2. Back up the database, then pull and restart on the pinned image:
+
+   ```bash
+   docker compose pull postgres
+   docker compose up -d postgres
+   ```
+
+3. Update the extension in every database that has it. Run it as the first statement of a fresh session, which a standalone `-c` gives you:
+
+   ```bash
+   docker compose exec postgres psql -U monitoring -d monitoring \
+     -c "ALTER EXTENSION timescaledb UPDATE"
+   ```
+
+4. Verify the new version and that the hypertables came through:
+
+   ```bash
+   docker compose exec postgres psql -U monitoring -d monitoring \
+     -c "SELECT extversion FROM pg_extension WHERE extname='timescaledb'" \
+     -c "SELECT hypertable_name FROM timescaledb_information.hypertables"
+   ```
+
+5. Restart the application services so they reconnect: `docker compose up -d`.
 
 ## Kubernetes Deployment
 
@@ -321,17 +439,11 @@ Use Helm if you already run charts. The kubectl samples below are the same shape
 
 Do not probe `/api/health`. That path is not a health endpoint.
 
-`MONITORING_*` environment variables override `config.yaml` only when the matching key exists in the file. Keep secret-bearing keys present and empty in the ConfigMap, and inject the real values as env vars from a Secret.
+`/ready` answers 503 while the server's database does not answer within 2 seconds, and 200 again once it does. `/health` answers 200 while the process serves requests, database or not. Keep it that way round: a liveness probe on `/ready` restarts every pod during a database outage, which does not bring the database back. A tenant's Keycloak or AMFA being unreachable does not affect either; the tenant's health alerts report that. The Compose files' container healthcheck (`-healthcheck`) probes `/ready`, so `docker compose ps` shows the API and MCP servers unhealthy while the database is unreachable.
 
-Required secrets (32+ character session secret, AES encryption key, database password, tenant client secret):
-
-- `MONITORING_AUTH_SESSION_SECRET`
-- `MONITORING_SECURITY_ENCRYPTION_KEY`
-- `MONITORING_DATABASE_PASSWORD`
-- `MONITORING_AUTH_SIMPLE_DEFAULT_PASS` (only the password is a secret; user and email can be plain env)
-- tenant client secret (the `MONITORING_KEYCLOAK_TENANTS_<NAME>_CLIENT_SECRET` key that matches your tenant block)
-
-Simple-auth seed (`MONITORING_AUTH_SIMPLE_DEFAULT_USER`, `_EMAIL`, `_PASS`) is required even when `auth.simple` keys in `config.yaml` are empty. Without them the API rolls back on start with `SECURITY ERROR: default_user must be set` and never binds. The password validator substring-matches a weak list (`admin`, `password`, `secret`, `default`, `changeme`, `welcome`); do not use an example that contains those strings.
+Environment overrides, the keys a ConfigMap must keep present for values
+injected from a Secret, secret requirements, and initial administrator password
+rules are defined in the [configuration reference](configuration.md#deployment-variable-requirements).
 
 ### Helm (recommended)
 
@@ -386,7 +498,7 @@ mcp:
 
 postgres:
   enabled: true
-  image: timescale/timescaledb:latest-pg16
+  image: timescale/timescaledb:2.30.2-pg16@sha256:6f139d56042989bd35f50ba5986e492cd32e35cc6778c50be2659add298dc09f
   database: monitoring
   user: monitoring
 
@@ -470,7 +582,7 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: timescale/timescaledb:latest-pg16
+          image: timescale/timescaledb:2.30.2-pg16@sha256:6f139d56042989bd35f50ba5986e492cd32e35cc6778c50be2659add298dc09f
           env:
             - name: POSTGRES_DB
               value: monitoring
@@ -549,7 +661,7 @@ spec:
                 secretKeyRef:
                   name: monitoring-secrets
                   key: encryption-key
-            - name: MONITORING_KEYCLOAK_TENANTS_DEMO_CLIENT_SECRET
+            - name: PROD_KEYCLOAK_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: monitoring-secrets
@@ -603,7 +715,7 @@ spec:
       targetPort: http
 ```
 
-Rename `MONITORING_KEYCLOAK_TENANTS_DEMO_CLIENT_SECRET` to match the tenant name in `config.yaml`.
+`PROD_KEYCLOAK_CLIENT_SECRET` only reaches a tenant through a `client_secret: "${PROD_KEYCLOAK_CLIENT_SECRET}"` placeholder in its `config.yaml` block. See the [configuration reference](configuration.md#deployment-variable-requirements).
 
 **web.yaml**
 
@@ -749,7 +861,7 @@ Unit files are world-readable. Put secrets in a 0600 EnvironmentFile. The web un
 sudo install -d -m 0750 -o monitoring -g monitoring /etc/monitoring-platform
 sudo tee /etc/monitoring-platform/secrets.env >/dev/null <<'EOF'
 MONITORING_DATABASE_PASSWORD=your_password
-MONITORING_KEYCLOAK_CLIENT_SECRET=keycloak_client_secret
+PROD_KEYCLOAK_CLIENT_SECRET=keycloak_client_secret
 MONITORING_AUTH_SIMPLE_DEFAULT_PASS=Init!2026-Qx7nK2
 EOF
 sudo chmod 0600 /etc/monitoring-platform/secrets.env
@@ -889,7 +1001,9 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
+        # $http_host keeps the port; $host drops it, and the API refuses a
+        # browser write whose Origin port differs from Host.
+        proxy_set_header Host $http_host;
         proxy_cache_bypass $http_upgrade;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -912,6 +1026,12 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
+### Upgrade: nginx must forward the port in Host
+
+The API refuses a POST, PUT or DELETE from a browser page on another origin. Over plain HTTP, browsers other than on localhost send no `Sec-Fetch-Site`, so the API compares the `Origin` header with `Host`, port included. nginx's `$host` drops the port: behind `proxy_set_header Host $host;` on a non-standard port, such as `http://kmt.example.com:8080`, the UI's own login, edits and logout are refused with 403 and logged as `Cross-origin request refused`.
+
+Before upgrading, change the line to `proxy_set_header Host $http_host;` and reload nginx. A site on HTTPS, or on port 80 or 443, works either way, but `$http_host` is correct for both.
+
 ## SSL/TLS Configuration
 
 ### Using Let's Encrypt
@@ -928,6 +1048,45 @@ sudo certbot renew --dry-run
 ```
 
 ## Database Setup
+
+### Upgrade: no built-in database password
+
+There is no built-in `database.password` any more. A server whose config
+sets none used to connect with `monitoring_password`, a password this project
+publishes; it now refuses to start with `SECURITY ERROR: database.password is
+not set`. Set the real password in `config.yaml` or through
+`MONITORING_DATABASE_PASSWORD` before upgrading. The same applies to
+`mcp.database.password`. A server still configured with `monitoring_password`
+starts, and logs a warning to use a password of its own.
+
+### Upgrade: database.ssl_mode defaults to require
+
+If `database.ssl_mode` is omitted, the server now connects with `require`.
+Before this, the omitted value was `disable`. A Postgres instance with TLS
+off will refuse the connection, and the error mentions TLS rather than the
+default. Set `ssl_mode: "disable"` for local and private-network databases
+that do not speak TLS, or `MONITORING_DATABASE_SSL_MODE=disable`. Deployed
+configs that already set `require` are unchanged.
+
+### Upgrade: databases from early single-tenant releases
+
+Those releases monitored a single Keycloak, configured under
+`keycloak.server_url`, and their tables carry no tenant. For the first start
+on such a database, configure that Keycloak as the only tenant under
+`keycloak.tenants`. The server then:
+
+- gives every realm, alert and event row to that tenant;
+- removes the unique indexes that made a realm ID, realm name or alert ID
+  unique across every tenant;
+- renames `keycloak_events`, `keycloak_metrics` and `keycloak_health` to
+  `<table>_pre_tenant` and creates them again per tenant. The old Keycloak
+  event, metrics and health history stays in the `_pre_tenant` tables but is
+  not shown; drop them once it is no longer wanted.
+
+With no tenant or several tenants configured, the server refuses to start
+and says so, rather than guess who the rows belong to. Further tenants can be
+added after the first successful start. Databases created by any KMT release are not
+affected.
 
 ### PostgreSQL with TimescaleDB
 
@@ -961,7 +1120,9 @@ CREATE EXTENSION IF NOT EXISTS timescaledb;
 BACKUP_DIR="/var/backups/monitoring-db"
 DATE=$(date +%Y%m%d_%H%M%S)
 mkdir -p $BACKUP_DIR
-pg_dump -U monitoring monitoring | gzip > $BACKUP_DIR/monitoring_$DATE.sql.gz
+# Postgres is not published, so dump through the container
+docker compose -f /opt/kmt/docker-compose.yml exec -T postgres \
+  sh -c 'pg_dump -U "$POSTGRES_USER" monitoring' | gzip > $BACKUP_DIR/monitoring_$DATE.sql.gz
 
 # Keep only last 30 days
 find $BACKUP_DIR -name "monitoring_*.sql.gz" -mtime +30 -delete
@@ -977,15 +1138,58 @@ Add to crontab:
 
 ### 1. Firewall Rules
 
+ufw does not protect ports that Docker publishes. Docker writes its own iptables rules for a published port, and they take effect before ufw's, so `ufw deny 5432/tcp` leaves a published `5432:5432` reachable from other machines.
+
+Keep services private in the Compose file instead:
+
+- Don't publish a port that only containers use. `deployments/server/docker-compose.yml` publishes nothing for Postgres or the MCP server.
+- Bind a port that only the host needs to loopback, such as `"127.0.0.1:7888:7888"`. Other machines can't reach it.
+- Let the reverse proxy (Traefik) be the only public entry point.
+
+ufw still protects services that run on the host itself, so keep it for SSH and anything else outside Docker:
+
 ```bash
-# Allow only necessary ports
-sudo ufw allow 443/tcp  # HTTPS
 sudo ufw allow 22/tcp   # SSH
-sudo ufw deny 7888/tcp  # Block direct API access
-sudo ufw deny 7880/tcp  # Block direct web access
-sudo ufw deny 5432/tcp  # Block direct database access
+sudo ufw allow 443/tcp  # HTTPS (Traefik)
+sudo ufw allow 80/tcp   # HTTP, redirected to HTTPS
 sudo ufw enable
 ```
+
+If a port must be published on a public interface, publish it on IPv4 only and filter it in Docker's `DOCKER-USER` chain, which Docker evaluates before its own rules. Publish it as `"0.0.0.0:7888:7888"`, not `"7888:7888"`: the short form also listens on IPv6, and those connections never pass through `DOCKER-USER`, so the rule below would leave IPv6 open.
+
+`--ctdir ORIGINAL` limits the rule to the client's packets; without it the rule also drops the replies, and even an allowed client is refused. `-i` limits it to connections arriving on the public interface; without it the rule also drops connections the server's containers open to port 7888 on other machines. For example, to allow only one subnet, replacing `eth0` with the server's public interface:
+
+```bash
+sudo iptables -I DOCKER-USER -i eth0 -p tcp -m conntrack --ctorigdstport 7888 --ctdir ORIGINAL ! -s 10.0.0.0/8 -j DROP
+```
+
+The rule is gone after a reboot: Docker creates `DOCKER-USER` empty when it starts. Add it again each time Docker starts with a systemd unit, using the same rule:
+
+```ini
+# /etc/systemd/system/kmt-firewall.service
+[Unit]
+Description=DOCKER-USER rule for Keycloak Monitoring Tool
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'R="-i eth0 -p tcp -m conntrack --ctorigdstport 7888 --ctdir ORIGINAL ! -s 10.0.0.0/8 -j DROP"; iptables -C DOCKER-USER $R 2>/dev/null || iptables -I DOCKER-USER $R'
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now kmt-firewall.service
+```
+
+The `-C` check adds the rule only when it is missing, so running the unit again never stacks a second copy.
+
+Check the result from other machines, not from the host: from an address outside the allowed subnet, `nc -zv <server> 7888` must fail, over IPv6 too if the server has an IPv6 address; from an address inside it, it must connect.
 
 ### 2. Fail2ban
 

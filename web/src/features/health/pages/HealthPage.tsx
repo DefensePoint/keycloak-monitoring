@@ -17,9 +17,12 @@ import { useTenant } from "@/shared/context";
 import { HighAvailability } from "../components/HighAvailability";
 import { InfinispanMetrics } from "../components/InfinispanMetrics";
 import { formatBytes } from "@/shared/utils";
+import { requestFailed } from "@/shared/lib";
 import {
   LoadingSkeleton,
   EmptyState,
+  ErrorState,
+  AlertBanner,
   SectionCard,
   PageHeader,
   FeatureErrorBoundary,
@@ -28,10 +31,17 @@ import {
 export function HealthPage() {
   const { selectedTenant } = useTenant();
 
-  const { data: keycloakDashboard, isLoading } = useKeycloakDashboard({
+  const dashboardQuery = useKeycloakDashboard({
     tenantId: selectedTenant?.tenant_id,
     refetchInterval: 5000,
   });
+  const {
+    data: keycloakDashboard,
+    isLoading,
+    dataUpdatedAt,
+    refetch,
+  } = dashboardQuery;
+  const failed = requestFailed(dashboardQuery);
 
   const health =
     keycloakDashboard && "health" in keycloakDashboard
@@ -53,6 +63,19 @@ export function HealthPage() {
     ? "Security Update Required"
     : "Update Available";
 
+  // The query keeps its last answer when a refresh fails, so the page says how
+  // old that answer is rather than leaving a stale "UP" looking live.
+  const staleMessage = dataUpdatedAt
+    ? `The last refresh failed. Showing the answer from ${new Date(dataUpdatedAt).toLocaleTimeString()}.`
+    : "The last refresh failed.";
+  const statusColor = failed
+    ? "warning"
+    : health?.status === "UP"
+      ? "success"
+      : health?.status === "DEGRADED"
+        ? "warning"
+        : "error";
+
   return (
     <Box sx={{ p: { xs: 2, sm: 4 } }}>
       <PageHeader
@@ -60,7 +83,13 @@ export function HealthPage() {
         subtitle="Monitor system health and performance metrics"
       />
 
-      {isLoading ? (
+      {failed && !health ? (
+        <ErrorState
+          error="The health data could not be loaded. Try again."
+          title="Failed to load health data"
+          onRetry={() => refetch()}
+        />
+      ) : isLoading ? (
         <LoadingSkeleton variant="card" count={3} />
       ) : health ? (
         <Box
@@ -74,6 +103,14 @@ export function HealthPage() {
             gap: 3,
           }}
         >
+          {failed && (
+            <AlertBanner
+              severity="warning"
+              title="Health data is out of date"
+              message={staleMessage}
+              sx={{ gridColumn: "1 / -1" }}
+            />
+          )}
           {/* Overall Status */}
           <SectionCard title="Keycloak Server Status">
             <Box
@@ -98,13 +135,7 @@ export function HealthPage() {
                 </Typography>
                 <Chip
                   label={health.status}
-                  color={
-                    health.status === "UP"
-                      ? "success"
-                      : health.status === "DEGRADED"
-                        ? "warning"
-                        : "error"
-                  }
+                  color={statusColor}
                   sx={{ fontWeight: 600 }}
                 />
               </Box>

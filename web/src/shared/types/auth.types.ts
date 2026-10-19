@@ -40,6 +40,10 @@ export interface TenantPolicy {
   user_id: number;
   tenant_id: string;
   allowed_realms?: string[];
+  // True when the row names no realm list at all, which grants every realm,
+  // the same as having no row. allowed_realms alone cannot tell this apart
+  // from a deny-all empty list: both are omitted.
+  realms_unrestricted?: boolean;
   granted_by?: string;
   granted_at: string;
   created_at: string;

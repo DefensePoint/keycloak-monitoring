@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"testing"
 	"time"
 
@@ -50,15 +49,14 @@ func assertSameJSON(t *testing.T, context string, want, got string) {
 	}
 }
 
+// fixtureTenant is the tenant the merge fixtures in this package are stored under.
+const fixtureTenant = "merge-fixture-tenant"
+
 func newRawDataTestRepo(t *testing.T) (*Repository, *gorm.DB) {
 	t.Helper()
 
-	dsn := os.Getenv("KMT_TEST_DATABASE_DSN")
-	if dsn == "" {
-		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
-	}
-
-	testdb.ShareDatabase(t, dsn)
+	dsn := testdb.DSN(t, "KMT_TEST_DATABASE_DSN")
+	testdb.Lock(t, dsn)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger:                 gormlogger.Default.LogMode(gormlogger.Silent),
@@ -94,6 +92,7 @@ func TestReconcileAMFAMerges_PreservesRawData(t *testing.T) {
 	const amfaPayload = `{"amfa_event_id":"abc-123","risk_level":3,"country":"DE"}`
 
 	kcEvent := &domain.Event{
+		TenantID:     fixtureTenant,
 		EventID:      kcEventID,
 		Type:         "LOGIN",
 		Source:       "keycloak:test-realm",
@@ -108,6 +107,7 @@ func TestReconcileAMFAMerges_PreservesRawData(t *testing.T) {
 	}
 
 	amfaEvent := &domain.Event{
+		TenantID:     fixtureTenant,
 		EventID:      amfaRowEventID,
 		Type:         "LOGIN",
 		Source:       "amfa:test-realm",
@@ -125,7 +125,7 @@ func TestReconcileAMFAMerges_PreservesRawData(t *testing.T) {
 		t.Fatalf("ReconcileAMFAMerges: %v", err)
 	}
 
-	merged, err := repo.GetByID(ctx, kcEventID)
+	merged, err := repo.GetByTenantAndEventID(ctx, fixtureTenant, kcEventID)
 	if err != nil {
 		t.Fatalf("get merged keycloak event: %v", err)
 	}
@@ -134,6 +134,7 @@ func TestReconcileAMFAMerges_PreservesRawData(t *testing.T) {
 	// A later Keycloak re-upsert of the same event (its domain.Event always
 	// carries RawData: "") must not wipe the merged payload back out.
 	kcReupsert := &domain.Event{
+		TenantID:     fixtureTenant,
 		EventID:      kcEventID,
 		Type:         "LOGIN",
 		Source:       "keycloak:test-realm",
@@ -147,7 +148,7 @@ func TestReconcileAMFAMerges_PreservesRawData(t *testing.T) {
 		t.Fatalf("re-save keycloak event: %v", err)
 	}
 
-	after, err := repo.GetByID(ctx, kcEventID)
+	after, err := repo.GetByTenantAndEventID(ctx, fixtureTenant, kcEventID)
 	if err != nil {
 		t.Fatalf("get event after re-upsert: %v", err)
 	}

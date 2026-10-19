@@ -30,7 +30,8 @@ func TestGetMetricsSummaryScopesEverySubQueryToRealms(t *testing.T) {
 		t.Fatalf("GetMetricsSummary: %v", err)
 	}
 
-	assertRealmScoped(t, recorder.Against("operator_actions"), 7)
+	// Counts, time metrics, severities, types and distinct alerts.
+	assertRealmScoped(t, recorder.Against("operator_actions"), 5)
 }
 
 func TestGetAllOperatorsSummaryScopesToRealms(t *testing.T) {

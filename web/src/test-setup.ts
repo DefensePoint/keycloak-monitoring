@@ -16,7 +16,7 @@ afterEach(() => {
  * `length` are all undefined, so `localStorage.clear()` throws
  * "localStorage.clear is not a function" and every test in the file fails
  * before its first assertion. That is why TenantContext.test.tsx showed nine
- * failures locally while passing in CI, which runs node:20-alpine.
+ * failures locally while passing in CI, which then ran Node 20.
  *
  * Node's `sessionStorage` does work, but it is process-global rather than
  * per-jsdom-environment, so values written by one test file can be read by

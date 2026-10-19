@@ -35,6 +35,7 @@ func TestReconcileAMFAMerges_DoesNotDestroySoftDeletedAmfaRowUnmerged(t *testing
 
 	// Live Keycloak twin, carrying none of the AMFA-owned fields yet.
 	kc := &domain.Event{
+		TenantID:     fixtureTenant,
 		EventID:      kcEventID,
 		Type:         "LOGIN",
 		Source:       "keycloak:test-realm",
@@ -50,6 +51,7 @@ func TestReconcileAMFAMerges_DoesNotDestroySoftDeletedAmfaRowUnmerged(t *testing
 	country := "DE"
 	isVPN := true
 	amfa := &domain.Event{
+		TenantID:     fixtureTenant,
 		EventID:      amfaRowEventID,
 		Type:         "LOGIN",
 		Source:       "amfa:test-realm",
@@ -89,7 +91,7 @@ func TestReconcileAMFAMerges_DoesNotDestroySoftDeletedAmfaRowUnmerged(t *testing
 	}
 
 	// And the twin must not have been enriched from a logically-deleted row.
-	twin, err := repo.GetByID(ctx, kcEventID)
+	twin, err := repo.GetByTenantAndEventID(ctx, fixtureTenant, kcEventID)
 	if err != nil {
 		t.Fatalf("get keycloak twin: %v", err)
 	}

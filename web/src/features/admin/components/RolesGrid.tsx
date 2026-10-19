@@ -7,6 +7,7 @@ export const RolesGrid: React.FC<RolesGridProps> = ({
   roles,
   onView,
   onDelete,
+  onToggleActive,
 }) => {
   return (
     <Box
@@ -26,6 +27,7 @@ export const RolesGrid: React.FC<RolesGridProps> = ({
           role={role}
           onView={onView}
           onDelete={onDelete}
+          onToggleActive={onToggleActive}
         />
       ))}
     </Box>

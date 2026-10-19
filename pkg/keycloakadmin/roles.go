@@ -9,7 +9,11 @@ import (
 
 // GetRealmRoles fetches all realm-level roles from Keycloak
 func (c *Client) GetRealmRoles(ctx context.Context, realmName string) ([]RoleRepresentation, error) {
-	path := fmt.Sprintf("/admin/realms/%s/roles", realmName)
+	realmSeg, err := pathSegment(realmName)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/admin/realms/%s/roles", realmSeg)
 	resp, err := c.get(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get realm roles: %w", err)
@@ -22,7 +26,7 @@ func (c *Client) GetRealmRoles(ctx context.Context, realmName string) ([]RoleRep
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("unexpected status code %d%s", resp.StatusCode, c.replyDetail("get realm roles", resp.StatusCode, body))
 	}
 
 	var roles []RoleRepresentation

@@ -42,6 +42,28 @@ func (e *DeletedAccountError) Error() string { return ErrUserDeleted.Error() }
 // only cares that the account was deleted.
 func (e *DeletedAccountError) Unwrap() error { return ErrUserDeleted }
 
+// ErrEmailInUse is returned when a login arrives with a subject nobody holds
+// and an email address an existing account already holds.
+//
+// The two identities may be one person whose identity provider issued a new
+// subject, after a realm rebuild for instance, or two people the provider let
+// hold the same address. Nothing in the login tells them apart, and handing the
+// account over on the address alone would let anyone who obtains a verified
+// copy of it take over whatever that account may do. So the login is refused
+// unless an administrator has switched on linking by verified email for a
+// planned migration.
+var ErrEmailInUse = errors.New("email address already belongs to another account")
+
+// EmailInUseError carries the id of the account already holding the address,
+// for the same reason DeletedAccountError carries one: it is the row an
+// administrator acts on.
+type EmailInUseError struct{ UserID uint }
+
+func (e *EmailInUseError) Error() string { return ErrEmailInUse.Error() }
+
+// Unwrap keeps errors.Is(err, ErrEmailInUse) working.
+func (e *EmailInUseError) Unwrap() error { return ErrEmailInUse }
+
 // Repository defines the interface for user persistence operations.
 type Repository interface {
 	// FindOrCreateBySubject finds a user by subject (OAuth2 sub claim) or creates a new one.
@@ -49,6 +71,12 @@ type Repository interface {
 
 	// GetBySubject retrieves a user by their subject (OAuth2 sub claim).
 	GetBySubject(ctx context.Context, subject string) (*domain.User, error)
+
+	// CurrentSessionEpoch returns the value a login stores in the session
+	// cookie; RevokeSessions records a logout by moving it on. See the
+	// postgres implementation.
+	CurrentSessionEpoch(ctx context.Context, subject string) (int64, error)
+	RevokeSessions(ctx context.Context, subject string, sessionEpoch int64) (bool, error)
 
 	// GetByEmail retrieves a user by their email address.
 	GetByEmail(ctx context.Context, email string) (*domain.User, error)

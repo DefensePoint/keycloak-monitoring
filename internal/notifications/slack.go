@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -84,34 +86,8 @@ func (s *SlackNotifier) Notify(ctx context.Context, alert *domain.Alert) (string
 		logger.Str("alert_id", alert.AlertID),
 		logger.Str("severity", alert.Severity.String()))
 
-	// Build Slack message
-	msg := s.buildSlackMessage(alert)
-
-	// Marshal to JSON
-	bodyBytes, err := json.Marshal(msg)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal message: %w", err)
-	}
-
-	// Create request
-	req, err := http.NewRequestWithContext(ctx, "POST", s.config.WebhookURL, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set(httplib.HeaderContentType, httplib.ContentTypeJSON)
-
-	// Send request
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to send request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("slack API returned status %d: %s", resp.StatusCode, string(body))
+	if err := s.postMessage(ctx, s.buildSlackMessage(alert)); err != nil {
+		return "", err
 	}
 
 	s.logger.Info("Slack notification sent successfully",
@@ -119,6 +95,90 @@ func (s *SlackNotifier) Notify(ctx context.Context, alert *domain.Alert) (string
 
 	// Return a message identifier (we don't get one from webhook, so use alert ID + timestamp)
 	return fmt.Sprintf("%s-%d", alert.AlertID, time.Now().Unix()), nil
+}
+
+// NotifyResolution posts that an alert has been resolved. A webhook cannot
+// edit or thread onto the original message, so it is a new message naming the
+// alert, in the resolved colour.
+func (s *SlackNotifier) NotifyResolution(ctx context.Context, alert *domain.Alert) error {
+	if !s.config.Enabled {
+		return fmt.Errorf("slack integration is not enabled")
+	}
+
+	resolvedAt := time.Now()
+	if alert.ResolvedAt != nil {
+		resolvedAt = *alert.ResolvedAt
+	}
+	fields := []slackField{{Title: "Severity", Value: alert.Severity.String(), Short: true}}
+	if alert.ResourceName != "" {
+		fields = append(fields, slackField{Title: "Resource", Value: slackText(alert.ResourceName), Short: true})
+	}
+	if alert.RealmName != "" {
+		fields = append(fields, slackField{Title: "Realm", Value: slackText(alert.RealmName), Short: true})
+	}
+	msg := &slackMessage{
+		Text:      fmt.Sprintf("✅ *Resolved*: %s", slackText(alert.Title)),
+		Channel:   s.config.Channel,
+		Username:  s.config.Username,
+		IconEmoji: s.config.IconEmoji,
+		Attachments: []slackAttachment{{
+			Color:     "good",
+			Title:     slackText(alert.Title),
+			Text:      resolutionText(alert, resolvedAt),
+			Fields:    fields,
+			Footer:    "Keycloak Monitoring Tool",
+			Timestamp: resolvedAt.Unix(),
+		}},
+	}
+	return s.postMessage(ctx, msg)
+}
+
+// postMessage sends one message to the configured webhook.
+func (s *SlackNotifier) postMessage(ctx context.Context, msg *slackMessage) error {
+	bodyBytes, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal message: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", s.config.WebhookURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return s.webhookError("failed to create request for", err)
+	}
+	req.Header.Set(httplib.HeaderContentType, httplib.ContentTypeJSON)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return s.webhookError("failed to send request to", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("slack API returned status %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// webhookError reports a failed webhook request without the webhook URL in it.
+// net/http returns a *url.Error carrying the whole request URL, and an
+// incoming webhook URL is the credential, so only its cause is kept, named
+// against the host the request was for.
+func (s *SlackNotifier) webhookError(what string, err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		err = urlErr.Err
+	}
+	return fmt.Errorf("%s %s: %w", what, s.webhookHost(), err)
+}
+
+// webhookHost is the scheme and host of the configured webhook URL, the only
+// part of it that is not secret.
+func (s *SlackNotifier) webhookHost() string {
+	u, err := url.Parse(s.config.WebhookURL)
+	if err != nil || u.Host == "" {
+		return "the Slack webhook URL"
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // buildSlackMessage builds a formatted Slack message from an alert.
@@ -130,7 +190,7 @@ func (s *SlackNotifier) buildSlackMessage(alert *domain.Alert) *slackMessage {
 	summaryText := fmt.Sprintf("%s *%s Alert*: %s",
 		severityEmoji,
 		strings.ToUpper(alert.Severity.String()),
-		alert.Title)
+		slackText(alert.Title))
 
 	// Build title link if base URL is configured
 	titleLink := ""
@@ -144,9 +204,9 @@ func (s *SlackNotifier) buildSlackMessage(alert *domain.Alert) *slackMessage {
 	// Build attachment
 	attachment := slackAttachment{
 		Color:     s.getSeverityColor(alert.Severity),
-		Title:     alert.Title,
+		Title:     slackText(alert.Title),
 		TitleLink: titleLink,
-		Text:      alert.Description,
+		Text:      slackText(alert.Description),
 		Timestamp: alert.FirstDetected.Unix(),
 		Footer:    "Keycloak Monitoring Tool",
 		Fields: []slackField{
@@ -162,17 +222,17 @@ func (s *SlackNotifier) buildSlackMessage(alert *domain.Alert) *slackMessage {
 			},
 			{
 				Title: "Tenant",
-				Value: alert.TenantID,
+				Value: slackText(alert.TenantID),
 				Short: true,
 			},
 			{
 				Title: "Realm",
-				Value: alert.RealmName,
+				Value: slackText(alert.RealmName),
 				Short: true,
 			},
 			{
 				Title: "Resource",
-				Value: fmt.Sprintf("%s: %s", alert.ResourceType, alert.ResourceName),
+				Value: fmt.Sprintf("%s: %s", slackText(alert.ResourceType), slackText(alert.ResourceName)),
 				Short: false,
 			},
 		},
@@ -182,7 +242,7 @@ func (s *SlackNotifier) buildSlackMessage(alert *domain.Alert) *slackMessage {
 	if alert.Recommendation != "" {
 		attachment.Fields = append(attachment.Fields, slackField{
 			Title: "Recommendation",
-			Value: alert.Recommendation,
+			Value: slackText(alert.Recommendation),
 			Short: false,
 		})
 	}
@@ -190,14 +250,14 @@ func (s *SlackNotifier) buildSlackMessage(alert *domain.Alert) *slackMessage {
 	// Add resource ID
 	attachment.Fields = append(attachment.Fields, slackField{
 		Title: "Resource ID",
-		Value: fmt.Sprintf("`%s`", alert.ResourceID),
+		Value: fmt.Sprintf("`%s`", slackText(alert.ResourceID)),
 		Short: true,
 	})
 
 	// Add alert ID
 	attachment.Fields = append(attachment.Fields, slackField{
 		Title: "Alert ID",
-		Value: fmt.Sprintf("`%s`", alert.AlertID),
+		Value: fmt.Sprintf("`%s`", slackText(alert.AlertID)),
 		Short: true,
 	})
 
@@ -267,3 +327,21 @@ func (s *SlackNotifier) getSeverityEmoji(severity domain.AlertSeverity) string {
 
 // Ensure SlackNotifier implements Notifier
 var _ Notifier = (*SlackNotifier)(nil)
+
+// slackEscaper escapes the three characters Slack reads as markup. Alert text
+// carries values from outside: an event alert's description holds the
+// client_id an unauthenticated request named, so an unescaped <!channel> would
+// ping the channel and <https://...|text> would show a disguised link.
+var slackEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
+// slackText escapes alert data for a Slack message.
+func slackText(s string) string { return slackEscaper.Replace(s) }
+
+// resolutionText is the body of a resolution notice: the alert's resolution
+// note when it carries one, so a resolution that is not a recovery says why.
+func resolutionText(alert *domain.Alert, resolvedAt time.Time) string {
+	if alert.ResolutionNote != "" {
+		return fmt.Sprintf("%s Resolved at %s.", slackText(alert.ResolutionNote), resolvedAt.UTC().Format(time.RFC3339))
+	}
+	return fmt.Sprintf("Resolved at %s.", resolvedAt.UTC().Format(time.RFC3339))
+}

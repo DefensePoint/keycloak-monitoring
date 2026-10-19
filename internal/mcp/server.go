@@ -6,6 +6,7 @@
 package mcp
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -13,6 +14,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/healthcheck"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/metrics"
 	"github.com/DefensePoint/keycloak-monitoring/internal/version"
@@ -27,8 +29,15 @@ const (
 
 // Server is the assembled MCP server and the HTTP mux it is served on.
 type Server struct {
-	handler http.Handler
-	port    int
+	handler   http.Handler
+	port      int
+	readiness *healthcheck.Readiness
+}
+
+// SetReadinessCheck sets what /ready requires, the database answering. Without
+// it /ready always answers 200. /health stays a liveness check either way.
+func (s *Server) SetReadinessCheck(check func(context.Context) error) {
+	s.readiness.SetCheck(check)
 }
 
 // Clock is the source of "now" for the tools that resolve a defaulted time
@@ -97,16 +106,17 @@ func newServerWithClock(
 
 	requireAuth := AuthMiddleware(tokens, perms, cfg.MCP.OriginAllowlist, log)
 
+	readiness := healthcheck.NewReadiness(log)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleHealth)
-	mux.HandleFunc("/ready", handleReady)
+	mux.Handle("/ready", readiness)
 	if cfg.MCP.Metrics.Enabled && m != nil {
 		mux.Handle("/metrics", metrics.GuardedHandler(m, cfg.MCP.Metrics))
 	}
 	ips := newKeyLimiter[string](cfg.MCP.Rate.PerIPPerMinute, cfg.MCP.Rate.Burst, maxTrackedIPs)
 	mux.Handle(Endpoint, rateLimitByIP(ips, capRequestBody(requireAuth(streamable))))
 
-	return &Server{handler: mux, port: cfg.MCP.Port}
+	return &Server{handler: mux, port: cfg.MCP.Port, readiness: readiness}
 }
 
 // maxRequestBodyBytes caps any MCP request body before authentication runs,
@@ -154,10 +164,4 @@ func handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"healthy"}`))
-}
-
-func handleReady(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ready"}`))
 }

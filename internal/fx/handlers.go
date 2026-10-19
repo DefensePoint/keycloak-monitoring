@@ -279,8 +279,9 @@ type AuthHandlersParams struct {
 	OAuth2AdminSvc   *auth.OAuth2AdminService `optional:"true"`
 	Provider         auth.Provider            `optional:"true"`
 	SessionManager   *auth.CookieSessionManager
-	StateStore       *auth.StateStore
+	LoginCookie      *auth.LoginCookie
 	SessionBlacklist *auth.SessionBlacklist
+	UserRepo         users.Repository
 	Config           *config.AppConfig
 	Logger           *logger.Logger
 	AuthMiddleware   *chihttp.AuthMiddleware
@@ -317,13 +318,16 @@ func provideAuthHandlers(p AuthHandlersParams) *chihttp.AuthHandlers {
 		p.Logger,
 		simpleEnabled,
 		oauth2Enabled,
-		p.StateStore,
+		p.LoginCookie,
 		p.AuthMiddleware.Authenticate,
 	)
 
 	// Set session blacklist for logout revocation (security fix)
 	if p.SessionBlacklist != nil {
 		handlers.SetSessionBlacklist(p.SessionBlacklist)
+	}
+	if p.UserRepo != nil {
+		handlers.SetSessionRevoker(p.UserRepo)
 	}
 
 	return handlers
@@ -380,6 +384,10 @@ func (a *rbacCheckerAdapter) HasPermission(ctx context.Context, userID uint, per
 	return a.service.HasPermission(ctx, userID, permission, tenantID)
 }
 
+func (a *rbacCheckerAdapter) HasGlobalPermission(ctx context.Context, userID uint, permission string) (bool, error) {
+	return a.service.HasGlobalPermission(ctx, userID, permission)
+}
+
 func (a *rbacCheckerAdapter) GetUserPermissions(ctx context.Context, userID uint, tenantID *string) ([]string, error) {
 	return a.service.GetUserPermissions(ctx, userID, tenantID)
 }
@@ -388,8 +396,13 @@ func (a *rbacCheckerAdapter) IsAdmin(ctx context.Context, userID uint) (bool, er
 	return a.service.IsAdmin(ctx, userID)
 }
 
-func (a *rbacCheckerAdapter) GetUserRoles(ctx context.Context, userID uint) ([]*chihttp.UserRoleInfo, error) {
+func (a *rbacCheckerAdapter) HoldsAnyRole(ctx context.Context, userID uint) (bool, error) {
 	roles, err := a.service.GetUserRoles(ctx, userID)
+	return len(roles) > 0, err
+}
+
+func (a *rbacCheckerAdapter) GetEffectiveUserRoles(ctx context.Context, userID uint) ([]*chihttp.UserRoleInfo, error) {
+	roles, err := a.service.GetEffectiveUserRoles(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -478,6 +491,10 @@ func (a *eventRepoAdapter) List(ctx context.Context, opts *events.ListOptions) (
 
 func (a *eventRepoAdapter) CountWithFilter(ctx context.Context, opts *events.ListOptions) (int64, error) {
 	return a.repo.CountWithFilter(ctx, opts)
+}
+
+func (a *eventRepoAdapter) GetByTenantAndEventID(ctx context.Context, tenantID, eventID string) (*domain.Event, error) {
+	return a.repo.GetByTenantAndEventID(ctx, tenantID, eventID)
 }
 
 // alertsOperatorAdapter adapts operator.Service to chihttp.AlertsOperatorService.

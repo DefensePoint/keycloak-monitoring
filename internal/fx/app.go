@@ -28,7 +28,6 @@ func NewApp(configPath string, opts ...fx.Option) *fx.App {
 		APITokenModule,
 		NotificationsModule,
 		ReportsModule,
-		ConfigCheckModule,
 		EventsCheckModule,
 		AmfaCheckModule,
 		AmfaMirrorModule,
@@ -50,6 +49,10 @@ func NewApp(configPath string, opts ...fx.Option) *fx.App {
 		// Monitoring module (MonitorPoolManager - starts goroutines for each tenant)
 		// This is the CORE of the application that collects data from Keycloak instances
 		MonitoringModule,
+
+		// Configuration checks read the tenants and Keycloak clients that the
+		// monitoring start hook loads, so they come after it.
+		ConfigCheckModule,
 	}
 
 	// Append any additional options

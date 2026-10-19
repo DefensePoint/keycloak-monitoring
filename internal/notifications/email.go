@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"html/template"
+	"net"
 	"net/smtp"
+	"os"
 	"strings"
 	"time"
 
@@ -15,17 +18,29 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 
+// emailSendTimeout bounds one email from connecting to the end of the SMTP
+// conversation, as the GitLab client's 30s bounds one API call.
+//
+// Without it a mail server that accepted the connection and then stopped
+// answering, or a firewall dropping its packets, held the send forever. The
+// checkers and the Keycloak monitor notify inline, so that stopped their
+// alerting and event collection until a restart, and shutdown waited on it.
+const emailSendTimeout = 30 * time.Second
+
 // EmailNotifier handles sending notifications via email.
 type EmailNotifier struct {
 	config *config.EmailConfig
 	logger *logger.Logger
+	// timeout is emailSendTimeout, shortened by tests.
+	timeout time.Duration
 }
 
 // NewEmailNotifier creates a new email notifier.
 func NewEmailNotifier(cfg *config.EmailConfig, log *logger.Logger) *EmailNotifier {
 	return &EmailNotifier{
-		config: cfg,
-		logger: log.WithComponent("email_notifier"),
+		config:  cfg,
+		logger:  log.WithComponent("email_notifier"),
+		timeout: emailSendTimeout,
 	}
 }
 
@@ -63,7 +78,7 @@ func (e *EmailNotifier) Notify(ctx context.Context, alert *domain.Alert) (string
 	}
 
 	// Send email
-	if err := e.sendEmail(subject, body); err != nil {
+	if err := e.sendEmail(ctx, subject, body); err != nil {
 		return "", fmt.Errorf("failed to send email: %w", err)
 	}
 
@@ -82,14 +97,16 @@ func (e *EmailNotifier) buildSubject(alert *domain.Alert) string {
 		subject := strings.ReplaceAll(e.config.Subject, "{{severity}}", strings.ToUpper(alert.Severity.String()))
 		subject = strings.ReplaceAll(subject, "{{title}}", alert.Title)
 		subject = strings.ReplaceAll(subject, "{{resource}}", alert.ResourceName)
-		return subject
+		// A line break in alert data would end the Subject header and start
+		// one of the sender's choosing.
+		return oneLine(subject)
 	}
 
 	// Default subject format
-	return fmt.Sprintf("[%s] Keycloak Monitoring Tool Alert: %s - %s",
+	return oneLine(fmt.Sprintf("[%s] Keycloak Monitoring Tool Alert: %s - %s",
 		strings.ToUpper(alert.Severity.String()),
 		alert.Title,
-		alert.ResourceName)
+		alert.ResourceName))
 }
 
 // buildHTMLBody builds an HTML email body.
@@ -113,8 +130,8 @@ func (e *EmailNotifier) buildHTMLBody(alert *domain.Alert) (string, error) {
 	return buf.String(), nil
 }
 
-// sendEmail sends an email using SMTP.
-func (e *EmailNotifier) sendEmail(subject, htmlBody string) error {
+// sendEmail sends an email using SMTP, within e.timeout and ctx.
+func (e *EmailNotifier) sendEmail(ctx context.Context, subject, htmlBody string) error {
 	// Build message headers
 	headers := make(map[string]string)
 	headers["From"] = e.config.From
@@ -126,13 +143,12 @@ func (e *EmailNotifier) sendEmail(subject, htmlBody string) error {
 	// Build message
 	var message bytes.Buffer
 	for k, v := range headers {
-		message.WriteString(fmt.Sprintf("%s: %s\r\n", k, v))
+		fmt.Fprintf(&message, "%s: %s\r\n", k, v)
 	}
 	message.WriteString("\r\n")
 	message.WriteString(htmlBody)
 
-	// Connect to SMTP server
-	addr := fmt.Sprintf("%s:%d", e.config.SMTPHost, e.config.SMTPPort)
+	addr := net.JoinHostPort(e.config.SMTPHost, fmt.Sprint(e.config.SMTPPort))
 
 	// Setup authentication
 	var auth smtp.Auth
@@ -140,35 +156,77 @@ func (e *EmailNotifier) sendEmail(subject, htmlBody string) error {
 		auth = smtp.PlainAuth("", e.config.Username, e.config.Password, e.config.SMTPHost)
 	}
 
-	// Send email
-	if e.config.UseTLS {
-		return e.sendEmailTLS(addr, auth, message.Bytes())
-	}
-
-	return smtp.SendMail(addr, auth, e.config.From, e.config.To, message.Bytes())
-}
-
-// sendEmailTLS sends an email using TLS.
-func (e *EmailNotifier) sendEmailTLS(addr string, auth smtp.Auth, message []byte) error {
-	// Setup TLS config
-	tlsConfig := &tls.Config{
-		ServerName:         e.config.SMTPHost,
-		InsecureSkipVerify: e.config.SkipVerify,
-	}
-
-	// Connect with TLS
-	conn, err := tls.Dial("tcp", addr, tlsConfig)
+	ctx, cancel := context.WithTimeout(ctx, e.timeout)
+	defer cancel()
+	conn, err := e.dial(ctx, addr)
 	if err != nil {
-		return fmt.Errorf("failed to connect with TLS: %w", err)
+		return err
 	}
 	defer func() { _ = conn.Close() }()
 
-	// Create SMTP client
+	// One deadline for the whole conversation, so a server that stops
+	// answering at any step fails the send instead of holding it. Closing on
+	// cancellation covers a context cancelled before the deadline.
+	deadline, _ := ctx.Deadline()
+	if err := conn.SetDeadline(deadline); err != nil {
+		return fmt.Errorf("failed to set SMTP deadline: %w", err)
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+
+	if err := e.converse(conn, auth, message.Bytes()); err != nil {
+		switch {
+		// The connection's deadline is the context's, and it can fire first:
+		// a timed-out read or write is this send running out of time too.
+		case errors.Is(ctx.Err(), context.DeadlineExceeded), errors.Is(err, os.ErrDeadlineExceeded):
+			return fmt.Errorf("SMTP server %s did not finish within %s: %w", addr, e.timeout, err)
+		case ctx.Err() != nil:
+			return fmt.Errorf("sending to SMTP server %s was cancelled: %w", addr, err)
+		}
+		return err
+	}
+	return nil
+}
+
+// dial connects to the SMTP server, over TLS from the start when use_tls is
+// set.
+func (e *EmailNotifier) dial(ctx context.Context, addr string) (net.Conn, error) {
+	if e.config.UseTLS {
+		d := tls.Dialer{Config: &tls.Config{
+			ServerName:         e.config.SMTPHost,
+			InsecureSkipVerify: e.config.SkipVerify,
+		}}
+		conn, err := d.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect with TLS: %w", err)
+		}
+		return conn, nil
+	}
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to SMTP server: %w", err)
+	}
+	return conn, nil
+}
+
+// converse runs the SMTP conversation on conn. Without use_tls it upgrades
+// with STARTTLS when the server offers it, as smtp.SendMail did, and PlainAuth
+// still refuses to send credentials over a connection that is not encrypted.
+func (e *EmailNotifier) converse(conn net.Conn, auth smtp.Auth, message []byte) error {
 	client, err := smtp.NewClient(conn, e.config.SMTPHost)
 	if err != nil {
 		return fmt.Errorf("failed to create SMTP client: %w", err)
 	}
-	defer func() { _ = client.Quit() }()
+	defer func() { _ = client.Close() }()
+
+	if !e.config.UseTLS {
+		if ok, _ := client.Extension("STARTTLS"); ok {
+			if err := client.StartTLS(&tls.Config{ServerName: e.config.SMTPHost}); err != nil {
+				return fmt.Errorf("STARTTLS failed: %w", err)
+			}
+		}
+	}
 
 	// Authenticate if needed
 	if auth != nil {
@@ -194,13 +252,17 @@ func (e *EmailNotifier) sendEmailTLS(addr string, auth smtp.Auth, message []byte
 	if err != nil {
 		return fmt.Errorf("failed to get data writer: %w", err)
 	}
-	defer func() { _ = w.Close() }()
-
-	_, err = w.Write(message)
-	if err != nil {
+	if _, err := w.Write(message); err != nil {
 		return fmt.Errorf("failed to write message: %w", err)
 	}
-
+	// Close ends the message and returns the server's verdict on it. Its
+	// error used to be discarded, so a message the server refused was
+	// reported as sent.
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("SMTP server rejected the message: %w", err)
+	}
+	// The message is accepted at this point; a failed QUIT does not undo it.
+	_ = client.Quit()
 	return nil
 }
 

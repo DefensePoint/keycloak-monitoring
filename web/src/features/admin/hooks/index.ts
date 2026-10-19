@@ -4,6 +4,7 @@ export {
   useRole,
   useCreateRole,
   useDeleteRole,
+  useSetRoleActive,
   // Permissions
   usePermissions,
   // Users

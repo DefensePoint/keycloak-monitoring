@@ -72,7 +72,7 @@ func TestAuthorizeDeniesEmptyAllowlist(t *testing.T) {
 }
 
 func TestTenantArgInjectsTheOnlyAllowlistedTenant(t *testing.T) {
-	got, err := TenantArg(&Caller{UserID: 7, TenantIDs: []string{"tenant-a"}}, "")
+	got, err := TenantArg(context.Background(), &Caller{UserID: 7, TenantIDs: []string{"tenant-a"}}, "")
 	if err != nil || got != "tenant-a" {
 		t.Fatalf("TenantArg = %q, %v, want tenant-a, nil", got, err)
 	}
@@ -81,7 +81,7 @@ func TestTenantArgInjectsTheOnlyAllowlistedTenant(t *testing.T) {
 func TestTenantArgRejectsASuppliedTenantForASingleTenantToken(t *testing.T) {
 	caller := &Caller{UserID: 7, TenantIDs: []string{"tenant-a"}}
 	for _, arg := range []string{"tenant-a", "tenant-b"} {
-		if _, err := TenantArg(caller, arg); !errors.Is(err, ErrInvalidInput) {
+		if _, err := TenantArg(context.Background(), caller, arg); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("TenantArg(%q) error = %v, want ErrInvalidInput", arg, err)
 		}
 	}
@@ -89,17 +89,17 @@ func TestTenantArgRejectsASuppliedTenantForASingleTenantToken(t *testing.T) {
 
 func TestTenantArgKeepsTheArgumentForAMultiTenantToken(t *testing.T) {
 	caller := &Caller{UserID: 7, TenantIDs: []string{"tenant-a", "tenant-b"}}
-	got, err := TenantArg(caller, "tenant-b")
+	got, err := TenantArg(context.Background(), caller, "tenant-b")
 	if err != nil || got != "tenant-b" {
 		t.Fatalf("TenantArg = %q, %v, want tenant-b, nil", got, err)
 	}
-	if _, err := TenantArg(caller, ""); !errors.Is(err, ErrInvalidInput) {
+	if _, err := TenantArg(context.Background(), caller, ""); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("TenantArg without an argument = %v, want ErrInvalidInput", err)
 	}
 }
 
 func TestTenantArgDeniesAnUnscopedToken(t *testing.T) {
-	if _, err := TenantArg(&Caller{UserID: 7}, "tenant-a"); !errors.Is(err, ErrForbidden) {
+	if _, err := TenantArg(context.Background(), &Caller{UserID: 7}, "tenant-a"); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("TenantArg for a token carrying no allowlist = %v, want ErrForbidden", err)
 	}
 }

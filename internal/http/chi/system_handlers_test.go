@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -43,6 +44,17 @@ func (s *stubEventRepo) CountWithFilter(_ context.Context, opts *events.ListOpti
 	s.calls++
 	s.lastOpts = opts
 	return s.total, nil
+}
+
+// GetByTenantAndEventID matches on both columns, as the real repository does.
+func (s *stubEventRepo) GetByTenantAndEventID(_ context.Context, tenantID, eventID string) (*domain.Event, error) {
+	s.calls++
+	for _, e := range s.events {
+		if e.TenantID == tenantID && e.EventID == eventID {
+			return e, nil
+		}
+	}
+	return nil, events.ErrNotFound
 }
 
 func realms(names ...string) []*domain.KeycloakRealmInfo {
@@ -398,6 +410,191 @@ func TestSystemHandlers_RequireUserForScoping(t *testing.T) {
 			}
 			if repo.calls != 0 {
 				t.Errorf("repository queried %d times without an authenticated caller, want 0", repo.calls)
+			}
+		})
+	}
+}
+
+// newEventRequest is newSystemRequest for GET /events/{eventID}.
+func newEventRequest(tenantID, eventID string, caller *UserDetails) *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "/api/tenants/"+tenantID+"/events/"+url.PathEscape(eventID), nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("tenantID", tenantID)
+	rctx.URLParams.Add("eventID", eventID)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	if caller != nil {
+		ctx = context.WithValue(ctx, UserInfoKey, caller)
+	}
+	return req.WithContext(ctx)
+}
+
+func TestSystemHandlers_Event_RealmPolicy(t *testing.T) {
+	// The event lives in realmA; the tenant holds realmA and realmB.
+	cases := []struct {
+		name     string
+		rbac     *mockRBACChecker
+		wantCode int
+	}{
+		{"caller with no policy row sees it", &mockRBACChecker{}, http.StatusOK},
+		{"admin sees it despite a restricting policy", &mockRBACChecker{isAdmin: true, policies: policyFor("tenant-a", "realmB")}, http.StatusOK},
+		{"policy for another tenant does not hide it", &mockRBACChecker{policies: policyFor("tenant-b", "realmB")}, http.StatusOK},
+		{"policy restricted to the other realm hides it", &mockRBACChecker{policies: policyFor("tenant-a", "realmB")}, http.StatusNotFound},
+		{"policy with an empty realm list hides it", &mockRBACChecker{policies: policyFor("tenant-a")}, http.StatusNotFound},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &stubEventRepo{events: []*domain.Event{
+				{TenantID: "tenant-a", EventID: "e1", Source: "keycloak:realmA", Username: "alice"},
+			}}
+			h := &SystemHandlers{
+				eventRepo:   repo,
+				realmLister: &mockRealmLister{realms: realms("realmA", "realmB")},
+				rbacService: tt.rbac,
+				log:         newTestLogger(),
+			}
+
+			rec := httptest.NewRecorder()
+			h.handleEvent(rec, newEventRequest("tenant-a", "e1", &UserDetails{ID: 1}))
+
+			if rec.Code != tt.wantCode {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantCode, rec.Body.String())
+			}
+			if tt.wantCode == http.StatusOK {
+				var got domain.Event
+				if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+					t.Fatalf("decode: %v; body = %s", err, rec.Body.String())
+				}
+				if got.EventID != "e1" || got.Username != "alice" {
+					t.Errorf("event = %+v, want e1 for alice", got)
+				}
+			}
+		})
+	}
+}
+
+// A caller left with no realm at all must not reach the repository, the same
+// rule the list follows.
+func TestSystemHandlers_Event_NoAllowedRealmNeverQueries(t *testing.T) {
+	repo := &stubEventRepo{events: []*domain.Event{{TenantID: "tenant-a", EventID: "e1", Source: "keycloak:realmA"}}}
+	h := &SystemHandlers{
+		eventRepo:   repo,
+		realmLister: &mockRealmLister{realms: realms("realmA")},
+		rbacService: &mockRBACChecker{policies: policyFor("tenant-a")},
+		log:         newTestLogger(),
+	}
+
+	rec := httptest.NewRecorder()
+	h.handleEvent(rec, newEventRequest("tenant-a", "e1", &UserDetails{ID: 1}))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if repo.calls != 0 {
+		t.Errorf("repository queried %d times for a caller with no allowed realm, want 0", repo.calls)
+	}
+}
+
+func TestSystemHandlers_Event_NotFoundCases(t *testing.T) {
+	cases := []struct {
+		name    string
+		eventID string
+	}{
+		{"another tenant's event with the same id", "shared"},
+		{"an id no tenant has", "missing"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &stubEventRepo{events: []*domain.Event{
+				{TenantID: "tenant-b", EventID: "shared", Source: "keycloak:realmA"},
+			}}
+			h := &SystemHandlers{
+				eventRepo:   repo,
+				realmLister: &mockRealmLister{realms: realms("realmA")},
+				rbacService: &mockRBACChecker{},
+				log:         newTestLogger(),
+			}
+
+			rec := httptest.NewRecorder()
+			h.handleEvent(rec, newEventRequest("tenant-a", tt.eventID, &UserDetails{ID: 1}))
+
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("status = %d, want %d; body = %s", rec.Code, http.StatusNotFound, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestSystemHandlers_Event_RequiresACaller(t *testing.T) {
+	repo := &stubEventRepo{}
+	h := &SystemHandlers{
+		eventRepo:   repo,
+		realmLister: &mockRealmLister{realms: realms("realmA")},
+		rbacService: &mockRBACChecker{},
+		log:         newTestLogger(),
+	}
+
+	rec := httptest.NewRecorder()
+	h.handleEvent(rec, newEventRequest("tenant-a", "e1", nil))
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if repo.calls != 0 {
+		t.Errorf("repository queried %d times without a caller, want 0", repo.calls)
+	}
+}
+
+// The other tests inject route params, so they cannot see how chi decodes a
+// path. This one routes for real: an id carrying a character Go keeps encoded
+// in RawPath (":", "+", "/", "&", "=") used to reach the lookup still escaped,
+// while a literal "%41" must survive untouched.
+func TestSystemHandlers_Event_DecodesTheRoutedID(t *testing.T) {
+	ids := []string{
+		"0b6f1c2e-5d3a-4c1e-9f00-1a2b3c4d5e6f",
+		"realm:with:colons-1790000000000-LOGIN",
+		"plus+sign",
+		"slash/inside",
+		"query?x=1&y=2",
+		"has space",
+		"percent%41literal",
+		"unicodé",
+	}
+	stored := make([]*domain.Event, 0, len(ids))
+	for _, id := range ids {
+		stored = append(stored, &domain.Event{TenantID: "tenant-a", EventID: id, Source: "keycloak:realmA"})
+	}
+	h := &SystemHandlers{
+		eventRepo:   &stubEventRepo{events: stored},
+		realmLister: &mockRealmLister{realms: realms("realmA")},
+		rbacService: &mockRBACChecker{},
+		log:         newTestLogger(),
+	}
+	router := chi.NewRouter()
+	router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), UserInfoKey, &UserDetails{ID: 1})))
+		})
+	})
+	router.Get("/api/tenants/{tenantID}/events/{eventID}", h.handleEvent)
+
+	for _, id := range ids {
+		t.Run(id, func(t *testing.T) {
+			// url.PathEscape plus the characters encodeURIComponent also escapes,
+			// which is what the web client sends.
+			escaped := strings.NewReplacer(":", "%3A", "+", "%2B", "&", "%26", "=", "%3D").
+				Replace(url.PathEscape(id))
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tenants/tenant-a/events/"+escaped, nil))
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d for %q (sent %s), want 200; body = %s", rec.Code, id, escaped, rec.Body.String())
+			}
+			var got domain.Event
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if got.EventID != id {
+				t.Errorf("event_id = %q, want %q", got.EventID, id)
 			}
 		})
 	}

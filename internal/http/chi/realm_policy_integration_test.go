@@ -16,7 +16,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -28,7 +27,6 @@ import (
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/alerts"
 	"github.com/DefensePoint/keycloak-monitoring/internal/amfa"
-	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
@@ -105,42 +103,13 @@ type policyStack struct {
 	tenantID string
 	users    map[string]uint
 
-	events *stubEventRepo
-	alerts *policyAlertsService
-	amfa   *stubAmfaService
-}
-
-// dsnConfig turns a libpq key=value DSN into the config NewClient builds its own
-// DSN from. Nothing here is echoed back to the log: the DSN carries a password.
-func dsnConfig(t *testing.T, dsn string) *config.DatabaseConfig {
-	t.Helper()
-
-	cfg := &config.DatabaseConfig{MaxConns: 5, MinConns: 1, Timeout: 30 * time.Second}
-	for _, pair := range strings.Fields(dsn) {
-		key, value, ok := strings.Cut(pair, "=")
-		if !ok {
-			continue
-		}
-		switch key {
-		case "host":
-			cfg.Host = value
-		case "port":
-			port, err := strconv.Atoi(value)
-			if err != nil {
-				t.Fatalf("KMT_TEST_DATABASE_DSN has a non-numeric port")
-			}
-			cfg.Port = port
-		case "dbname":
-			cfg.Database = value
-		case "user":
-			cfg.User = value
-		case "password":
-			cfg.Password = value
-		case "sslmode":
-			cfg.SSLMode = value
-		}
-	}
-	return cfg
+	events   *stubEventRepo
+	alerts   *policyAlertsService
+	amfa     *stubAmfaService
+	keycloak *policyKeycloakService
+	// realms is what the tenant holds, as every handler's realm lister reports
+	// it. A test may add to it before driving a request.
+	realms *mockRealmLister
 }
 
 // policyAlertsService records the realm scope every alerts query ran with, and
@@ -209,15 +178,11 @@ func (s *policyAlertsService) DeleteAlert(_ context.Context, _, alertID string) 
 func newPolicyStack(t *testing.T) *policyStack {
 	t.Helper()
 
-	dsn := os.Getenv("KMT_TEST_DATABASE_DSN")
-	if dsn == "" {
-		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
-	}
-
-	testdb.ShareDatabase(t, dsn)
+	dsn := testdb.DSN(t, "KMT_TEST_DATABASE_DSN")
+	testdb.Lock(t, dsn)
 
 	log := logger.NewNoop()
-	client, err := database.NewClient(dsnConfig(t, dsn), log)
+	client, err := database.NewClient(testdb.DatabaseConfig(t, dsn), log)
 	if err != nil {
 		t.Fatalf("failed to open test database: %v", err)
 	}
@@ -251,7 +216,9 @@ func newPolicyStack(t *testing.T) *policyStack {
 		events:   &stubEventRepo{events: []*domain.Event{{EventID: "e1"}}, total: 1},
 		alerts:   &policyAlertsService{},
 		amfa:     &stubAmfaService{},
+		realms:   &mockRealmLister{realms: realms(policyRealmDenied, policyRealmAllowed)},
 	}
+	stack.keycloak = &policyKeycloakService{stubKeycloakService: &stubKeycloakService{}, realms: stack.realms}
 	stack.router = mountPolicyRoutes(stack, rbacService, log)
 	return stack
 }
@@ -353,7 +320,7 @@ func seedPolicyRow(t *testing.T, db *gorm.DB, repo rbac.TenantPolicyRepository, 
 	}
 }
 
-// mountPolicyRoutes mounts the system, alerts and AMFA tenant routes as the
+// mountPolicyRoutes mounts the system, alerts, AMFA and Keycloak tenant routes as the
 // application router does. Only authentication is a double, reading the caller
 // from the X-Test-User header; every authorization layer below it is real.
 func mountPolicyRoutes(stack *policyStack, rbacService rbac.Service, log *logger.Logger) http.Handler {
@@ -367,11 +334,10 @@ func mountPolicyRoutes(stack *policyStack, rbacService rbac.Service, log *logger
 		})
 	}
 
-	system := NewSystemHandlers(stack.events, nil, &mockRealmLister{
-		realms: realms(policyRealmDenied, policyRealmAllowed),
-	}, checker, log, authMW, rbacMW)
+	system := NewSystemHandlers(stack.events, nil, stack.realms, checker, log, authMW, rbacMW)
 	alertsHandlers := NewAlertsHandlers(stack.alerts, checker, &mockOperatorService{}, nil, log, authMW, rbacMW)
 	amfaHandlers := NewAmfaHandlers(stack.amfa, nil, checker, log, authMW, rbacMW, nil)
+	keycloakHandlers := NewKeycloakHandlers(stack.keycloak, checker, nil, log, authMW, rbacMW)
 
 	r := chi.NewRouter()
 	r.Route("/api/tenants/{tenantID}", func(r chi.Router) {
@@ -379,6 +345,7 @@ func mountPolicyRoutes(stack *policyStack, rbacService rbac.Service, log *logger
 		system.RegisterTenantRoutes(r)
 		alertsHandlers.RegisterTenantRoutes(r)
 		amfaHandlers.RegisterTenantRoutes(r)
+		keycloakHandlers.RegisterTenantRoutes(r)
 	})
 	return r
 }
@@ -391,6 +358,10 @@ func (a *policyRBACAdapter) HasPermission(ctx context.Context, userID uint, perm
 	return a.service.HasPermission(ctx, userID, permission, tenantID)
 }
 
+func (a *policyRBACAdapter) HasGlobalPermission(ctx context.Context, userID uint, permission string) (bool, error) {
+	return a.service.HasGlobalPermission(ctx, userID, permission)
+}
+
 func (a *policyRBACAdapter) GetUserPermissions(ctx context.Context, userID uint, tenantID *string) ([]string, error) {
 	return a.service.GetUserPermissions(ctx, userID, tenantID)
 }
@@ -399,8 +370,13 @@ func (a *policyRBACAdapter) IsAdmin(ctx context.Context, userID uint) (bool, err
 	return a.service.IsAdmin(ctx, userID)
 }
 
-func (a *policyRBACAdapter) GetUserRoles(ctx context.Context, userID uint) ([]*UserRoleInfo, error) {
+func (a *policyRBACAdapter) HoldsAnyRole(ctx context.Context, userID uint) (bool, error) {
 	roles, err := a.service.GetUserRoles(ctx, userID)
+	return len(roles) > 0, err
+}
+
+func (a *policyRBACAdapter) GetEffectiveUserRoles(ctx context.Context, userID uint) ([]*UserRoleInfo, error) {
+	roles, err := a.service.GetEffectiveUserRoles(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -490,6 +466,7 @@ func (s *policyStack) reset() {
 	s.amfa.lastStatsOpts = amfa.StatsOptions{}
 	s.amfa.lastListOpts = amfa.ListEventsOptions{}
 	s.amfa.lastGeoOpts = amfa.GeoOptions{}
+	s.keycloak.reset()
 }
 
 // CreatePolicy with no realms must leave a column every reader treats as

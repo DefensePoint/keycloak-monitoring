@@ -32,10 +32,13 @@ type Reader interface {
 
 // Writer defines write operations for tenants.
 type Writer interface {
-	// Create creates a new tenant.
+	// Create creates a new tenant. A tenant created as the default clears
+	// is_default on every other tenant in the same transaction.
 	Create(ctx context.Context, tenant *domain.KeycloakTenant) error
 
-	// Update updates an existing tenant.
+	// Update updates an existing tenant. A tenant saved as the default clears
+	// is_default on every other tenant in the same transaction, so a save that
+	// fails leaves the previous default in place.
 	Update(ctx context.Context, tenant *domain.KeycloakTenant) error
 
 	// Delete hard-deletes a tenant and every row it owns. This is
@@ -48,7 +51,4 @@ type Writer interface {
 
 	// UpdateError records an error for a tenant.
 	UpdateError(ctx context.Context, tenantID, errorMsg string) error
-
-	// UnsetDefault unsets all tenants as default.
-	UnsetDefault(ctx context.Context) error
 }

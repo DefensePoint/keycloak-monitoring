@@ -6,7 +6,9 @@ export interface OperatorMetricsSummary {
   alerts_resolved: number;
   alerts_ignored: number;
   critical_alerts_handled: number;
-  high_alerts_handled: number;
+  error_alerts_handled: number;
+  warning_alerts_handled: number;
+  info_alerts_handled: number;
   avg_response_time: number;
   avg_time_to_acknowledge: number;
   avg_time_to_resolve: number;

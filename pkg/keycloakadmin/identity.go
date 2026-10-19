@@ -9,7 +9,11 @@ import (
 
 // GetIdentityProviders returns a list of identity providers in a realm
 func (c *Client) GetIdentityProviders(ctx context.Context, realmName string) ([]*IdentityProviderRepresentation, error) {
-	path := fmt.Sprintf("/admin/realms/%s/identity-provider/instances", realmName)
+	realmSeg, err := pathSegment(realmName)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/admin/realms/%s/identity-provider/instances", realmSeg)
 
 	resp, err := c.get(ctx, path)
 	if err != nil {
@@ -23,7 +27,7 @@ func (c *Client) GetIdentityProviders(ctx context.Context, realmName string) ([]
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("failed to get identity providers, status: %d, body: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("failed to get identity providers, status: %d%s", resp.StatusCode, c.replyDetail("get identity providers", resp.StatusCode, body))
 	}
 
 	var identityProviders []*IdentityProviderRepresentation

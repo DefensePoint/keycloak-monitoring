@@ -34,6 +34,10 @@ type RoleRepository interface {
 
 	// RemovePermissionsFromRole removes permissions from a role.
 	RemovePermissionsFromRole(ctx context.Context, roleID uint, permissionIDs []uint) error
+
+	// SetRolePermissions makes the role's permissions exactly permissionIDs,
+	// removing any it held that are not listed. An empty list removes all.
+	SetRolePermissions(ctx context.Context, roleID uint, permissionIDs []uint) error
 }
 
 // PermissionRepository defines the interface for permission persistence.
@@ -79,6 +83,10 @@ type UserRoleRepository interface {
 
 	// HasPermission checks if a user has a specific permission.
 	HasPermission(ctx context.Context, userID uint, permission string, tenantID *string) (bool, error)
+
+	// HasGlobalPermission checks if a user holds a permission through a role
+	// granted for every tenant. A tenant-scoped grant does not count.
+	HasGlobalPermission(ctx context.Context, userID uint, permission string) (bool, error)
 
 	// GetUsersWithRole retrieves all users with a specific role.
 	GetUsersWithRole(ctx context.Context, roleID uint) ([]*domain.User, error)

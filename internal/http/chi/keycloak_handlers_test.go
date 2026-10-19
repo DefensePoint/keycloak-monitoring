@@ -24,6 +24,9 @@ type stubKeycloakService struct {
 	dashboard    *keycloak.Dashboard
 	realms       []*domain.KeycloakRealmInfo
 	amfaRealms   []string
+	clients      []*keycloakadmin.ClientRepresentation
+
+	userDetailsCalls int
 }
 
 func (s *stubKeycloakService) ListEvents(context.Context, string, int, int) ([]*domain.KeycloakEvent, error) {
@@ -105,11 +108,12 @@ func (s *stubKeycloakService) GetUsers(context.Context, string, string, int, int
 }
 
 func (s *stubKeycloakService) GetClients(context.Context, string, string) ([]*keycloakadmin.ClientRepresentation, error) {
-	return nil, nil
+	return s.clients, nil
 }
 
 func (s *stubKeycloakService) GetUserDetails(context.Context, string, string, string) (*keycloakadmin.UserDetails, error) {
-	return nil, nil
+	s.userDetailsCalls++
+	return &keycloakadmin.UserDetails{}, nil
 }
 
 func (s *stubKeycloakService) GetInfinispanMetrics(context.Context, string) (*keycloakadmin.InfinispanMetrics, error) {
@@ -152,6 +156,14 @@ type stubKeycloakEventRepo struct {
 	realmCalls   []string
 	typeCalls    [][2]string
 	otherRealmEv []*domain.KeycloakEvent
+}
+
+func (r *stubKeycloakEventRepo) StoredEventIDs(context.Context, string, []string, time.Time, time.Time) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (r *stubKeycloakEventRepo) IDlessEventTimes(context.Context, string, time.Time) (time.Time, time.Time, error) {
+	return time.Time{}, time.Time{}, nil
 }
 
 func (s *stubKeycloakEventRepo) GetEvents(context.Context, string, int, int) ([]*domain.KeycloakEvent, error) {
@@ -226,12 +238,7 @@ func TestKeycloakHandlers_Events_TypeFilterStaysInRealm(t *testing.T) {
 				},
 			}
 			svc := keycloak.NewService(repo, nil, nil, nil, nil, nil)
-			rbacSvc := &mockRBACChecker{
-				policies: policyFor("tenant-a", "realmB"),
-				hasAccessToRealmFn: func(_ context.Context, _ uint, _, realmName string) (bool, error) {
-					return realmName == "realmB", nil
-				},
-			}
+			rbacSvc := &mockRBACChecker{policies: policyFor("tenant-a", "realmB")}
 			router := setupTestKeycloakRouter(newTestKeycloakHandlers(svc, rbacSvc))
 
 			req := httptest.NewRequest(http.MethodGet, "/api/tenants/tenant-a/keycloak/events"+tt.query, nil)
@@ -266,12 +273,7 @@ func TestKeycloakHandlers_Events_TypeFilterStaysInRealm(t *testing.T) {
 func TestKeycloakHandlers_Events_DeniedRealmNeverQueries(t *testing.T) {
 	repo := &stubKeycloakEventRepo{}
 	svc := keycloak.NewService(repo, nil, nil, nil, nil, nil)
-	rbacSvc := &mockRBACChecker{
-		policies: policyFor("tenant-a", "realmB"),
-		hasAccessToRealmFn: func(_ context.Context, _ uint, _, realmName string) (bool, error) {
-			return realmName == "realmB", nil
-		},
-	}
+	rbacSvc := &mockRBACChecker{policies: policyFor("tenant-a", "realmB")}
 	router := setupTestKeycloakRouter(newTestKeycloakHandlers(svc, rbacSvc))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tenants/tenant-a/keycloak/events?realm=realmA&type=LOGIN", nil)
@@ -437,12 +439,7 @@ func TestKeycloakHandlers_Dashboard_AllRealmsNarrowedToPolicy(t *testing.T) {
 
 func TestKeycloakHandlers_Dashboard_NamedRealmStillDenied(t *testing.T) {
 	svc := &stubKeycloakService{dashboard: dashboardFor("realmA", "realmB")}
-	rbacSvc := &mockRBACChecker{
-		policies: policyFor("tenant-a", "realmB"),
-		hasAccessToRealmFn: func(_ context.Context, _ uint, _, realmName string) (bool, error) {
-			return realmName == "realmB", nil
-		},
-	}
+	rbacSvc := &mockRBACChecker{policies: policyFor("tenant-a", "realmB")}
 	router := setupTestKeycloakRouter(newTestKeycloakHandlers(svc, rbacSvc))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tenants/tenant-a/keycloak/dashboard?realm=realmA", nil)
@@ -603,7 +600,8 @@ func TestKeycloakHandlers_CheckRealmAccess(t *testing.T) {
 		name           string
 		realmName      string
 		authenticated  bool
-		hasAccessFn    func(ctx context.Context, userID uint, tenantID, realmName string) (bool, error)
+		policies       []*domain.TenantPolicy
+		policiesErr    error
 		wantAllowed    bool
 		wantStatusCode int
 	}{
@@ -611,16 +609,35 @@ func TestKeycloakHandlers_CheckRealmAccess(t *testing.T) {
 			name:          "realm the caller may read",
 			realmName:     "master",
 			authenticated: true,
+			policies:      policyFor("tenant-a", "master"),
 			wantAllowed:   true,
 		},
 		{
-			name:          "realm outside the caller's policy",
+			name:           "realm outside the caller's policy",
+			realmName:      "master",
+			authenticated:  true,
+			policies:       policyFor("tenant-a", "other"),
+			wantStatusCode: http.StatusForbidden,
+		},
+		{
+			name:          "caller with no policy row",
 			realmName:     "master",
 			authenticated: true,
-			hasAccessFn: func(_ context.Context, _ uint, _, _ string) (bool, error) {
-				return false, nil
-			},
-			wantStatusCode: http.StatusForbidden,
+			wantAllowed:   true,
+		},
+		{
+			name:          "a later row grants the realm",
+			realmName:     "master",
+			authenticated: true,
+			policies:      append(policyFor("tenant-a", "other"), policyFor("tenant-a", "master")...),
+			wantAllowed:   true,
+		},
+		{
+			name:          "an unrestricted row widens an earlier list",
+			realmName:     "master",
+			authenticated: true,
+			policies:      append(policyFor("tenant-a", "other"), &domain.TenantPolicy{TenantID: "tenant-a", RealmsUnrestricted: true}),
+			wantAllowed:   true,
 		},
 		{
 			// An empty realm names no realm to authorize, so it is denied.
@@ -640,12 +657,10 @@ func TestKeycloakHandlers_CheckRealmAccess(t *testing.T) {
 			wantStatusCode: http.StatusUnauthorized,
 		},
 		{
-			name:          "realm lookup fails",
-			realmName:     "master",
-			authenticated: true,
-			hasAccessFn: func(_ context.Context, _ uint, _, _ string) (bool, error) {
-				return false, errors.New("policy lookup failed")
-			},
+			name:           "realm lookup fails",
+			realmName:      "master",
+			authenticated:  true,
+			policiesErr:    errors.New("policy lookup failed"),
 			wantStatusCode: http.StatusInternalServerError,
 		},
 	}
@@ -653,7 +668,7 @@ func TestKeycloakHandlers_CheckRealmAccess(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := &KeycloakHandlers{
-				rbacService: &mockRBACChecker{hasAccessToRealmFn: tt.hasAccessFn},
+				rbacService: &mockRBACChecker{policies: tt.policies, policiesErr: tt.policiesErr},
 				log:         newTestLogger(),
 			}
 

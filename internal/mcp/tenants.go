@@ -62,7 +62,7 @@ func registerListTenants(srv *mcpsdk.Server, authz *Authorizer, g *toolGuard) {
 func registerGetTenantHealth(srv *mcpsdk.Server, authz *Authorizer, g *toolGuard) {
 	handler := func(ctx context.Context, req *mcpsdk.CallToolRequest, in tenantHealthInput) (*mcpsdk.CallToolResult, tenantHealthOutput, error) {
 		caller := CallerFromRequest(req)
-		tenantID, err := TenantArg(caller, in.Tenant)
+		tenantID, err := TenantArg(ctx, caller, in.Tenant)
 		if err != nil {
 			return nil, tenantHealthOutput{}, err
 		}

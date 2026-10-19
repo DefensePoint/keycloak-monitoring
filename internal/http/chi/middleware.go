@@ -3,11 +3,17 @@ package chi
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/gorilla/sessions"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/auth"
@@ -27,6 +33,39 @@ const (
 	UserInfoKey contextKey = "user_info"
 )
 
+func ClientIPMiddleware(trusted []string) (func(http.Handler) http.Handler, error) {
+	cidrs := make([]string, 0, len(trusted))
+	for i, c := range trusted {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		if _, err := netip.ParsePrefix(c); err != nil {
+			hint := ""
+			if ip, ipErr := netip.ParseAddr(c); ipErr == nil {
+				bits := 32
+				if ip.Is6() {
+					bits = 128
+				}
+				hint = fmt.Sprintf(" (did you mean %s/%d?)", ip, bits)
+			}
+			return nil, fmt.Errorf("trusted_proxies[%d] %q is not a CIDR%s", i, c, hint)
+		}
+		cidrs = append(cidrs, c)
+	}
+	if len(cidrs) == 0 {
+		return chimw.ClientIPFromRemoteAddr, nil
+	}
+	return chimw.ClientIPFromXFF(cidrs...), nil
+}
+
+func clientIP(r *http.Request) string {
+	if ip := chimw.GetClientIP(r.Context()); ip != "" {
+		return ip
+	}
+	return r.RemoteAddr
+}
+
 // LoggingMiddleware logs HTTP requests with timing information.
 func LoggingMiddleware(log *logger.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -45,7 +84,7 @@ func LoggingMiddleware(log *logger.Logger) func(http.Handler) http.Handler {
 				logger.Str("path", r.URL.Path),
 				logger.Int("status", wrapped.statusCode),
 				logger.Dur("duration", duration),
-				logger.Str("remote_addr", r.RemoteAddr),
+				logger.Str("remote_addr", clientIP(r)),
 			)
 		})
 	}
@@ -120,29 +159,105 @@ func SecurityHeadersMiddleware(headers SecurityHeaders) func(http.Handler) http.
 	}
 }
 
-// CORSMiddleware adds CORS headers to responses.
-func CORSMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Get origin from request
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			origin = "*"
+// CrossOriginMiddleware refuses state-changing browser requests from any
+// origin other than the API's own or one listed in allowedOrigins, and
+// grants credentialed CORS only to allowedOrigins.
+func CrossOriginMiddleware(allowedOrigins []string, log *logger.Logger) (func(http.Handler) http.Handler, error) {
+	protection := http.NewCrossOriginProtection()
+	allowed := make(map[string]bool, len(allowedOrigins))
+	var origins []string
+	for _, entry := range allowedOrigins {
+		origins = append(origins, strings.FieldsFunc(entry, func(r rune) bool {
+			return r == ',' || unicode.IsSpace(r)
+		})...)
+	}
+	for _, entry := range origins {
+		if strings.Contains(entry, "*") {
+			return nil, fmt.Errorf("http.cors.allowed_origins: %q: wildcards are not allowed, list each origin", entry)
 		}
-
-		// Allow credentials requires specific origin (not wildcard)
-		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-
-		// Handle preflight requests
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
+		origin, err := normalizeOrigin(entry)
+		if err != nil {
+			return nil, fmt.Errorf("http.cors.allowed_origins: %w", err)
 		}
+		if err := protection.AddTrustedOrigin(origin); err != nil {
+			return nil, fmt.Errorf("http.cors.allowed_origins: %w", err)
+		}
+		if origin != entry {
+			log.Info("Allowed origin normalized to the form browsers send",
+				logger.Str("configured", entry), logger.Str("origin", origin))
+		}
+		allowed[origin] = true
+	}
+	protection.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Warn("Cross-origin request refused",
+			logger.Str("method", r.Method),
+			logger.Str("path", r.URL.Path),
+			logger.Str("origin", r.Header.Get("Origin")),
+			logger.Str("sec_fetch_site", r.Header.Get("Sec-Fetch-Site")))
+		httputil.RespondForbidden(w, log, "Cross-origin request refused")
+	}))
 
-		next.ServeHTTP(w, r)
-	})
+	return func(next http.Handler) http.Handler {
+		protected := protection.Handler(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Add("Vary", "Origin")
+			origin := r.Header.Get("Origin")
+			if !allowed[origin] {
+				protected.ServeHTTP(w, r)
+				return
+			}
+
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			protected.ServeHTTP(w, r)
+		})
+	}, nil
+}
+
+// normalizeOrigin returns origin in the form a browser's Origin header takes,
+// which both allowlists compare as an exact string: lowercase scheme and host,
+// no default port. It rejects what a browser never sends: a scheme other than
+// http or https, user info, or a non-ASCII host (browsers send punycode).
+func normalizeOrigin(origin string) (string, error) {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return "", fmt.Errorf("invalid origin %q: %w", origin, err)
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", fmt.Errorf("invalid origin %q: scheme must be http or https", origin)
+	}
+	if u.User != nil {
+		return "", fmt.Errorf("invalid origin %q: user info is not allowed", origin)
+	}
+	if u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return "", fmt.Errorf("invalid origin %q: path, query, and fragment are not allowed", origin)
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return "", fmt.Errorf("invalid origin %q: host is required", origin)
+	}
+	for _, r := range host {
+		if r > unicode.MaxASCII {
+			return "", fmt.Errorf("invalid origin %q: use the punycode (xn--) form of the host", origin)
+		}
+	}
+	port := u.Port()
+	if (scheme == "http" && port == "80") || (scheme == "https" && port == "443") {
+		port = ""
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return scheme + "://" + host, nil
 }
 
 // UserLookupService provides user lookup functionality.
@@ -168,6 +283,9 @@ type UserDetails struct {
 	Locale             string    `json:"Locale"`
 	UpdatedAt          time.Time `json:"UpdatedAt"`
 	MustChangePassword bool      `json:"MustChangePassword"`
+	// SessionEpoch counts the user's logouts; a session cookie carrying an
+	// older value is rejected.
+	SessionEpoch int64 `json:"-"`
 }
 
 // AuthMiddleware provides authentication middleware for HTTP handlers.
@@ -304,6 +422,11 @@ func (m *AuthMiddleware) authenticateFromSession(r *http.Request) (*UserDetails,
 	if m.userLookup != nil && subject != "" {
 		fullDetails, err := m.userLookup.GetUserBySubject(r.Context(), subject)
 		if err == nil && fullDetails != nil {
+			// The epoch lives in the database, so a logout made through any
+			// server instance, or before a restart, is honored here.
+			if sessionEpoch(session) < fullDetails.SessionEpoch {
+				return nil, &authError{message: "session has been revoked"}
+			}
 			userDetails = fullDetails
 		}
 	}
@@ -432,9 +555,14 @@ func GetTenantFromContext(ctx context.Context) string {
 // This is the single interface all handlers use for permission checks.
 type RBACChecker interface {
 	HasPermission(ctx context.Context, userID uint, permission string, tenantID *string) (bool, error)
+	HasGlobalPermission(ctx context.Context, userID uint, permission string) (bool, error)
 	GetUserPermissions(ctx context.Context, userID uint, tenantID *string) ([]string, error)
 	IsAdmin(ctx context.Context, userID uint) (bool, error)
-	GetUserRoles(ctx context.Context, userID uint) ([]*UserRoleInfo, error)
+	GetEffectiveUserRoles(ctx context.Context, userID uint) ([]*UserRoleInfo, error)
+	// HoldsAnyRole reports whether the user has any role assignment at all,
+	// expired ones and those of a deactivated role included: an
+	// administrator can make those grant again.
+	HoldsAnyRole(ctx context.Context, userID uint) (bool, error)
 	HasAccessToTenant(ctx context.Context, userID uint, tenantID string) (bool, error)
 	HasAccessToRealm(ctx context.Context, userID uint, tenantID, realmName string) (bool, error)
 	GetUserPolicies(ctx context.Context, userID uint) ([]*domain.TenantPolicy, error)
@@ -536,6 +664,52 @@ func (m *RBACMiddleware) RequirePermission(permission string) func(http.Handler)
 
 			// Check permission
 			hasPermission, err := m.service.HasPermission(ctx, user.ID, permission, tenantID)
+			if err != nil {
+				m.log.Error("Failed to check permission",
+					logger.Err(err),
+					logger.Uint("user_id", user.ID),
+					logger.Str("permission", permission))
+				httputil.RespondInternalError(w, m.log, "Failed to check permissions")
+				return
+			}
+
+			if !hasPermission {
+				m.log.Warn("Permission denied",
+					logger.Uint("user_id", user.ID),
+					logger.Str("email", user.Email),
+					logger.Str("permission", permission))
+				http.Error(w, `{"error":"`+httputil.ErrPermissionDenied+`"}`, http.StatusForbidden)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireGlobalPermission is RequirePermission for a platform-wide resource,
+// such as the platform user accounts. Only a grant that applies to every
+// tenant counts: a route without a tenant checks with a nil tenant, and
+// HasPermission then accepts a grant made for any single tenant.
+func (m *RBACMiddleware) RequireGlobalPermission(permission string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+
+			user := GetUserFromContext(ctx)
+			if user == nil {
+				m.log.Warn("No user info in context for permission check")
+				httputil.RespondUnauthorized(w, m.log, "Unauthorized")
+				return
+			}
+
+			isAdmin, adminErr := m.service.IsAdmin(ctx, user.ID)
+			if adminErr == nil && isAdmin {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			hasPermission, err := m.service.HasGlobalPermission(ctx, user.ID, permission)
 			if err != nil {
 				m.log.Error("Failed to check permission",
 					logger.Err(err),
@@ -697,4 +871,12 @@ func TenantIDMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// sessionEpoch returns the session epoch the login stored in the cookie.
+// Cookies from before logout was recorded per user carry none and count as 0,
+// which stays valid until the user's first logout.
+func sessionEpoch(session *sessions.Session) int64 {
+	epoch, _ := session.Values["session_epoch"].(int64)
+	return epoch
 }

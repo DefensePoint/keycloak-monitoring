@@ -78,7 +78,7 @@ describe("useRealmSelector", () => {
     expect(result.current.selectedRealm).toBe("all");
   });
 
-  it("should fallback to default realm if session storage value is invalid", () => {
+  it("should fallback to all if the saved realm is unavailable", () => {
     sessionStorage.setItem("selectedRealm_tenant-1", "non-existent-realm");
 
     const { result } = renderHook(() =>
@@ -89,7 +89,7 @@ describe("useRealmSelector", () => {
       }),
     );
 
-    expect(result.current.selectedRealm).toBe("master");
+    expect(result.current.selectedRealm).toBe("all");
   });
 
   it("should fallback to 'all' if default realm is not in available realms", () => {
@@ -153,5 +153,134 @@ describe("useRealmSelector", () => {
 
     expect(result.current.selectedRealm).toBe("test-realm");
     expect(sessionStorage.getItem("selectedRealm_undefined")).toBeNull();
+  });
+
+  it.each([null, "test-realm", "all"])(
+    "resolves saved choice %s after realms arrive without saving a loading fallback",
+    (saved) => {
+      if (saved !== null)
+        sessionStorage.setItem("selectedRealm_tenant-1", saved);
+      const { result, rerender } = renderHook(
+        ({ realms }) =>
+          useRealmSelector({
+            tenantId: "tenant-1",
+            defaultRealm: "master",
+            availableRealms: realms,
+          }),
+        { initialProps: { realms: [] as typeof mockRealms } },
+      );
+      expect(result.current.selectedRealm).toBe("all");
+      expect(sessionStorage.getItem("selectedRealm_tenant-1")).toBe(saved);
+      rerender({ realms: mockRealms });
+      expect(result.current.selectedRealm).toBe(saved ?? "master");
+    },
+  );
+
+  it("restores each tenant's choice across tenant switches and loading", () => {
+    const { result, rerender } = renderHook(
+      ({ tenantId, defaultRealm, realms }) =>
+        useRealmSelector({ tenantId, defaultRealm, availableRealms: realms }),
+      {
+        initialProps: {
+          tenantId: "tenant-1",
+          defaultRealm: "master",
+          realms: mockRealms,
+        },
+      },
+    );
+    act(() => result.current.handleRealmChange("test-realm"));
+    rerender({ tenantId: "tenant-2", defaultRealm: "dev-realm", realms: [] });
+    expect(result.current.selectedRealm).toBe("all");
+    rerender({
+      tenantId: "tenant-2",
+      defaultRealm: "dev-realm",
+      realms: mockRealms,
+    });
+    expect(result.current.selectedRealm).toBe("dev-realm");
+    act(() => result.current.handleRealmChange("all"));
+    rerender({
+      tenantId: "tenant-1",
+      defaultRealm: "master",
+      realms: mockRealms,
+    });
+    expect(result.current.selectedRealm).toBe("test-realm");
+    rerender({
+      tenantId: "tenant-2",
+      defaultRealm: "dev-realm",
+      realms: mockRealms,
+    });
+    expect(result.current.selectedRealm).toBe("all");
+  });
+
+  it("restores a user choice after a reload whose realms arrive late", () => {
+    const first = renderHook(() =>
+      useRealmSelector({
+        tenantId: "tenant-1",
+        defaultRealm: "master",
+        availableRealms: mockRealms,
+      }),
+    );
+    act(() => first.result.current.handleRealmChange("dev-realm"));
+    first.unmount();
+    const next = renderHook(
+      ({ realms }) =>
+        useRealmSelector({
+          tenantId: "tenant-1",
+          defaultRealm: "master",
+          availableRealms: realms,
+        }),
+      { initialProps: { realms: [] as typeof mockRealms } },
+    );
+    expect(next.result.current.selectedRealm).toBe("all");
+    next.rerender({ realms: mockRealms });
+    expect(next.result.current.selectedRealm).toBe("dev-realm");
+  });
+
+  it("falls back when a selected realm is removed from the visible list", () => {
+    const { result, rerender } = renderHook(
+      ({ realms }) =>
+        useRealmSelector({
+          tenantId: "tenant-1",
+          defaultRealm: "master",
+          availableRealms: realms,
+        }),
+      { initialProps: { realms: mockRealms } },
+    );
+    act(() => result.current.handleRealmChange("test-realm"));
+    rerender({ realms: [{ realm_name: "master" }] });
+    expect(result.current.selectedRealm).toBe("all");
+  });
+
+  it("uses the default after realms load and keeps choices in memory when storage is blocked", () => {
+    const read = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new Error("blocked");
+      });
+    const write = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("blocked");
+      });
+    try {
+      const { result, rerender } = renderHook(
+        ({ realms }) =>
+          useRealmSelector({
+            tenantId: "tenant-1",
+            defaultRealm: "master",
+            availableRealms: realms,
+          }),
+        { initialProps: { realms: [] as typeof mockRealms } },
+      );
+      expect(result.current.selectedRealm).toBe("all");
+      rerender({ realms: mockRealms });
+      expect(result.current.selectedRealm).toBe("master");
+      act(() => result.current.handleRealmChange("test-realm"));
+      rerender({ realms: [...mockRealms] });
+      expect(result.current.selectedRealm).toBe("test-realm");
+    } finally {
+      read.mockRestore();
+      write.mockRestore();
+    }
   });
 });

@@ -12,13 +12,17 @@ import (
 // Provider defines the interface for OAuth2/OIDC authentication providers.
 type Provider interface {
 	// GetAuthCodeURL returns the URL for initiating the OAuth2 flow.
-	GetAuthCodeURL(state string) string
+	GetAuthCodeURL(state string, opts ...oauth2.AuthCodeOption) string
 
 	// Exchange exchanges an authorization code for tokens.
-	Exchange(ctx context.Context, code string) (*oauth2.Token, error)
+	Exchange(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error)
 
 	// VerifyIDToken verifies and extracts claims from an ID token.
 	VerifyIDToken(ctx context.Context, token string) (*UserInfo, error)
+
+	// VerifyLoginIDToken verifies a login's ID token and that it carries the
+	// nonce that login sent.
+	VerifyLoginIDToken(ctx context.Context, token, nonce string) (*UserInfo, error)
 
 	// RefreshToken refreshes an expired access token.
 	RefreshToken(ctx context.Context, refreshToken string) (*oauth2.Token, error)

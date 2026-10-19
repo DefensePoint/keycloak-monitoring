@@ -22,6 +22,8 @@ type stubTenantService struct {
 	createErr  error
 	deleteErr  error
 	calls      []string
+	lastCreate *tenant.CreateRequest
+	lastUpdate *tenant.UpdateRequest
 	allTenants []*domain.KeycloakTenant
 	listErr    error
 	unmarkErr  error
@@ -60,6 +62,7 @@ func (s *stubTenantService) DeleteTenant(ctx context.Context, tenantID string) e
 
 func (s *stubTenantService) SyncFromConfig(ctx context.Context, tenantID string, createReq *tenant.CreateRequest, updateReq *tenant.UpdateRequest) (*domain.KeycloakTenant, error) {
 	s.record("SyncFromConfig")
+	s.lastCreate, s.lastUpdate = createReq, updateReq
 	if s.live != nil {
 		if s.updateErr != nil {
 			return nil, s.updateErr

@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { apiClient, ApiClient } from "./apiClient";
+import {
+  apiClient,
+  ApiClient,
+  SESSION_EXPIRED_EVENT,
+  httpStatusOf,
+} from "./apiClient";
 
 describe("ApiClient", () => {
   beforeEach(() => {
@@ -68,7 +73,12 @@ describe("ApiClient", () => {
       );
     });
 
-    it("should redirect to login on 401 status", async () => {
+    // Navigating to /login on a 401 left the user there after signing in
+    // again, on a page the router read as a tenant named "login". The client
+    // now announces the expiry and stays put; the auth context signs out.
+    it("announces an expired session on 401 and does not navigate", async () => {
+      const onExpired = vi.fn();
+      window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
       (
         global.fetch as unknown as ReturnType<typeof vi.fn>
       ).mockResolvedValueOnce({
@@ -77,7 +87,29 @@ describe("ApiClient", () => {
       });
 
       await expect(apiClient.get("/test")).rejects.toThrow("Session expired");
-      expect(window.location.href).toBe("/login?session=expired");
+      window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+
+      expect(onExpired).toHaveBeenCalledTimes(1);
+      expect(window.location.href).toBe("");
+    });
+
+    it("announces an expired session when a download gets 401", async () => {
+      const onExpired = vi.fn();
+      window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+      (
+        global.fetch as unknown as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+      });
+
+      await expect(apiClient.getBlob("/report")).rejects.toThrow(
+        "Session expired",
+      );
+      window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+
+      expect(onExpired).toHaveBeenCalledTimes(1);
+      expect(window.location.href).toBe("");
     });
 
     it("should throw error with message from response", async () => {
@@ -334,5 +366,39 @@ describe("ApiClient", () => {
 
       await expect(apiClient.get("/test")).rejects.toThrow("HTTP 503");
     });
+  });
+});
+
+describe("HTTP errors", () => {
+  beforeEach(() => {
+    global.fetch = vi.fn();
+  });
+
+  it("carry the status the server answered with", async () => {
+    (global.fetch as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        json: async () => ({ error: "Insufficient permissions" }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => {
+          throw new Error("not JSON");
+        },
+      });
+
+    const forbidden = await apiClient.get("/a").catch((e: unknown) => e);
+    expect((forbidden as Error).message).toBe("Insufficient permissions");
+    expect(httpStatusOf(forbidden)).toBe(403);
+
+    const failed = await apiClient.get("/b").catch((e: unknown) => e);
+    expect(httpStatusOf(failed)).toBe(500);
+  });
+
+  it("is undefined for an error without a response", () => {
+    expect(httpStatusOf(new TypeError("Failed to fetch"))).toBeUndefined();
+    expect(httpStatusOf(null)).toBeUndefined();
   });
 });

@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
+  Alert,
   Box,
   Typography,
   Paper,
@@ -22,10 +23,10 @@ import {
   Cancel,
   ArrowForward,
 } from "@mui/icons-material";
+import { unreadableRealmText } from "../utils/unreadable";
 import { useTenant } from "@/shared/context";
 import {
   useAlerts,
-  useRealmSelector,
   useKeycloakDashboard,
   useRealmDashboard,
   useRealmEvents,
@@ -86,41 +87,7 @@ export function RealmPage() {
       ? allRealmsDashboard.realms
       : [];
 
-  const { selectedRealm, handleRealmChange } = useRealmSelector({
-    tenantId,
-    defaultRealm: selectedTenant?.default_realm,
-    availableRealms: allRealms,
-  });
-
   const { navigateToRealm } = useRealmNavigation(tenantId);
-
-  useEffect(() => {
-    if (realmName && selectedTenant?.default_realm && allRealms.length > 0) {
-      if (
-        selectedRealm === selectedTenant.default_realm &&
-        realmName !== selectedTenant.default_realm
-      ) {
-        navigate(`/${tenantId}/realm/${selectedTenant.default_realm}`, {
-          replace: true,
-        });
-      }
-    }
-  }, [
-    realmName,
-    selectedRealm,
-    selectedTenant?.default_realm,
-    allRealms.length,
-    tenantId,
-    navigate,
-  ]);
-
-  const handleRealmSelectorChange = useCallback(
-    (realm: string) => {
-      handleRealmChange(realm);
-      navigateToRealm(realm);
-    },
-    [handleRealmChange, navigateToRealm],
-  );
 
   const { data: eventsResponse } = useRealmEvents({
     tenantId: selectedTenant?.tenant_id,
@@ -268,7 +235,7 @@ export function RealmPage() {
       >
         <RealmSelector
           selectedRealm={realmName || "all"}
-          onRealmChange={handleRealmSelectorChange}
+          onRealmChange={navigateToRealm}
           realms={allRealms}
           defaultRealm={selectedTenant?.default_realm}
         />
@@ -283,6 +250,15 @@ export function RealmPage() {
           <Chip label="Default" size="small" color="error" />
         )}
       </Box>
+
+      {realmDashboard.realm_info?.unreadable_since && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          {unreadableRealmText(
+            realmDashboard.realm_info.unreadable_since,
+            realmDashboard.realm_info.last_checked,
+          )}
+        </Alert>
+      )}
 
       <Box>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>

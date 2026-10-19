@@ -20,6 +20,15 @@ export interface Stats {
   by_source?: Record<string, number>;
 }
 
+// EventFilters narrows an events query server-side. Type and severity are
+// exact matches; minRisk keeps events whose AMFA risk level is at least this
+// value, so events without a risk level never match it.
+export interface EventFilters {
+  type?: string;
+  severity?: string;
+  minRisk?: number;
+}
+
 class EventsService {
   async getEvents(
     tenantId: string,
@@ -29,6 +38,7 @@ class EventsService {
     endTime?: string,
     source?: string,
     realm?: string,
+    filters?: EventFilters,
   ): Promise<EventsResponse> {
     const params: Record<string, string | number> = { limit, offset };
     if (startTime) params.start_time = startTime;
@@ -36,8 +46,22 @@ class EventsService {
     if (source) params.source = source;
     // See getStats: a realm goes in `realm`, never encoded as a source.
     if (realm) params.realm = realm;
+    if (filters?.type) params.type = filters.type;
+    if (filters?.severity) params.severity = filters.severity;
+    // 0 is a real threshold, so test for presence rather than truthiness.
+    if (filters?.minRisk !== undefined) params.min_risk = filters.minRisk;
 
     return apiClient.get<EventsResponse>(`/tenants/${tenantId}/events`, params);
+  }
+
+  /**
+   * One of the tenant's events by id. The server answers 404 both for an id
+   * the tenant does not have and for an event outside the caller's realms.
+   */
+  async getEvent(tenantId: string, eventId: string): Promise<Event> {
+    return apiClient.get<Event>(
+      `/tenants/${tenantId}/events/${encodeURIComponent(eventId)}`,
+    );
   }
 
   async getStats(

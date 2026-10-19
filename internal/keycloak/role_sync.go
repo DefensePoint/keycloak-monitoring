@@ -273,6 +273,9 @@ func (s *RoleSyncService) SyncUser(ctx context.Context, realmName string, kcUser
 			PreferredUsername: kcUser.Username,
 			Username:          kcUser.Username,
 			IsActive:          kcUser.Enabled,
+			// Without this the column default makes a Keycloak user a local
+			// "simple" account, with identity fields and password editable.
+			AuthMethod: domain.AuthMethodOAuth,
 		}
 
 		platformUser, err = s.userRepo.FindOrCreateBySubject(ctx, newUser)

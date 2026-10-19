@@ -16,7 +16,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "", "Path to configuration file")
-	healthFlag := flag.Bool("healthcheck", false, "Probe the local health endpoint and exit (container healthcheck)")
+	healthFlag := flag.Bool("healthcheck", false, "Probe the local readiness endpoint, which needs the database, and exit (container healthcheck)")
 	flag.Parse()
 
 	if *healthFlag {
@@ -25,7 +25,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "unhealthy: %v\n", err)
 			os.Exit(1)
 		}
-		url := fmt.Sprintf("http://127.0.0.1:%d/health", cfg.MCP.Port)
+		url := fmt.Sprintf("http://127.0.0.1:%d/ready", cfg.MCP.Port)
 		if err := healthcheck.Probe(url, 3*time.Second); err != nil {
 			fmt.Fprintf(os.Stderr, "unhealthy: %v\n", err)
 			os.Exit(1)

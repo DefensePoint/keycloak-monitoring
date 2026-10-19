@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts/clearing"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
@@ -15,7 +16,7 @@ type ClientErrorCheck struct {
 	eventsRepo KeycloakEventReader
 	logger     Logger
 	tenantID   string
-	realms     []string
+	realmsFn   RealmsFunc
 	threshold  int
 	timeWindow time.Duration
 }
@@ -25,11 +26,10 @@ func NewClientErrorCheck(
 	eventsRepo KeycloakEventReader,
 	log Logger,
 	tenantID string,
-	realms []string,
+	realmsFn RealmsFunc,
 	threshold int,
 	timeWindow time.Duration,
 ) *ClientErrorCheck {
-	// Set defaults - CLIENT_LOGIN_ERROR is medium priority
 	if threshold == 0 {
 		threshold = 10
 	}
@@ -41,7 +41,7 @@ func NewClientErrorCheck(
 		eventsRepo: eventsRepo,
 		logger:     log.WithComponent("client_error_check"),
 		tenantID:   tenantID,
-		realms:     realms,
+		realmsFn:   realmsFn,
 		threshold:  threshold,
 		timeWindow: timeWindow,
 	}
@@ -59,14 +59,27 @@ func (c *ClientErrorCheck) GetDescription() string {
 
 // Execute performs the client login error check.
 func (c *ClientErrorCheck) Execute(ctx context.Context) ([]*domain.Alert, error) {
+	ev, err := c.Evaluate(ctx)
+	return ev.Alerts, err
+}
+
+// Evaluate runs the check and reports, besides the alerts, every realm whose
+// count it read, so a condition that cleared there can resolve. A realm whose
+// count failed is left out: its condition was not evaluated.
+func (c *ClientErrorCheck) Evaluate(ctx context.Context) (clearing.Evaluation, error) {
 	c.logger.Debug("Checking CLIENT_LOGIN_ERROR events")
 
 	start := time.Now().Add(-c.timeWindow)
 	end := time.Now()
 
-	var alerts []*domain.Alert
+	realms, err := c.realmsFn(ctx)
+	if err != nil {
+		return clearing.Evaluation{}, fmt.Errorf("list realms: %w", err)
+	}
 
-	for _, realmName := range c.realms {
+	ev := clearing.Evaluation{TenantID: c.tenantID}
+
+	for _, realmName := range realms {
 		count, err := c.eventsRepo.CountEventsByType(ctx, c.tenantID, realmName, "CLIENT_LOGIN_ERROR", start, end)
 		if err != nil {
 			c.logger.Error("Failed to count CLIENT_LOGIN_ERROR events",
@@ -75,12 +88,13 @@ func (c *ClientErrorCheck) Execute(ctx context.Context) ([]*domain.Alert, error)
 			continue
 		}
 
+		ev.MarkEvaluated(c.generateAlertID(realmName))
 		if count >= int64(c.threshold) {
-			alerts = append(alerts, c.createAlert(realmName, int(count)))
+			ev.Alerts = append(ev.Alerts, c.createAlert(realmName, int(count)))
 		}
 	}
 
-	return alerts, nil
+	return ev, nil
 }
 
 // createAlert creates an alert.

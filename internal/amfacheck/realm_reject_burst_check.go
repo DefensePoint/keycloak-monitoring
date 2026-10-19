@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts/clearing"
 	"github.com/DefensePoint/keycloak-monitoring/internal/amfa"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
@@ -16,7 +17,8 @@ import (
 // It runs alongside rule 1 (RiskRejectedCheck), not instead of it: rule 1
 // still fires one alert per rejected event; this rule adds the "many
 // different accounts at once" signal that a flood of per-event alerts
-// doesn't surface on its own. Deduped per (realm, UTC day), like rule 2.
+// doesn't surface on its own. One alert per realm that resolves once the
+// burst ages out of the window and reopens on the next one, like rule 2.
 type RealmRejectBurstCheck struct {
 	tenantID  string
 	realmsFn  RealmsFunc
@@ -44,39 +46,46 @@ func (c *RealmRejectBurstCheck) GetDescription() string {
 }
 
 func (c *RealmRejectBurstCheck) Execute(ctx context.Context) ([]*domain.Alert, error) {
+	ev, err := c.Evaluate(ctx)
+	return ev.Alerts, err
+}
+
+// Evaluate runs the check and reports every realm it counted, so a burst that
+// ended there resolves and a later one reopens the alert.
+func (c *RealmRejectBurstCheck) Evaluate(ctx context.Context) (clearing.Evaluation, error) {
 	realms, err := c.realmsFn(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("amfa-realm-reject-burst: load realms: %w", err)
+		return clearing.Evaluation{}, fmt.Errorf("amfa-realm-reject-burst: load realms: %w", err)
 	}
-	now := time.Now().UTC()
-	since := now.Add(-c.window)
-	day := now.Format("2006-01-02")
+	since := time.Now().UTC().Add(-c.window)
 
-	var alerts []*domain.Alert
+	ev := clearing.Evaluation{TenantID: c.tenantID}
 	for _, realm := range realms {
 		count, err := c.repo.CountDistinctRejectedUsersSince(ctx, realm, since)
 		if err != nil {
-			return nil, fmt.Errorf("amfa-realm-reject-burst: realm=%s: %w", realm, err)
+			return clearing.Evaluation{}, fmt.Errorf("amfa-realm-reject-burst: realm=%s: %w", realm, err)
 		}
+		// Marked by realm rather than by alert ID, so an alert raised under
+		// the per-day ID this check used before resolves too.
+		ev.MarkRealmEvaluated(realm)
 		if count < int64(c.threshold) {
 			continue
 		}
-		alerts = append(alerts, c.toAlert(realm, day, count))
+		ev.Alerts = append(ev.Alerts, c.toAlert(realm, count))
 	}
-	return alerts, nil
+	return ev, nil
 }
 
-func (c *RealmRejectBurstCheck) toAlert(realm, day string, count int64) *domain.Alert {
+func (c *RealmRejectBurstCheck) toAlert(realm string, count int64) *domain.Alert {
 	md, _ := json.Marshal(map[string]any{
 		"distinct_rejected_users": count,
 		"threshold":               c.threshold,
 		"window":                  c.window.String(),
 		"realm_name":              realm,
-		"utc_date":                day,
 	})
 	return &domain.Alert{
 		TenantID:       c.tenantID,
-		AlertID:        alertID("amfa-realm-reject-burst", c.tenantID, realm, day),
+		AlertID:        alertID("amfa-realm-reject-burst", c.tenantID, realm),
 		Source:         domain.AlertSourceEvent,
 		Type:           domain.AlertTypeSecurity,
 		Severity:       domain.AlertSeverityCritical,

@@ -64,12 +64,38 @@ func buildAmfaRegistry(cfg *config.AppConfig, tenants map[string]config.TenantCo
 			continue
 		}
 		// Validate also fills in defaults (port, sslmode, pool sizes, timeouts),
-		// so it must run before either client is constructed.
+		// so it must run before either client is constructed. It rewrites an
+		// empty Database.SSLMode to "require" in place, so the configured value
+		// has to be read first or the distinction is gone.
 		amfaCfg := tcfg.Amfa
+		// Either spelling counts as configured. Reading only ssl_mode here
+		// would report source=default for a tenant that set the legacy
+		// sslmode key, which is the one thing this line exists to get right.
+		configuredSSLMode := amfaCfg.Database.SSLMode
+		if configuredSSLMode == "" {
+			configuredSSLMode = amfaCfg.Database.LegacySSLMode
+		}
 		if err := amfaCfg.Validate(); err != nil {
 			logWarn(log, "AMFA config invalid for tenant; skipping",
 				logger.Str("tenant_id", tenantID), logger.Err(err))
 			continue
+		}
+
+		// Report the TLS mode before the connection is attempted, not after it
+		// succeeds: a mode the server will not accept surfaces as a connection
+		// error naming TLS, which says nothing about a default the operator
+		// never set. Logging it here puts the answer directly above that error.
+		// Only the database transport connects to Postgres; an API-transport
+		// tenant would be describing a connection it never makes.
+		if !amfaCfg.API.Configured() {
+			source := "config"
+			if configuredSSLMode == "" {
+				source = "default"
+			}
+			logInfo(log, "AMFA database TLS mode resolved",
+				logger.Str("tenant_id", tenantID),
+				logger.Str("sslmode", amfaCfg.Database.SSLMode),
+				logger.Str("source", source))
 		}
 
 		repo, transport, err := newAmfaRepository(tenantID, tcfg, cfg, log)
@@ -119,10 +145,11 @@ func newAmfaRepository(
 		amfaHTTPClient := saferequest.HTTPClient(amfaPolicy)
 
 		// Tokens come from the tenant's own Keycloak, using the confidential
-		// client this platform already holds for the Admin API. AMFA verifies
-		// them against that realm's JWKS and rejects any token whose realm does
-		// not match the requested one, so a tenant's credentials can only read
-		// that tenant's events.
+		// client this platform already holds for the Admin API, so they are
+		// issued by the admin realm. AMFA refuses a token whose realm does not
+		// match the realm being read unless that client is listed in AMFA's
+		// MONITORING_TRUSTED_READERS; without it only the admin realm can be
+		// read. See docs/amfa-integration.md.
 		tokens := httpclient.NewClientCredentialsTokenSource(
 			tcfg.ServerURL,
 			amfaAuthRealm(tcfg),

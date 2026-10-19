@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"testing"
 	"time"
 
@@ -39,12 +38,8 @@ import (
 func newReconcileTestRepo(t *testing.T) (*Repository, *gorm.DB) {
 	t.Helper()
 
-	dsn := os.Getenv("KMT_TEST_DATABASE_DSN")
-	if dsn == "" {
-		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
-	}
-
-	testdb.ShareDatabase(t, dsn)
+	dsn := testdb.DSN(t, "KMT_TEST_DATABASE_DSN")
+	testdb.Lock(t, dsn)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger:                 gormlogger.Default.LogMode(gormlogger.Silent),
@@ -101,6 +96,7 @@ func TestReconcileAMFAMerges_MergesAmfaFieldsOntoKeycloakTwinAndDeletesAmfaRow(t
 
 	// Keycloak twin arrives first, with no risk_level of its own yet.
 	kcEvent := &domain.Event{
+		TenantID:     fixtureTenant,
 		EventID:      kcEventID,
 		Type:         "LOGIN",
 		Category:     "authentication",
@@ -118,6 +114,7 @@ func TestReconcileAMFAMerges_MergesAmfaFieldsOntoKeycloakTwinAndDeletesAmfaRow(t
 
 	// AMFA row arrives second, carrying the AMFA-owned attributes.
 	amfaEvent := &domain.Event{
+		TenantID:         fixtureTenant,
 		EventID:          amfaRowEventID,
 		Type:             "LOGIN",
 		Category:         "authentication",
@@ -153,7 +150,7 @@ func TestReconcileAMFAMerges_MergesAmfaFieldsOntoKeycloakTwinAndDeletesAmfaRow(t
 		t.Fatalf("expected at least 1 row absorbed, got %d", absorbed)
 	}
 
-	merged, err := repo.GetByID(ctx, kcEventID)
+	merged, err := repo.GetByTenantAndEventID(ctx, fixtureTenant, kcEventID)
 	if err != nil {
 		t.Fatalf("get merged keycloak event: %v", err)
 	}
@@ -210,6 +207,7 @@ func TestReconcileAMFAMerges_KeycloakRiskLevelWinsOverAmfa(t *testing.T) {
 	// Keycloak already carries its own risk_level, stamped by the
 	// adaptive-auth extension directly onto the login event.
 	kcEvent := &domain.Event{
+		TenantID:     fixtureTenant,
 		EventID:      kcEventID,
 		Type:         "LOGIN",
 		Source:       "keycloak:test-realm",
@@ -224,6 +222,7 @@ func TestReconcileAMFAMerges_KeycloakRiskLevelWinsOverAmfa(t *testing.T) {
 	}
 
 	amfaEvent := &domain.Event{
+		TenantID:     fixtureTenant,
 		EventID:      amfaRowEventID,
 		Type:         "LOGIN",
 		Source:       "amfa:test-realm",
@@ -241,7 +240,7 @@ func TestReconcileAMFAMerges_KeycloakRiskLevelWinsOverAmfa(t *testing.T) {
 		t.Fatalf("ReconcileAMFAMerges: %v", err)
 	}
 
-	merged, err := repo.GetByID(ctx, kcEventID)
+	merged, err := repo.GetByTenantAndEventID(ctx, fixtureTenant, kcEventID)
 	if err != nil {
 		t.Fatalf("get merged keycloak event: %v", err)
 	}
@@ -262,6 +261,7 @@ func TestReconcileAMFAMerges_LeavesAmfaOnlyEventsUntouched(t *testing.T) {
 
 	// No Keycloak twin exists for this amfa_event_id.
 	amfaEvent := &domain.Event{
+		TenantID:     fixtureTenant,
 		EventID:      amfaRowEventID,
 		Type:         "LOGIN",
 		Source:       "amfa:test-realm",
@@ -279,7 +279,7 @@ func TestReconcileAMFAMerges_LeavesAmfaOnlyEventsUntouched(t *testing.T) {
 		t.Fatalf("ReconcileAMFAMerges: %v", err)
 	}
 
-	still, err := repo.GetByID(ctx, amfaRowEventID)
+	still, err := repo.GetByTenantAndEventID(ctx, fixtureTenant, amfaRowEventID)
 	if err != nil {
 		t.Fatalf("expected the orphan AMFA row to still exist: %v", err)
 	}
@@ -308,6 +308,7 @@ func TestSave_KeycloakReupsertDoesNotClobberAmfaOwnedFields(t *testing.T) {
 	cleanupEventID(t, db, amfaRowEventID)
 
 	kcEvent := &domain.Event{
+		TenantID:     fixtureTenant,
 		EventID:      kcEventID,
 		Type:         "LOGIN",
 		Source:       "keycloak:test-realm",
@@ -321,6 +322,7 @@ func TestSave_KeycloakReupsertDoesNotClobberAmfaOwnedFields(t *testing.T) {
 	}
 
 	amfaEvent := &domain.Event{
+		TenantID:     fixtureTenant,
 		EventID:      amfaRowEventID,
 		Type:         "LOGIN",
 		Source:       "amfa:test-realm",
@@ -342,6 +344,7 @@ func TestSave_KeycloakReupsertDoesNotClobberAmfaOwnedFields(t *testing.T) {
 	// event on its next cycle. Its domain.Event never carries the AMFA
 	// fields, matching keycloak/monitor.go's generalEvent construction.
 	kcReupsert := &domain.Event{
+		TenantID:     fixtureTenant,
 		EventID:      kcEventID,
 		Type:         "LOGIN",
 		Source:       "keycloak:test-realm",
@@ -354,7 +357,7 @@ func TestSave_KeycloakReupsertDoesNotClobberAmfaOwnedFields(t *testing.T) {
 		t.Fatalf("re-save keycloak event: %v", err)
 	}
 
-	after, err := repo.GetByID(ctx, kcEventID)
+	after, err := repo.GetByTenantAndEventID(ctx, fixtureTenant, kcEventID)
 	if err != nil {
 		t.Fatalf("get event after re-upsert: %v", err)
 	}
@@ -363,5 +366,78 @@ func TestSave_KeycloakReupsertDoesNotClobberAmfaOwnedFields(t *testing.T) {
 	}
 	if after.Country == nil || *after.Country != "DE" {
 		t.Errorf("country: expected the merged value (DE) to survive the Keycloak re-upsert, got %v", after.Country)
+	}
+}
+
+// TestSave_KeycloakReupsertKeepsMergedRiskLevel covers risk_level, which
+// ReconcileAMFAMerges copies onto the Keycloak row when the Keycloak event
+// does not carry one. The Keycloak monitor re-saves the event without it on
+// its next poll, and that re-save must not set the merged value back to NULL.
+func TestSave_KeycloakReupsertKeepsMergedRiskLevel(t *testing.T) {
+	repo, db := newReconcileTestRepo(t)
+	ctx := context.Background()
+
+	amfaEventID := testEventID(t, "amfa-corr")
+	kcEventID := testEventID(t, "kc")
+	amfaRowEventID := testEventID(t, "amfa-row")
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	cleanupEventID(t, db, kcEventID)
+	cleanupEventID(t, db, amfaRowEventID)
+
+	kcEvent := func() *domain.Event {
+		return &domain.Event{
+			TenantID:     fixtureTenant,
+			EventID:      kcEventID,
+			Type:         "LOGIN",
+			Source:       "keycloak:test-realm",
+			SourceSystem: "keycloak",
+			Status:       "processed",
+			Timestamp:    now,
+			AMFAEventID:  &amfaEventID,
+		}
+	}
+	if err := repo.Save(ctx, kcEvent()); err != nil {
+		t.Fatalf("save keycloak event: %v", err)
+	}
+	amfaEvent := &domain.Event{
+		TenantID:     fixtureTenant,
+		EventID:      amfaRowEventID,
+		Type:         "LOGIN",
+		Source:       "amfa:test-realm",
+		SourceSystem: "amfa",
+		Status:       "processed",
+		Timestamp:    now,
+		AMFAEventID:  &amfaEventID,
+		RiskLevel:    intPtr(3),
+	}
+	if err := repo.Save(ctx, amfaEvent); err != nil {
+		t.Fatalf("save amfa event: %v", err)
+	}
+	if _, err := repo.ReconcileAMFAMerges(ctx); err != nil {
+		t.Fatalf("ReconcileAMFAMerges: %v", err)
+	}
+
+	merged, err := repo.GetByTenantAndEventID(ctx, fixtureTenant, kcEventID)
+	if err != nil {
+		t.Fatalf("get event after merge: %v", err)
+	}
+	if merged.RiskLevel == nil || *merged.RiskLevel != 3 {
+		t.Fatalf("precondition: expected the merge to set risk_level 3, got %v", merged.RiskLevel)
+	}
+
+	if err := repo.Save(ctx, kcEvent()); err != nil {
+		t.Fatalf("re-save keycloak event: %v", err)
+	}
+
+	after, err := repo.GetByTenantAndEventID(ctx, fixtureTenant, kcEventID)
+	if err != nil {
+		t.Fatalf("get event after re-upsert: %v", err)
+	}
+	if after.RiskLevel == nil || *after.RiskLevel != 3 {
+		t.Errorf("risk_level: expected the merged value (3) to survive the Keycloak re-upsert, got %v", after.RiskLevel)
+	}
+	if after.AMFAEventID == nil || *after.AMFAEventID != amfaEventID {
+		t.Errorf("amfa_event_id: expected %q to be kept, got %v", amfaEventID, after.AMFAEventID)
 	}
 }

@@ -9,12 +9,14 @@ export interface RoleCardProps {
   role: Role;
   onView: (role: Role) => void;
   onDelete: (roleId: number, isSystem: boolean) => void;
+  onToggleActive?: (role: Role) => void;
 }
 
 export interface RolesGridProps {
   roles: Role[];
   onView: (role: Role) => void;
   onDelete: (roleId: number, isSystem: boolean) => void;
+  onToggleActive?: (role: Role) => void;
 }
 
 export interface PermissionsSelectorProps {

@@ -5,11 +5,15 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/sessions"
+	"golang.org/x/oauth2"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/auth"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
@@ -48,9 +52,33 @@ type AuthHandlers struct {
 	log              *logger.Logger
 	simpleEnabled    bool
 	oauth2Enabled    bool
-	stateStore       *auth.StateStore
+	loginCookie      *auth.LoginCookie
 	authMiddleware   func(http.Handler) http.Handler
 	sessionBlacklist *auth.SessionBlacklist
+	sessionRevoker   SessionRevoker
+}
+
+// SessionRevoker records logouts so that every server instance, and a
+// restarted one, rejects the sessions a logout ended. A login stores the
+// user's current epoch in the cookie; a logout moves it on.
+type SessionRevoker interface {
+	CurrentSessionEpoch(ctx context.Context, subject string) (int64, error)
+	RevokeSessions(ctx context.Context, subject string, sessionEpoch int64) (bool, error)
+}
+
+// SetSessionRevoker sets where logouts are recorded.
+func (h *AuthHandlers) SetSessionRevoker(r SessionRevoker) {
+	h.sessionRevoker = r
+}
+
+// currentSessionEpoch is the value a new session cookie carries. Failing the
+// login when it cannot be read is deliberate: a guessed value could either be
+// rejected at once or outlive a logout.
+func (h *AuthHandlers) currentSessionEpoch(ctx context.Context, subject string) (int64, error) {
+	if h.sessionRevoker == nil {
+		return 0, nil
+	}
+	return h.sessionRevoker.CurrentSessionEpoch(ctx, subject)
 }
 
 // NewAuthHandlers creates a new AuthHandlers.
@@ -64,7 +92,7 @@ func NewAuthHandlers(
 	log *logger.Logger,
 	simpleEnabled bool,
 	oauth2Enabled bool,
-	stateStore *auth.StateStore,
+	loginCookie *auth.LoginCookie,
 	authMiddleware func(http.Handler) http.Handler,
 ) *AuthHandlers {
 	return &AuthHandlers{
@@ -77,7 +105,7 @@ func NewAuthHandlers(
 		log:              log,
 		simpleEnabled:    simpleEnabled,
 		oauth2Enabled:    oauth2Enabled,
-		stateStore:       stateStore,
+		loginCookie:      loginCookie,
 		authMiddleware:   authMiddleware,
 		sessionBlacklist: nil, // Set via SetSessionBlacklist
 	}
@@ -104,7 +132,7 @@ func generateSessionID() string {
 //   - POST /auth/login/simple        - Simple login (public)
 //   - GET  /auth/login/oauth2        - OAuth2 login (public)
 //   - GET  /auth/callback            - OAuth2 callback (public)
-//   - GET  /auth/logout              - Logout (public)
+//   - POST /auth/logout              - Logout (public; GET answers 405)
 //   - GET  /auth/password/requirements - Password requirements (public)
 //   - GET  /auth/userinfo            - Current user info (auth required)
 //   - POST /auth/refresh             - Refresh token (auth required)
@@ -116,7 +144,8 @@ func (h *AuthHandlers) RegisterRoutes(r chi.Router) {
 		r.Post("/login/simple", h.handleSimpleLogin)
 		r.Get("/login/oauth2", h.handleOAuth2Login)
 		r.Get("/callback", h.handleCallback)
-		r.Get("/logout", h.handleLogout)
+		r.Post("/logout", h.handleLogout)
+		r.Get("/logout", h.handleLogoutGet)
 		r.Get("/password/requirements", h.handlePasswordRequirements)
 
 		// Protected routes (auth required)
@@ -205,6 +234,13 @@ func (h *AuthHandlers) handleSimpleLogin(w http.ResponseWriter, r *http.Request)
 		session.Values["email"] = userInfo.Email
 		session.Values["name"] = userInfo.Name
 		session.Values["created_at"] = time.Now().Unix()
+		epoch, err := h.currentSessionEpoch(r.Context(), userInfo.Subject)
+		if err != nil {
+			h.log.Error("Failed to read the session epoch", logger.Err(err))
+			httputil.RespondInternalError(w, h.log, "Failed to create session")
+			return
+		}
+		session.Values["session_epoch"] = epoch
 
 		if err := h.sessionStore.Save(r, w, session); err != nil {
 			h.log.Error("Failed to save session", logger.Err(err))
@@ -243,22 +279,31 @@ func (h *AuthHandlers) handleOAuth2Login(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	url, state, err := h.service.Login(r.Context())
+	url, attempt, err := h.service.Login(r.Context())
 	if err != nil {
 		h.log.Error("Failed to initiate OAuth2 login", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Failed to initiate login")
 		return
 	}
 
-	// Store state for CSRF protection
-	if err := h.stateStore.Save(state); err != nil {
-		h.log.Error("Failed to save state", logger.Err(err))
+	// Keep the attempt for the callback in the browser that started it: its
+	// state for CSRF protection, its nonce and PKCE verifier to check what the
+	// provider returns. Holding it in the browser rather than in this process
+	// ties the callback to that browser, so a callback link captured from
+	// someone else's login cannot sign in whoever opens it, and lets any API
+	// instance complete the login.
+	if h.loginCookie == nil {
+		httputil.RespondInternalError(w, h.log, "OAuth2 login cookie not configured")
+		return
+	}
+	if err := h.loginCookie.Save(w, r, attempt); err != nil {
+		h.log.Error("Failed to save login cookie", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Failed to initiate login")
 		return
 	}
 
 	h.log.Info("Redirecting to OAuth2 login",
-		logger.Str("state", state[:8]+"..."))
+		logger.Str("state", attempt.State[:8]+"..."))
 
 	http.Redirect(w, r, url, http.StatusFound)
 }
@@ -284,11 +329,16 @@ func (h *AuthHandlers) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate state to prevent CSRF
-	if err := h.stateStore.Validate(state); err != nil {
-		h.log.Warn("Invalid state parameter",
-			logger.Err(err),
-			logger.Str("state", state[:8]+"..."))
+	// The callback must come from the browser that started the login, and
+	// that browser's cookie holds the login's nonce and PKCE verifier.
+	if h.loginCookie == nil {
+		httputil.RespondInternalError(w, h.log, "OAuth2 login cookie not configured")
+		return
+	}
+	attempt, ok := h.loginCookie.Take(w, r, state)
+	if !ok {
+		h.log.Warn("OAuth2 callback was not started in this browser, or its login expired",
+			logger.Str("state", logPrefix(state)))
 		httputil.RespondBadRequest(w, h.log, "Invalid state parameter")
 		return
 	}
@@ -298,8 +348,9 @@ func (h *AuthHandlers) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Exchange authorization code for tokens using provider directly
-	token, err := h.provider.Exchange(r.Context(), code)
+	// Exchange authorization code for tokens using provider directly. The PKCE
+	// verifier proves this is the client that asked for the code.
+	token, err := h.provider.Exchange(r.Context(), code, oauth2.VerifierOption(attempt.CodeVerifier))
 	if err != nil {
 		h.log.Error("Failed to exchange code for token", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Authentication failed")
@@ -314,8 +365,8 @@ func (h *AuthHandlers) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify ID token and extract user info
-	userInfo, err := h.provider.VerifyIDToken(r.Context(), rawIDToken)
+	// Verify ID token, including the nonce this login sent, and extract user info
+	userInfo, err := h.provider.VerifyLoginIDToken(r.Context(), rawIDToken, attempt.Nonce)
 	if err != nil {
 		h.log.Error("Failed to verify ID token", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Authentication failed")
@@ -373,6 +424,13 @@ func (h *AuthHandlers) handleCallback(w http.ResponseWriter, r *http.Request) {
 		cookieSession.Values["email"] = userInfo.Email
 		cookieSession.Values["name"] = userInfo.Name
 		cookieSession.Values["created_at"] = time.Now().Unix()
+		epoch, err := h.currentSessionEpoch(r.Context(), userInfo.Subject)
+		if err != nil {
+			h.log.Error("Failed to read the session epoch", logger.Err(err))
+			httputil.RespondInternalError(w, h.log, "Session error")
+			return
+		}
+		cookieSession.Values["session_epoch"] = epoch
 
 		if err := h.sessionStore.Save(r, w, cookieSession); err != nil {
 			h.log.Error("Failed to save session", logger.Err(err))
@@ -388,20 +446,94 @@ func (h *AuthHandlers) handleCallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
+// handleLogoutGet refuses a GET logout. Logout used to be a GET, so any page
+// could end the session just by linking to it, an image tag being enough;
+// it is a POST now, which a cross-site page cannot send with the cookie.
+//
+//	@Summary		Logout with GET (refused)
+//	@Description	Logout is POST /auth/logout. GET answers 405 and leaves the session alone.
+//	@Tags			Auth
+//	@Failure		405	{object}	dto.ErrorResponse
+//	@Router			/auth/logout [get]
+func (h *AuthHandlers) handleLogoutGet(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Allow", http.MethodPost)
+	httputil.RespondJSON(w, h.log, http.StatusMethodNotAllowed, map[string]string{
+		"error": "logout is POST /auth/logout",
+	})
+}
+
+// crossSiteRequest reports whether the request came from a page on another
+// origin. Sec-Fetch-Site decides when the browser sends it: only
+// "same-origin" and "none" (typed or bookmarked) pass. Chrome sends it only to
+// secure origins, HTTPS or localhost, so over plain http the Origin header
+// decides instead: its host and port must be the one the browser addressed,
+// which behind the web server's proxy is X-Forwarded-Host, since the proxy
+// changes Host. A page cannot set either header on a cross-site form post or
+// no-cors fetch. A request with neither header, from a script or an old
+// browser, is not refused; the session cookie's SameSite setting still
+// covers old browsers sending it cross-site.
+func crossSiteRequest(r *http.Request) bool {
+	switch site := r.Header.Get("Sec-Fetch-Site"); site {
+	case "same-origin", "none":
+		return false
+	case "":
+	default:
+		return true
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		// Includes "null", sent by sandboxed frames and some redirects.
+		return true
+	}
+	addressed := r.Header.Get("X-Forwarded-Host")
+	if addressed == "" {
+		addressed = r.Host
+	}
+	// A proxy chain may list several hosts; the first is the client's.
+	if i := strings.IndexByte(addressed, ','); i >= 0 {
+		addressed = addressed[:i]
+	}
+	addressed = strings.TrimSpace(addressed)
+	// Without a port to compare, compare the host names alone; with one,
+	// compare both. A port-less host comes from a legacy nginx setup that
+	// forwards $host, which drops the port; the deployment guide now
+	// forwards $http_host, which keeps it.
+	if _, _, err := net.SplitHostPort(addressed); err != nil {
+		host := (&url.URL{Host: addressed}).Hostname()
+		return !strings.EqualFold(u.Hostname(), host)
+	}
+	return !strings.EqualFold(u.Host, addressed)
+}
+
 // handleLogout logs out the user.
 //
 //	@Summary		Logout
-//	@Description	Clears the user session and logs out
+//	@Description	Clears the user session and logs out. Refused when the request comes from a page on another origin (Sec-Fetch-Site, or Origin when the browser sends no Sec-Fetch-Site).
 //	@Tags			Auth
-//	@Success		302	"Redirect to home page"
+//	@Success		200	{object}	map[string]bool	"Logged out"
+//	@Failure		403	{object}	dto.ErrorResponse	"Request from another site"
 //	@Failure		500	{object}	dto.ErrorResponse
-//	@Router			/auth/logout [get]
+//	@Router			/auth/logout [post]
 func (h *AuthHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if crossSiteRequest(r) {
+		h.log.Warn("Refused a logout from another site",
+			logger.Str("sec_fetch_site", r.Header.Get("Sec-Fetch-Site")),
+			logger.Str("origin", r.Header.Get("Origin")))
+		httputil.RespondJSON(w, h.log, http.StatusForbidden, map[string]string{
+			"error": "logout from another site refused",
+		})
+		return
+	}
+
 	// Get session
 	session, err := h.sessionStore.Get(r, h.sessionName)
 	if err != nil {
-		// Session doesn't exist, just redirect
-		http.Redirect(w, r, "/", http.StatusFound)
+		// No session to end: already logged out
+		httputil.RespondJSON(w, h.log, http.StatusOK, map[string]bool{"success": true})
 		return
 	}
 
@@ -431,6 +563,23 @@ func (h *AuthHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Record the logout in the database, so every instance and a restarted
+	// one reject this user's sessions from before it. The in-memory
+	// blacklist above still covers this instance if the write fails.
+	if h.sessionRevoker != nil {
+		if subject, ok := session.Values["subject"].(string); ok && subject != "" {
+			moved, err := h.sessionRevoker.RevokeSessions(r.Context(), subject, sessionEpoch(session))
+			switch {
+			case err != nil:
+				h.log.Error("Failed to record logout; other server instances keep accepting this session until it expires",
+					logger.Str("session_id", sessionRef), logger.Err(err))
+			case !moved:
+				h.log.Info("Logout from a session already revoked; the user's newer sessions are left alone",
+					logger.Str("session_id", sessionRef))
+			}
+		}
+	}
+
 	// Clear session cookie
 	session.Options.MaxAge = -1 // Delete cookie
 	if err := h.sessionStore.Save(r, w, session); err != nil {
@@ -443,8 +592,7 @@ func (h *AuthHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 		logger.Str("session_id", sessionRef),
 		logger.Str("email", email))
 
-	// Redirect to home page
-	http.Redirect(w, r, "/", http.StatusFound)
+	httputil.RespondJSON(w, h.log, http.StatusOK, map[string]bool{"success": true})
 }
 
 // handleUserInfo returns the current user's information.
@@ -642,7 +790,7 @@ func (a *sessionStoreAdapter) Get(r *http.Request, name string) (*sessions.Sessi
 
 // Save saves the session.
 func (a *sessionStoreAdapter) Save(r *http.Request, w http.ResponseWriter, s *sessions.Session) error {
-	return s.Save(r, w)
+	return a.manager.Save(r, w, s)
 }
 
 // Ensure AuthHandlers implements RouteRegistrar

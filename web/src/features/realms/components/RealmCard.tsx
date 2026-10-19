@@ -9,6 +9,7 @@ import {
   Tooltip,
 } from "@mui/material";
 import type { RealmCardProps } from "../types";
+import { unreadableRealmText } from "../utils/unreadable";
 
 export const RealmCard: React.FC<RealmCardProps> = ({ realm, onClick }) => {
   const theme = useTheme();
@@ -19,6 +20,12 @@ export const RealmCard: React.FC<RealmCardProps> = ({ realm, onClick }) => {
       !realm.events_listeners ||
       realm.events_listeners.length === 0);
 
+  // A realm KMT can no longer read shows what it last read, so its stored
+  // health says nothing about now.
+  const unreadable = unreadableRealmText(
+    realm.unreadable_since,
+    realm.last_checked,
+  );
   const isHealthy = realm.enabled && realm.is_healthy;
 
   return (
@@ -65,23 +72,48 @@ export const RealmCard: React.FC<RealmCardProps> = ({ realm, onClick }) => {
               />
             </Tooltip>
           )}
-          <Chip
-            label={isHealthy ? "Healthy" : "Unhealthy"}
-            size="small"
-            sx={{
-              bgcolor: isHealthy
-                ? alpha(theme.palette.success.main, 0.2)
-                : alpha(theme.palette.error.main, 0.2),
-              color: isHealthy
-                ? theme.palette.success.main
-                : theme.palette.error.main,
-              fontWeight: 700,
-              textTransform: "uppercase",
-              fontSize: "0.75rem",
-            }}
-          />
+          {unreadable ? (
+            <Tooltip title={unreadable}>
+              <Chip
+                label="Can't read"
+                size="small"
+                sx={{
+                  bgcolor: alpha(theme.palette.warning.main, 0.2),
+                  color: theme.palette.warning.main,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  fontSize: "0.75rem",
+                }}
+              />
+            </Tooltip>
+          ) : (
+            <Chip
+              label={isHealthy ? "Healthy" : "Unhealthy"}
+              size="small"
+              sx={{
+                bgcolor: isHealthy
+                  ? alpha(theme.palette.success.main, 0.2)
+                  : alpha(theme.palette.error.main, 0.2),
+                color: isHealthy
+                  ? theme.palette.success.main
+                  : theme.palette.error.main,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                fontSize: "0.75rem",
+              }}
+            />
+          )}
         </Box>
       </Box>
+
+      {unreadable && realm.last_checked && (
+        <Typography
+          variant="caption"
+          sx={{ display: "block", color: "warning.main", mb: 1.5 }}
+        >
+          Last read {new Date(realm.last_checked).toLocaleString()}
+        </Typography>
+      )}
 
       {/* Metrics */}
       {realm.metrics && (

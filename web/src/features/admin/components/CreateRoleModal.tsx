@@ -6,6 +6,8 @@ import {
   DialogActions,
   Button,
   Box,
+  FormControlLabel,
+  Switch,
 } from "@mui/material";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -15,12 +17,12 @@ import {
   type CreateRoleFormData,
 } from "@/shared/lib/zodFormSchemas";
 import { PermissionsSelector } from "./PermissionsSelector";
-import type { Permission } from "../types";
+import type { CreateRoleRequest, Permission } from "../types";
 
 interface CreateRoleModalProps {
   open: boolean;
   permissions: Permission[];
-  onSubmit: (data: CreateRoleFormData) => void;
+  onSubmit: (data: CreateRoleRequest) => void;
   onClose: () => void;
   isSubmitting?: boolean;
 }
@@ -40,6 +42,7 @@ export const CreateRoleModal: React.FC<CreateRoleModalProps> = ({
       display_name: "",
       description: "",
       permission_ids: [],
+      is_active: true,
     },
   });
 
@@ -50,8 +53,18 @@ export const CreateRoleModal: React.FC<CreateRoleModalProps> = ({
     onClose();
   };
 
-  const handleFormSubmit = (data: CreateRoleFormData) => {
-    onSubmit(data);
+  // The selector works in permission IDs; the API takes names.
+  const handleFormSubmit = ({
+    permission_ids,
+    ...role
+  }: CreateRoleFormData) => {
+    const selected = new Set(permission_ids);
+    onSubmit({
+      ...role,
+      permissions: permissions
+        .filter((p) => selected.has(p.id))
+        .map((p) => p.name),
+    });
     reset();
   };
 
@@ -110,6 +123,25 @@ export const CreateRoleModal: React.FC<CreateRoleModalProps> = ({
             rows={2}
             required
             fullWidth
+          />
+          <Controller
+            name="is_active"
+            control={control}
+            render={({ field }) => (
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={field.value}
+                    onChange={(e) => field.onChange(e.target.checked)}
+                  />
+                }
+                label={
+                  field.value
+                    ? "Active: users with this role get its permissions"
+                    : "Inactive: grants nothing until activated"
+                }
+              />
+            )}
           />
           <Controller
             name="permission_ids"

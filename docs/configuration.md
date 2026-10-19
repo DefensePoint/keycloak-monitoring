@@ -4,7 +4,7 @@ Complete reference for configuring the Keycloak Monitoring Tool.
 
 ## Overview
 
-The Keycloak Monitoring Tool uses a YAML configuration file (`config.yaml`) as the primary configuration source. All settings can be overridden using environment variables with the `MONITORING_` prefix.
+The Keycloak Monitoring Tool uses a YAML configuration file (`config.yaml`) as the primary configuration source. Settings with a built-in default or a key present in `config.yaml` can be overridden using the `MONITORING_` prefix.
 
 ### Configuration Priority
 
@@ -25,7 +25,9 @@ vim config.yaml
 
 # Or use environment variables for sensitive data
 export MONITORING_DATABASE_PASSWORD=your_secure_password
-export MONITORING_KEYCLOAK_CLIENT_SECRET=your_keycloak_client_secret
+# Tenant client secrets: reference a variable from config.yaml, e.g.
+#   client_secret: "${PROD_KEYCLOAK_CLIENT_SECRET}"
+export PROD_KEYCLOAK_CLIENT_SECRET=your_keycloak_client_secret
 ```
 
 ## Configuration File
@@ -35,28 +37,29 @@ The configuration file is a YAML file typically named `config.yaml` and located 
 ### Specifying a Custom Configuration File
 
 ```bash
-# Using the -config flag
 ./bin/server -config /path/to/custom-config.yaml
-
-# Or via environment variable
-export CONFIG_FILE=/path/to/custom-config.yaml
-./bin/server
 ```
+
+Without `-config`, the server, web and MCP binaries read `config.yaml` from the
+working directory. When that file is missing, they load only the built-in
+defaults and `MONITORING_*` variables.
 
 ## Environment Variables
 
-All configuration options can be set via environment variables using the following convention:
+For eligible configuration keys, construct the environment variable using this convention:
 
 1. Prefix with `MONITORING_`
 2. Replace `.` (dots) with `_` (underscores)
 3. Convert to UPPERCASE
+
+An override only applies to a key that has a built-in default or is present in `config.yaml`. For settings of a single tenant under `keycloak.tenants`, use a `${NAME}` placeholder in the file instead; see "Environment Variables for Multi-Tenant Setup" under [Keycloak Monitoring](#keycloak-monitoring).
 
 ### Examples
 
 | Config Key | Environment Variable |
 |------------|---------------------|
 | `database.host` | `MONITORING_DATABASE_HOST` |
-| `keycloak.server_url` | `MONITORING_KEYCLOAK_SERVER_URL` |
+| `keycloak.global.polling.metrics_interval` | `MONITORING_KEYCLOAK_GLOBAL_POLLING_METRICS_INTERVAL` |
 | `http.server.port` | `MONITORING_HTTP_SERVER_PORT` |
 | `auth.simple.default_pass` | `MONITORING_AUTH_SIMPLE_DEFAULT_PASS` |
 | `auth.session.secret` | `MONITORING_AUTH_SESSION_SECRET` |
@@ -69,11 +72,38 @@ All configuration options can be set via environment variables using the followi
 export MONITORING_DATABASE_HOST=postgres.example.com
 export MONITORING_DATABASE_PORT=5432
 export MONITORING_DATABASE_PASSWORD=secure_password
-export MONITORING_KEYCLOAK_SERVER_URL=https://keycloak.example.com
 export MONITORING_AUTH_SESSION_SECRET=$(openssl rand -base64 32)
 
 ./bin/server
 ```
+
+### Deployment Variable Requirements
+
+Use this reference for both local and hosted deployments. An environment variable
+only overrides a key with a built-in default or a key present in `config.yaml`.
+Keep a key without a built-in default present, even if empty, when supplying it
+through `MONITORING_*`. Examples are `auth.simple.default_pass`,
+`auth.session.secret`, and the `auth.oauth2` keys `provider_url`, `client_id`,
+`client_secret` and `redirect_url`. A `${NAME}` placeholder instead uses that
+exact environment variable name; it must appear in the configuration value to
+have any effect.
+
+| Variable | When it is needed |
+| --- | --- |
+| `MONITORING_DATABASE_PASSWORD` | Supply the database credential when password authentication is used; it overrides `database.password`. |
+| `PROD_KEYCLOAK_CLIENT_SECRET` | Example placeholder name for a monitored tenant's client secret: `client_secret: "${PROD_KEYCLOAK_CLIENT_SECRET}"`. It has no effect without that placeholder. Use a separate variable for each tenant. |
+| `MONITORING_AUTH_SIMPLE_DEFAULT_USER`, `_EMAIL`, `_PASS` | Seed the initial administrator when `auth.simple.enabled` is true and the database has no users. `_USER` and `_EMAIL` fall back to `admin` and `admin@example.com`; `_PASS` has no default. Startup fails if a resolved value is empty or the password breaks the rules below. A populated database starts without the seed. With simple authentication enabled, every startup, including one on a populated database, also gives the account whose email matches `_EMAIL` the global administrator role if it lacks it. Because `_EMAIL` falls back to `admin@example.com`, this runs even when the variable is not set, and a revoked administrator role on that account returns at the next restart. If no account has that email, startup logs a warning and continues. |
+| `MONITORING_AUTH_SESSION_SECRET` | Required for login: with an empty secret, every login returns HTTP 500 and the server logs `securecookie: hash key is not set`. Use a stable random value of at least 32 characters, and keep `auth.session.secret` present for the override. |
+| `MONITORING_AUTH_OAUTH2_CLIENT_SECRET` | Required when `auth.oauth2.enabled` is true. An empty `client_secret`, `provider_url`, `client_id` or `redirect_url` disables OAuth2 login with a startup warning. Keep `auth.oauth2.client_secret` present for the override. |
+| `MONITORING_SECURITY_ENCRYPTION_KEY` | Recommended for production, optional for a new plaintext deployment. Without it, the server warns that tenant secrets are stored as plaintext. If set, it must be the base64 encoding of 32 bytes; an invalid key prevents startup. Tenants with encrypted secrets cannot authenticate until their original key is restored. See [Secrets Encryption](#secrets-encryption). |
+| `MONITORING_SECURITY_RUN_SECRET_MIGRATION` | Optional, deliberate migration of existing plaintext tenant secrets; only takes effect with the encryption key. |
+
+The initial administrator password must contain at least 12 characters, an
+uppercase letter, a lowercase letter, a number, and a special character. The
+validator rejects any case-insensitive substring matching `password`, `admin`,
+`welcome`, `letmein`, `qwerty`, `123456`, `secret`, `changeme`, or `default`.
+Generate a unique password rather than reusing a documentation example. The
+initial password is not rotated automatically; change it after first login.
 
 ## Configuration Sections
 
@@ -106,6 +136,56 @@ export MONITORING_HTTP_SERVER_ENABLED=true
 export MONITORING_HTTP_SERVER_HOST=0.0.0.0
 export MONITORING_HTTP_SERVER_PORT=7888
 ```
+
+#### Cross-origin requests
+
+By default only KMT's own web UI can use the API with the session cookie:
+
+- No CORS headers are sent, so a page on another origin can't read API responses.
+- A POST, PUT or DELETE that a browser marks as coming from another origin (`Sec-Fetch-Site`, or an `Origin` that doesn't match the request's host) is refused with 403 and logged as `Cross-origin request refused`. This holds whatever `auth.session.same_site` is set to.
+- Requests without `Origin` or `Sec-Fetch-Site`, such as API-token clients, curl and the MCP server, are not affected.
+
+The web server forwards the browser's `Host` to the API server, so its proxy needs no extra setting. A reverse proxy in front of the web server must pass the original `Host` through, port included: with nginx that is `proxy_set_header Host $http_host;`, not `$host`, which drops the port. Over plain HTTP on a non-standard port, browsers send no `Sec-Fetch-Site`, and a `Host` without the port makes the UI's own writes fail with 403.
+
+To let a trusted browser app on another origin call the API, list its origin:
+
+```yaml
+http:
+  cors:
+    # scheme://host[:port], http or https. Lowercased, and :80 or :443 dropped,
+    # to match the Origin header browsers send. Wildcards, paths, user info and
+    # non-ASCII hosts (use the xn-- form) are rejected at startup.
+    # Default: []
+    allowed_origins:
+      - "https://dashboard.example.com"
+```
+
+or
+
+```bash
+# Separate several origins with spaces or commas
+export MONITORING_HTTP_CORS_ALLOWED_ORIGINS="https://dashboard.example.com"
+```
+
+#### HTTPS and the session cookie
+
+A deployment served over HTTPS needs nothing set: these defaults keep the session cookie and every later visit on HTTPS.
+
+- `auth.session.secure` defaults to `true`, so the session cookie, and the short-lived single sign-on login cookie, are marked `Secure` and never sent over plain HTTP. A cookie set over HTTPS is `Secure` whatever the setting says: TLS to KMT, or `X-Forwarded-Proto: https` from the proxy that terminates TLS (Traefik sends it).
+- `http.security_headers.hsts` defaults to `max-age=31536000` (one year). The API and the web server send it on every response, the application page included, so after one HTTPS visit the browser upgrades a typed or linked `http://` address before sending anything. Browsers ignore it on a plain HTTP response.
+
+Recommended deployed values, which are the defaults: remove any `secure: false` or `hsts: ""` a deployment's `config.yaml` carries from an older example.
+
+```yaml
+auth:
+  session:
+    secure: true
+http:
+  security_headers:
+    hsts: "max-age=31536000"
+```
+
+Local development over plain HTTP sets `auth.session.secure: false` (the local `.env.example` sets `MONITORING_AUTH_SESSION_SECURE=false`): browsers drop a `Secure` cookie on a plain HTTP response, so sign-in would not stick. HSTS needs no change there.
 
 ### Web Server
 
@@ -168,6 +248,8 @@ keycloak:
       # Another instance
 ```
 
+A tenant's `config:` block takes the same keys as `keycloak.global`. Settings it leaves out keep the global value, and a list in it replaces the global list. These apply per tenant: `default_realm`, `realms`, `polling`, `events`, `connection` and `infinispan_port`. These are only read from `keycloak.global`: `config_checker`, `event_checker`, `amfa_checker`, `amfa_mirror`, `version_checker`, `infinispan_enabled` and `connection.allow_private_ranges`. Setting one of them for a tenant logs a warning at startup and has no effect. A value of the wrong type, such as `events_interval: soon`, stops startup; an unknown key is logged as a warning when the tenant's monitor starts.
+
 **Complete Multi-Tenant Example:**
 
 ```yaml
@@ -199,13 +281,24 @@ keycloak:
     events:
       # Event types to collect (empty = all events)
       # Common types: LOGIN, LOGOUT, REGISTER, LOGIN_ERROR, etc.
+      # Not case-sensitive. Names Keycloak does not list are skipped with a
+      # warning; if none is known, nothing is collected and an error is logged.
       types: []
 
       # Maximum events to fetch per poll (prevents database overload)
       max_events_per_poll: 1000
 
-      # How far back to look for events on each poll
+      # Each poll reads only the events after the last one it saw. After a
+      # start, new events are fetched at once while the day so far, from the
+      # start of the day this long ago, is backfilled a few pages per poll.
+      # Failed writes are retried until they are older than that.
       lookback_duration: 1m
+
+      # Keycloak's transaction-default-timeout (5m by default): how long after
+      # its time a successful event may become visible. Every 5 minutes one
+      # poll reads back this far, plus the time since the last such sweep and
+      # a minute's margin. Raise it with Keycloak's; tenants can override it.
+      late_commit_window: 5m
 
     # Connection settings for Keycloak API
     connection:
@@ -224,7 +317,30 @@ keycloak:
     # Automated security configuration scanning
     # ========================================================================
     config_checker:
-      # How often to scan configurations for security issues
+      # Master switch, off by default: nothing below runs until it is on.
+      # When on, every tenant enabled at startup gets the checks enabled below;
+      # a tenant added later is checked after a restart. Per-tenant
+      # config_checker overrides are not applied yet. The realm and client
+      # security checks are on by default and did not run in KMT 1.0.x, so
+      # expect a first wave of alerts for existing misconfigurations.
+      enabled: false
+
+      # How often to scan configurations for security issues.
+      # An alert follows its problem. It resolves on its own, with a
+      # resolution notification, once two runs in a row have read its realm
+      # without finding the problem (about two intervals). A resolved alert
+      # whose problem is found again, because the fix did not take or it came
+      # back, reopens as a new occurrence and notifies again. Acknowledged
+      # alerts keep their status while the problem lasts; ignored alerts keep
+      # theirs for good. A run that cannot read a realm, or an identity
+      # provider's metadata, leaves that realm's or provider's alerts as they
+      # are, and so does switching a check off below: it stops looking, it
+      # does not fix anything. The alerts of a deleted or disabled realm
+      # resolve the same way, two runs after it is gone. A realm the
+      # monitoring client can no longer see (its roles there were removed)
+      # keeps its alerts, and the server logs it once per tenant: "Monitoring
+      # client cannot view this realm's settings", then "can view this realm's
+      # settings again" once a check reads it.
       poll_interval: 5m
 
       checks:
@@ -238,7 +354,9 @@ keycloak:
           check_saml_only: true
 
           # Certificate expiration warning threshold (days)
-          # Alerts created when certificates expire within this window
+          # A warning alert is raised when a certificate expires within this
+          # window. Once it has expired, a separate critical alert is raised
+          # and notified, and the warning is resolved without a notification.
           certificate_expiration_warning_days: 30
 
           # HTTP timeout for fetching SAML metadata XML
@@ -357,7 +475,10 @@ keycloak:
       # required.
       admin_realm: "master"
       client_id: "monitoring-service"
-      client_secret: "${PROD_KEYCLOAK_CLIENT_SECRET}"  # Use environment variable
+      # ${NAME} is replaced with the NAME environment variable at startup;
+      # an unset one is kept as literal text and logged as a warning.
+      # Write $${NAME} for a literal ${NAME}.
+      client_secret: "${PROD_KEYCLOAK_CLIENT_SECRET}"
 
       # Enable/disable monitoring for this tenant
       enabled: true
@@ -380,6 +501,10 @@ keycloak:
         realms:
           - "master"
           - "production-realm"
+
+        # Realm the Dashboard and Events pages open on (empty = All Realms).
+        # See "Initial Realm Selection" below.
+        default_realm: "production-realm"
 
         # Override polling intervals for this tenant.
         # For high-volume and/or federated (external user-store) tenants,
@@ -406,14 +531,12 @@ keycloak:
         - "non-production"
       owner: "dev-team"
 
-      # Override configuration checks for staging
+      # Watch only the staging realm and fewer event types
       config:
-        config_checker:
-          checks:
-            client_security:
-              # Allow localhost redirects in staging
-              allow_localhost_redirects: true
-              production_environment: false
+        realms:
+          - "staging"
+        events:
+          types: ["LOGIN_ERROR", "CLIENT_LOGIN_ERROR"]
 
     dev-keycloak:
       name: "Development Keycloak"
@@ -433,16 +556,27 @@ keycloak:
           skip_tls_verify: true  # OK for local development
         polling:
           metrics_interval: 10m  # Less frequent polling
-        config_checker:
-          poll_interval: 15m  # Less frequent checks
 ```
 
 **Environment Variables for Multi-Tenant Setup:**
 
+Give each tenant's secret a `${NAME}` placeholder in `config.yaml` and set the variable in the environment:
+
+```yaml
+keycloak:
+  tenants:
+    production-keycloak:
+      client_secret: "${PROD_KEYCLOAK_CLIENT_SECRET}"
+    staging-keycloak:
+      client_secret: "${STAGING_KEYCLOAK_CLIENT_SECRET}"
+```
+
+Do not use `MONITORING_KEYCLOAK_TENANTS_<ID>_*` overrides for tenant settings. The variable name has to carry the tenant ID exactly, hyphens included (`MONITORING_KEYCLOAK_TENANTS_PRODUCTION-KEYCLOAK_CLIENT_SECRET`), which a shell cannot export, and it only applies when the key is already in `config.yaml`. Written with underscores instead, it is silently ignored and the file's value is used. Global settings have no such problem:
+
 ```bash
-# Tenant-specific credentials
-export MONITORING_KEYCLOAK_TENANTS_PRODUCTION_KEYCLOAK_CLIENT_SECRET=secure_prod_client_secret
-export MONITORING_KEYCLOAK_TENANTS_STAGING_KEYCLOAK_CLIENT_SECRET=secure_staging_client_secret
+# Tenant-specific credentials, referenced from config.yaml as above
+export PROD_KEYCLOAK_CLIENT_SECRET=secure_prod_client_secret
+export STAGING_KEYCLOAK_CLIENT_SECRET=secure_staging_client_secret
 
 # Override global polling for all tenants
 export MONITORING_KEYCLOAK_GLOBAL_POLLING_METRICS_INTERVAL=10m
@@ -451,11 +585,9 @@ export MONITORING_KEYCLOAK_GLOBAL_POLLING_EVENTS_INTERVAL=1m
 # Override configuration checker settings
 export MONITORING_KEYCLOAK_GLOBAL_CONFIG_CHECKER_POLL_INTERVAL=10m
 export MONITORING_KEYCLOAK_GLOBAL_CONFIG_CHECKER_CHECKS_REALM_SECURITY_MIN_PASSWORD_LENGTH=16
-
-# Override specific tenant settings
-export MONITORING_KEYCLOAK_TENANTS_PRODUCTION_KEYCLOAK_ENABLED=true
-export MONITORING_KEYCLOAK_TENANTS_PRODUCTION_KEYCLOAK_CONFIG_POLLING_EVENTS_INTERVAL=30s
 ```
+
+Change a specific tenant's settings, such as `enabled` or its polling intervals, in its block in `config.yaml`, using a `${NAME}` placeholder where the value should come from the environment.
 
 **Adding Tenants via UI:**
 
@@ -485,6 +617,24 @@ You can also add and manage tenants through the web interface:
 
 Tenants created via the UI are stored in the database and override any tenants defined in `config.yaml` with the same ID.
 
+#### Initial Realm Selection
+
+Dashboard and Events open on the tenant's `config.default_realm` when the
+browser tab has no saved choice for that tenant. Picking a realm, including
+All Realms, saves the choice for that tenant in the tab's `sessionStorage`,
+and a saved choice wins over the default. A reload in the same tab keeps the
+choice. A new tab opened from a bookmark or a typed URL starts with no saved
+choice, and signing out clears the tab's saved choices. A saved or default
+realm that is not in the realm list the caller can see falls back to All
+Realms. Both pages show All Realms until the realm list loads. A realm page
+always opens the realm named in its URL.
+
+The UI uses the tenant default only; `keycloak.global.default_realm` is not a
+fallback. Set `config.default_realm` in the tenant's block in `config.yaml`, as
+in the `production-keycloak` example above. For a tenant created in the UI, set
+its Default Realm on the **Tenants** page. This selection changes the initial
+view, not the caller's permissions or the set of realms the server monitors.
+
 #### Notification Configuration
 
 Configure where security alerts are sent. Each notification channel has a minimum severity threshold to prevent alert fatigue.
@@ -498,6 +648,11 @@ notifications:
   # Example: "https://monitoring.example.com"
   # Leave empty to disable links in notifications
   base_url: "https://monitoring.example.com"
+
+  # How often to retry a failed send of a tenant down/degraded, event storage
+  # or Keycloak event alert, while the alert stays active and unacknowledged.
+  # Only channels whose send failed are retried. Default: 5m
+  retry_interval: 5m
 
   # ============================================================================
   # GITLAB ISSUE INTEGRATION
@@ -834,9 +989,12 @@ database:
   user: "monitoring"
 
   # Database password
-  # Production: Use environment variable MONITORING_DATABASE_PASSWORD
-  # Required: Yes
-  password: "monitoring_password"
+  # Required: there is no built-in password, and the server refuses to start
+  # with an empty one or an unexpanded ${NAME} placeholder. Set it here or
+  # through MONITORING_DATABASE_PASSWORD. mcp.database.password works the
+  # same way. The development password the local stacks use only logs a
+  # warning.
+  password: ""
 
   # SSL mode for connections
   # Options: disable, require, verify-ca, verify-full
@@ -844,8 +1002,10 @@ database:
   #   - require: SSL without verification
   #   - verify-ca: Verify server certificate
   #   - verify-full: Full verification
-  # Default: "disable"
-  ssl_mode: "disable"
+  # Default when omitted: "require"
+  # Set "disable" only for a database on a private network with TLS off, as
+  # the Compose stacks do for their own Postgres.
+  ssl_mode: "require"
 
   # Maximum connections in pool
   # Default: 25
@@ -855,7 +1015,12 @@ database:
   # Default: 5
   min_conns: 5
 
-  # Connection timeout
+  # How long to wait for a new database connection to open, and for the
+  # startup check. A database that accepts the connection but never answers
+  # fails startup after this long instead of hanging. It is not a query
+  # timeout, and pooled connections are kept regardless of it (each is
+  # replaced after 30 minutes). mcp.database.timeout works the same way,
+  # and defaults to 10s when omitted.
   # Valid units: ns, us/µs, ms, s, m, h
   # Default: 30s
   timeout: 30s
@@ -891,11 +1056,7 @@ auth:
     # SECURITY: MUST be set via environment variables in production
     # NEVER commit actual passwords to version control
     # Use: MONITORING_AUTH_SIMPLE_DEFAULT_USER, DEFAULT_PASS, DEFAULT_EMAIL
-    # Password must meet security requirements:
-    #   - Minimum 12 characters
-    #   - Uppercase, lowercase, number, and special character required
-    #   - Cannot be common weak password (admin123, password123, etc.)
-    # Change the admin password after first login; the initial password remains valid until changed
+    # Password rules: see Deployment Variable Requirements above
     default_user: ""
     default_pass: ""
     default_email: ""
@@ -916,9 +1077,9 @@ auth:
     client_id: "monitoring-dashboard"
 
     # OAuth2 client secret (from Keycloak)
-    # Production: Use environment variable MONITORING_AUTH_OAUTH2_CLIENT_SECRET
+    # Set it through MONITORING_AUTH_OAUTH2_CLIENT_SECRET rather than here.
     # Required if oauth2.enabled is true
-    client_secret: "your-client-secret-here"
+    client_secret: ""
 
     # OAuth2 redirect URL (callback URL)
     # Must match configuration in Keycloak
@@ -946,8 +1107,9 @@ auth:
     # MUST be at least 32 characters
     # Generate with: openssl rand -base64 32
     # Production: Use environment variable MONITORING_AUTH_SESSION_SECRET
-    # Required: Yes
-    secret: "change-this-to-a-random-secret-key-at-least-32-chars"
+    # Required: Yes. The server refuses to start while it is empty or one of
+    # the example values this project has published.
+    secret: ""
 
     # Session cookie name
     # Default: "monitoring_session"
@@ -959,11 +1121,11 @@ auth:
     # Default: 24h
     max_age: 24h
 
-    # Use secure cookies (HTTPS only)
-    # Production: true
-    # Development (HTTP): false
-    # Default: false
-    secure: false
+    # Mark the session cookie Secure (HTTPS only). Over HTTPS it is Secure
+    # whatever this says; false only for local development over plain HTTP.
+    # See "HTTPS and the session cookie".
+    # Default: true
+    secure: true
 
     # SameSite cookie attribute (CSRF protection)
     # Options: lax, strict, none
@@ -980,13 +1142,14 @@ auth:
     state_max_age: 10m
 ```
 
-or
+or, with the keys that have no built-in default kept present in `config.yaml`
+(see [Deployment Variable Requirements](#deployment-variable-requirements)):
 
 ```bash
 # Simple Auth
 export MONITORING_AUTH_SIMPLE_ENABLED=true
 export MONITORING_AUTH_SIMPLE_DEFAULT_USER=admin
-export MONITORING_AUTH_SIMPLE_DEFAULT_PASS=secure_password
+export MONITORING_AUTH_SIMPLE_DEFAULT_PASS='Init!2026-Qx7nK2'
 export MONITORING_AUTH_SIMPLE_DEFAULT_EMAIL=admin@example.com
 
 # OAuth2
@@ -1069,19 +1232,13 @@ logging:
   # Default: "json"
   format: "json"
 
-  # Log output configuration
+  # Log output configuration (logs are written to stdout)
   output:
-    stdout:
-      # Enable logging to stdout
-      # Default: true
-      enabled: true
-
-      # Pretty-print JSON logs
-      # Only applies to JSON format
-      # Production: false (compact logs)
-      # Development: true (readable logs)
-      # Default: false
-      pretty: false
+    # Human-readable console lines instead of JSON lines
+    # Production: false (compact logs)
+    # Development: true (readable logs)
+    # Default: false
+    pretty: false
 ```
 
 or
@@ -1089,8 +1246,7 @@ or
 ```bash
 export MONITORING_LOGGING_LEVEL=info
 export MONITORING_LOGGING_FORMAT=json
-export MONITORING_LOGGING_OUTPUT_STDOUT_ENABLED=true
-export MONITORING_LOGGING_OUTPUT_STDOUT_PRETTY=false
+export MONITORING_LOGGING_OUTPUT_PRETTY=false
 ```
 
 ### MCP Server
@@ -1253,19 +1409,18 @@ auth:
   simple:
     enabled: true
     default_user: "admin"
-    default_pass: "admin"
+    default_pass: ""  # Set by MONITORING_AUTH_SIMPLE_DEFAULT_PASS
   oauth2:
     enabled: false
   session:
-    secret: "dev-secret-key-min-32-characters-long"
+    secret: ""  # Set by MONITORING_AUTH_SESSION_SECRET
     secure: false
 
 logging:
   level: "debug"
   format: "console"
   output:
-    stdout:
-      pretty: true
+    pretty: true
 
 notifications:
   gitlab:
@@ -1335,8 +1490,7 @@ keycloak:
       server_url: "https://keycloak.example.com"
       admin_realm: "master"
       client_id: "monitoring-service"
-      # Use environment variable:
-      # MONITORING_KEYCLOAK_TENANTS_PROD_KEYCLOAK_CLIENT_SECRET
+      client_secret: "${PROD_KEYCLOAK_CLIENT_SECRET}"
       enabled: true
       tags: ["production", "critical"]
       owner: "platform-team"
@@ -1350,8 +1504,7 @@ keycloak:
       server_url: "https://staging.keycloak.example.com"
       admin_realm: "master"
       client_id: "monitoring-service"
-      # Use environment variable:
-      # MONITORING_KEYCLOAK_TENANTS_STAGING_KEYCLOAK_CLIENT_SECRET
+      client_secret: "${STAGING_KEYCLOAK_CLIENT_SECRET}"
       enabled: true
       tags: ["staging", "non-production"]
 
@@ -1362,14 +1515,18 @@ auth:
     enabled: true
     provider_url: "https://keycloak.example.com/realms/production"
     client_id: "monitoring-dashboard"
-    # Use environment variable: MONITORING_AUTH_OAUTH2_CLIENT_SECRET
+    # Set by MONITORING_AUTH_OAUTH2_CLIENT_SECRET; the key must stay present
+    # (empty is fine) or the override is ignored.
+    client_secret: ""
     redirect_url: "https://monitoring.example.com/auth/callback"
     scopes:
       - "openid"
       - "profile"
       - "email"
   session:
-    # Use environment variable: MONITORING_AUTH_SESSION_SECRET
+    # Set by MONITORING_AUTH_SESSION_SECRET; the key must stay present
+    # (empty is fine) or the override is ignored.
+    secret: ""
     max_age: 24h
     secure: true
     same_site: "lax"
@@ -1378,9 +1535,7 @@ logging:
   level: "info"
   format: "json"
   output:
-    stdout:
-      enabled: true
-      pretty: false
+    pretty: false
 
 notifications:
   gitlab:
@@ -1433,8 +1588,8 @@ database:
   port: 5432
   database: "monitoring"
   user: "monitoring"
-  password: "monitoring_password"
-  ssl_mode: "disable"
+  password: ""                       # from MONITORING_DATABASE_PASSWORD
+  ssl_mode: "disable"                # the Compose Postgres has no TLS
 
 keycloak:
   global:
@@ -1457,7 +1612,7 @@ keycloak:
       server_url: "https://keycloak.example.com"
       admin_realm: "master"
       client_id: "monitoring-service"
-      client_secret: "${KEYCLOAK_CLIENT_SECRET}"  # Use env var
+      client_secret: "${PROD_KEYCLOAK_CLIENT_SECRET}"  # Use env var
       enabled: true
       tags: ["production"]
 
@@ -1468,7 +1623,7 @@ auth:
     default_pass: "${MONITORING_AUTH_SIMPLE_DEFAULT_PASS}"  # REQUIRED: Strong password
     default_email: "${MONITORING_AUTH_SIMPLE_DEFAULT_EMAIL}"  # Use env var
   session:
-    secret: "docker-secret-key-minimum-32-characters"
+    secret: "${MONITORING_AUTH_SESSION_SECRET}"  # REQUIRED: openssl rand -base64 32
 
 logging:
   level: "info"
@@ -1496,10 +1651,14 @@ notifications:
 
 2. **Use environment variables for sensitive data in production**
 
+   Keep `auth.session.secret` present in `config.yaml`, even if empty, for its
+   override to apply ([Deployment Variable Requirements](#deployment-variable-requirements)).
+
    ```bash
    export MONITORING_DATABASE_PASSWORD=$(cat /run/secrets/db_password)
    export MONITORING_AUTH_SESSION_SECRET=$(openssl rand -base64 32)
-   export MONITORING_KEYCLOAK_CLIENT_SECRET=$(cat /run/secrets/keycloak_client_secret)
+   # Tenant secrets, referenced from config.yaml as client_secret: "${PROD_KEYCLOAK_CLIENT_SECRET}"
+   export PROD_KEYCLOAK_CLIENT_SECRET=$(cat /run/secrets/keycloak_client_secret)
    ```
 
 3. **Generate strong session secrets**
@@ -1518,7 +1677,10 @@ notifications:
        skip_tls_verify: false
    auth:
      session:
-       secure: true
+       secure: true  # the default
+   http:
+     security_headers:
+       hsts: "max-age=31536000"  # the default
    ```
 
 ### Performance
@@ -1568,8 +1730,7 @@ notifications:
      level: "debug"
      format: "console"
      output:
-       stdout:
-         pretty: true
+       pretty: true
    ```
 
 ### High Availability

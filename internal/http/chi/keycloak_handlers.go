@@ -14,6 +14,7 @@ import (
 	_ "github.com/DefensePoint/keycloak-monitoring/internal/http/dto" // swagger
 	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
 )
 
 // KeycloakTenantService defines the tenant interface needed by keycloak handlers.
@@ -239,8 +240,11 @@ func (h *KeycloakHandlers) handleKeycloakHealth(w http.ResponseWriter, r *http.R
 //	@Tags			keycloak
 //	@Produce		json
 //	@Param			tenantID	path		string	true	"Tenant ID"
-//	@Param			hours		query		int		false	"Number of hours to look back (default 24)"
+//	@Param			start		query		string	false	"Range start (RFC3339); with end, overrides hours. At most 7 days before end"
+//	@Param			end			query		string	false	"Range end (RFC3339)"
+//	@Param			hours		query		int		false	"Number of hours to look back (default 24, max 168)"
 //	@Success		200			{object}	map[string]interface{}
+//	@Failure		400			{object}	dto.ErrorResponse	"Range longer than 7 days"
 //	@Failure		401			{object}	dto.ErrorResponse
 //	@Failure		403			{object}	dto.ErrorResponse
 //	@Failure		500			{object}	dto.ErrorResponse
@@ -250,7 +254,11 @@ func (h *KeycloakHandlers) handleKeycloakHealthHistory(w http.ResponseWriter, r 
 	ctx := r.Context()
 	tenantID := chi.URLParam(r, "tenantID")
 
-	from, to := parseHoursParam(r, 24)
+	from, to, ok := parseHistoryWindow(r, 24)
+	if !ok {
+		httputil.RespondBadRequest(w, h.log, "Time range too long: start and end may be at most 7 days apart")
+		return
+	}
 
 	history, err := h.service.GetHealthHistory(ctx, tenantID, from, to)
 	if err != nil {
@@ -353,9 +361,11 @@ func narrowRealmMetrics(metrics map[string]*domain.KeycloakMetrics, scope []stri
 //	@Produce		json
 //	@Param			tenantID	path		string	true	"Tenant ID"
 //	@Param			realm		query		string	true	"Realm name"
-//	@Param			hours		query		int		false	"Number of hours to look back (default 24)"
+//	@Param			start		query		string	false	"Range start (RFC3339); with end, overrides hours. At most 7 days before end"
+//	@Param			end			query		string	false	"Range end (RFC3339)"
+//	@Param			hours		query		int		false	"Number of hours to look back (default 24, max 168)"
 //	@Success		200			{object}	map[string]interface{}
-//	@Failure		400			{object}	dto.ErrorResponse	"Missing realm parameter"
+//	@Failure		400			{object}	dto.ErrorResponse	"Missing realm parameter, or range longer than 7 days"
 //	@Failure		401			{object}	dto.ErrorResponse
 //	@Failure		403			{object}	dto.ErrorResponse
 //	@Failure		500			{object}	dto.ErrorResponse
@@ -376,7 +386,11 @@ func (h *KeycloakHandlers) handleKeycloakMetricsHistory(w http.ResponseWriter, r
 		return
 	}
 
-	from, to := parseHoursParam(r, 24)
+	from, to, ok := parseHistoryWindow(r, 24)
+	if !ok {
+		httputil.RespondBadRequest(w, h.log, "Time range too long: start and end may be at most 7 days apart")
+		return
+	}
 
 	metrics, err := h.service.GetMetricsHistoryByRealm(ctx, tenantID, realmName, from, to)
 	if err != nil {
@@ -406,7 +420,9 @@ func (h *KeycloakHandlers) handleKeycloakMetricsHistory(w http.ResponseWriter, r
 //	@Param			realm		query		string	true	"Realm name"
 //	@Param			type		query		string	false	"Filter by event type"
 //	@Param			limit		query		int		false	"Limit results (default 100)"
-//	@Param			hours		query		int		false	"Number of hours to look back (default 1)"
+//	@Param			start		query		string	false	"Range start (RFC3339); with end, overrides hours"
+//	@Param			end			query		string	false	"Range end (RFC3339)"
+//	@Param			hours		query		int		false	"Number of hours to look back (default 1, max 168)"
 //	@Success		200			{object}	map[string]interface{}
 //	@Failure		400			{object}	dto.ErrorResponse	"Missing realm parameter"
 //	@Failure		401			{object}	dto.ErrorResponse
@@ -438,7 +454,7 @@ func (h *KeycloakHandlers) handleKeycloakEvents(w http.ResponseWriter, r *http.R
 		limit = MaxLimit
 	}
 
-	from, to := parseHoursParam(r, 1)
+	from, to := parseTimeWindow(r, 1)
 
 	var events []*domain.KeycloakEvent
 	var err error
@@ -917,7 +933,7 @@ func (h *KeycloakHandlers) handleKeycloakClients(w http.ResponseWriter, r *http.
 
 	httputil.RespondSuccess(w, h.log, map[string]interface{}{
 		"realm":   realmName,
-		"clients": clients,
+		"clients": keycloakadmin.RedactClients(clients),
 		"count":   len(clients),
 	})
 }
@@ -956,6 +972,10 @@ func (h *KeycloakHandlers) handleKeycloakUserDetails(w http.ResponseWriter, r *h
 
 	// Check realm access
 	if !h.checkRealmAccess(ctx, w, tenantID, realmName) {
+		return
+	}
+	if keycloakadmin.CheckPathSegment(userID) != nil {
+		httputil.RespondBadRequest(w, h.log, "invalid userId")
 		return
 	}
 
@@ -1015,8 +1035,12 @@ func (h *KeycloakHandlers) handleInfinispanMetrics(w http.ResponseWriter, r *htt
 func (h *KeycloakHandlers) handleRealmUserByPath(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	tenantID := chi.URLParam(r, "tenantID")
-	realmName := chi.URLParam(r, "realmName")
-	userID := chi.URLParam(r, "kcUserID")
+	realmName, realmOK := pathParam(r, "realmName")
+	userID, userOK := pathParam(r, "kcUserID")
+	if !realmOK || !userOK {
+		httputil.RespondBadRequest(w, h.log, "invalid realm name or user ID")
+		return
+	}
 
 	if realmName == "" || userID == "" {
 		httputil.RespondBadRequest(w, h.log, "realm name and user ID are required")
@@ -1025,6 +1049,10 @@ func (h *KeycloakHandlers) handleRealmUserByPath(w http.ResponseWriter, r *http.
 
 	// Check realm access
 	if !h.checkRealmAccess(ctx, w, tenantID, realmName) {
+		return
+	}
+	if keycloakadmin.CheckPathSegment(userID) != nil {
+		httputil.RespondBadRequest(w, h.log, "invalid user ID")
 		return
 	}
 
@@ -1051,23 +1079,17 @@ func (h *KeycloakHandlers) checkRealmAccess(ctx context.Context, w http.Response
 		return false
 	}
 
-	if realmName == "" {
+	if strings.TrimSpace(realmName) == "" {
 		httputil.RespondForbidden(w, h.log, "Access to realm denied")
 		return false
 	}
 
-	hasAccess, err := h.rbacService.HasAccessToRealm(ctx, user.ID, tenantID, realmName)
-	if err != nil {
-		h.log.Error("Failed to check realm access",
-			logger.Err(err),
-			logger.Uint("user_id", user.ID),
-			logger.Str("tenant_id", tenantID),
-			logger.Str("realm", realmName))
-		httputil.RespondInternalError(w, h.log, "Failed to check realm access")
+	scope, all, ok := h.callerRealmScope(ctx, w, tenantID)
+	if !ok {
 		return false
 	}
 
-	if !hasAccess {
+	if !all && !slices.Contains(scope, realmName) {
 		h.log.Warn("Realm access denied",
 			logger.Uint("user_id", user.ID),
 			logger.Str("email", user.Email),

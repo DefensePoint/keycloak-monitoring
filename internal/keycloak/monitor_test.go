@@ -3,6 +3,7 @@ package keycloak
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -61,7 +62,10 @@ type mockAdminAPI struct {
 	GetEnabledUsersCountFunc func(ctx context.Context, realmName string) (enabled, disabled int, err error)
 	GetSessionsCountFunc     func(ctx context.Context, realmName string) (active, offline int, err error)
 	GetEventsFunc            func(ctx context.Context, realmName string, options *keycloakadmin.EventQueryOptions) ([]*keycloakadmin.EventRepresentation, error)
-	GetRecentEventsFunc      func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error)
+	EventsFunc               func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error)
+	GetEventsSinceFunc       func(ctx context.Context, realmName string, since time.Time, first int) ([]*keycloakadmin.EventRepresentation, bool, error)
+	// eventReads records the read kind GetEventsSince was given, per call.
+	eventReads               []keycloakadmin.EventsRead
 	GetHealthMetricsFunc     func(ctx context.Context) *keycloakadmin.HealthMetrics
 	GetInfinispanMetricsFunc func(ctx context.Context) (*keycloakadmin.InfinispanMetrics, error)
 
@@ -238,10 +242,22 @@ func (m *mockAdminAPI) GetEvents(ctx context.Context, realmName string, options 
 	return []*keycloakadmin.EventRepresentation{}, nil
 }
 
-func (m *mockAdminAPI) GetRecentEvents(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error) {
-	m.trackCall("GetRecentEvents")
-	if m.GetRecentEventsFunc != nil {
-		return m.GetRecentEventsFunc(ctx, realmName)
+// GetEventsSince serves GetEventsSinceFunc when set. Otherwise it returns the
+// realm's events from EventsFunc (or one default event) as a single page.
+func (m *mockAdminAPI) GetEventsSince(ctx context.Context, realmName string, since time.Time, first int, read keycloakadmin.EventsRead) ([]*keycloakadmin.EventRepresentation, bool, error) {
+	m.trackCall("GetEventsSince")
+	m.mu.Lock()
+	m.eventReads = append(m.eventReads, read)
+	m.mu.Unlock()
+	if m.GetEventsSinceFunc != nil {
+		return m.GetEventsSinceFunc(ctx, realmName, since, first)
+	}
+	if first > 0 {
+		return nil, false, nil
+	}
+	if m.EventsFunc != nil {
+		events, err := m.EventsFunc(ctx, realmName)
+		return events, false, err
 	}
 	return []*keycloakadmin.EventRepresentation{
 		{
@@ -254,7 +270,7 @@ func (m *mockAdminAPI) GetRecentEvents(ctx context.Context, realmName string) ([
 			IPAddress: "192.168.1.1",
 			Details:   map[string]string{"event_id": "evt-1"},
 		},
-	}, nil
+	}, false, nil
 }
 
 func (m *mockAdminAPI) GetHealthMetrics(ctx context.Context) *keycloakadmin.HealthMetrics {
@@ -287,6 +303,8 @@ type mockEventRepository struct {
 
 	SaveEventsFunc        func(ctx context.Context, events []*domain.KeycloakEvent) error
 	CountEventsByTypeFunc func(ctx context.Context, tenantID, realmName, eventType string, from, to time.Time) (int64, error)
+	StoredEventIDsFunc    func(ctx context.Context, tenantID string, ids []string, from, to time.Time) (map[string]bool, error)
+	IDlessFunc            func(ctx context.Context, tenantID string, since time.Time) (legacy, hashed time.Time, err error)
 
 	savedEvents []*domain.KeycloakEvent
 	calls       map[string]int
@@ -318,6 +336,26 @@ func (m *mockEventRepository) CountEventsByType(ctx context.Context, tenantID, r
 		return m.CountEventsByTypeFunc(ctx, tenantID, realmName, eventType, from, to)
 	}
 	return 10, nil
+}
+
+func (m *mockEventRepository) StoredEventIDs(ctx context.Context, tenantID string, ids []string, from, to time.Time) (map[string]bool, error) {
+	m.mu.Lock()
+	m.calls["StoredEventIDs"]++
+	m.mu.Unlock()
+	if m.StoredEventIDsFunc != nil {
+		return m.StoredEventIDsFunc(ctx, tenantID, ids, from, to)
+	}
+	return map[string]bool{}, nil
+}
+
+func (m *mockEventRepository) IDlessEventTimes(ctx context.Context, tenantID string, since time.Time) (legacy, hashed time.Time, err error) {
+	m.mu.Lock()
+	m.calls["IDlessEventTimes"]++
+	m.mu.Unlock()
+	if m.IDlessFunc != nil {
+		return m.IDlessFunc(ctx, tenantID, since)
+	}
+	return time.Time{}, time.Time{}, nil
 }
 
 func (m *mockEventRepository) getSavedEvents() []*domain.KeycloakEvent {
@@ -440,6 +478,9 @@ type mockRealmRepository struct {
 
 	savedRealms []*domain.KeycloakRealmInfo
 	calls       map[string]int
+	// retiredWith records the realm ids each RetireRealmsNotIn call kept.
+	retiredWith      [][]string
+	markedUnreadable [][]string
 }
 
 func newMockRealmRepository() *mockRealmRepository {
@@ -457,6 +498,22 @@ func (m *mockRealmRepository) SaveRealm(ctx context.Context, realm *domain.Keycl
 	if m.SaveRealmFunc != nil {
 		return m.SaveRealmFunc(ctx, realm)
 	}
+	return nil
+}
+
+func (m *mockRealmRepository) RetireRealmsNotIn(ctx context.Context, tenantID string, realmIDs []string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls["RetireRealmsNotIn"]++
+	m.retiredWith = append(m.retiredWith, append([]string(nil), realmIDs...))
+	return 0, nil
+}
+
+func (m *mockRealmRepository) MarkRealmsUnreadable(ctx context.Context, tenantID string, realmNames []string, since time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls["MarkRealmsUnreadable"]++
+	m.markedUnreadable = append(m.markedUnreadable, append([]string(nil), realmNames...))
 	return nil
 }
 
@@ -673,10 +730,11 @@ func TestMonitor_collectEvents(t *testing.T) {
 	healthAlertManager := newMockHealthAlertManager()
 
 	// Setup mock to return events
-	client.GetRecentEventsFunc = func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error) {
+	stamped := time.Now().UnixMilli()
+	client.EventsFunc = func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error) {
 		return []*keycloakadmin.EventRepresentation{
 			{
-				Time:      time.Now().UnixMilli(),
+				Time:      stamped,
 				Type:      "LOGIN",
 				RealmID:   "realm-1",
 				ClientID:  "test-client",
@@ -686,7 +744,7 @@ func TestMonitor_collectEvents(t *testing.T) {
 				Details:   map[string]string{"event_id": "evt-1"},
 			},
 			{
-				Time:      time.Now().UnixMilli(),
+				Time:      stamped,
 				Type:      "LOGIN_ERROR",
 				RealmID:   "realm-1",
 				ClientID:  "test-client",
@@ -802,7 +860,7 @@ func TestMonitor_collectEvents_apiError(t *testing.T) {
 	realmRepo := newMockRealmRepository()
 
 	// Setup mock to return error
-	client.GetRecentEventsFunc = func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error) {
+	client.EventsFunc = func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error) {
 		return nil, errors.New("connection refused")
 	}
 
@@ -1549,9 +1607,10 @@ func TestMonitor_collectEvents_userEnrichment(t *testing.T) {
 	// Events without a username in Details (e.g. REFRESH_TOKEN, CODE_TO_TOKEN).
 	// The old code would call GetUserByID to enrich these; the new code does not,
 	// because that call triggers UNKNOWN 4 WARNs in federated Keycloak realms.
-	client.GetRecentEventsFunc = func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error) {
+	client.EventsFunc = func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error) {
 		return []*keycloakadmin.EventRepresentation{
 			{
+				ID:      "kc-evt-1",
 				Time:    time.Now().UnixMilli(),
 				Type:    "REFRESH_TOKEN",
 				RealmID: "realm-1",
@@ -1559,6 +1618,7 @@ func TestMonitor_collectEvents_userEnrichment(t *testing.T) {
 				Details: map[string]string{"event_id": "evt-1"}, // no username key
 			},
 			{
+				ID:      "kc-evt-2",
 				Time:    time.Now().UnixMilli(),
 				Type:    "CODE_TO_TOKEN",
 				RealmID: "realm-1",
@@ -1566,6 +1626,7 @@ func TestMonitor_collectEvents_userEnrichment(t *testing.T) {
 				Details: map[string]string{"event_id": "evt-2"}, // no username key, same user
 			},
 			{
+				ID:      "kc-evt-3",
 				Time:    time.Now().UnixMilli(),
 				Type:    "REFRESH_TOKEN",
 				RealmID: "realm-1",
@@ -1635,17 +1696,18 @@ func TestMonitor_collectEvents_userEnrichmentFromDetails(t *testing.T) {
 	// Events carry the username (and sometimes email) in their details, as
 	// Keycloak does for user events. Enrichment should use those directly and
 	// NOT call the (expensive) Admin API user lookup.
-	client.GetRecentEventsFunc = func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error) {
+	stamped := time.Now().UnixMilli()
+	client.EventsFunc = func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error) {
 		return []*keycloakadmin.EventRepresentation{
 			{
-				Time:    time.Now().UnixMilli(),
+				Time:    stamped,
 				Type:    "LOGIN",
 				RealmID: "realm-1",
 				UserID:  "user-1",
 				Details: map[string]string{"event_id": "evt-1", "username": "alice", "email": "alice@example.com"},
 			},
 			{
-				Time:    time.Now().UnixMilli(),
+				Time:    stamped,
 				Type:    "LOGIN_ERROR",
 				RealmID: "realm-1",
 				UserID:  "user-2",
@@ -1908,7 +1970,7 @@ func TestMonitor_StopDrainsPromptlyWhenContextCancelled(t *testing.T) {
 	// Stand in for a slow Keycloak round trip that honours cancellation, the
 	// way http.NewRequestWithContext does. The 30s arm is far longer than
 	// Stop's 10s drain, so this cannot pass by simply waiting the call out.
-	client.GetRecentEventsFunc = func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error) {
+	client.EventsFunc = func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error) {
 		once.Do(func() { close(entered) })
 		select {
 		case <-ctx.Done():
@@ -1944,7 +2006,7 @@ func TestMonitor_StopDrainsPromptlyWhenContextCancelled(t *testing.T) {
 	case <-entered:
 	case <-time.After(5 * time.Second):
 		cancel()
-		t.Fatal("GetRecentEvents was never called; the collector never started")
+		t.Fatal("GetEventsSince was never called; the collector never started")
 	}
 
 	start := time.Now()
@@ -1971,7 +2033,7 @@ func TestMonitor_StopWaitsForWorkers(t *testing.T) {
 	var once sync.Once
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	client.GetRecentEventsFunc = func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error) {
+	client.EventsFunc = func(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error) {
 		once.Do(func() { close(entered) })
 		<-release
 		return nil, nil
@@ -2025,5 +2087,73 @@ func TestMonitor_StopWaitsForWorkers(t *testing.T) {
 	case <-stopped:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Stop() did not return after the worker finished")
+	}
+}
+
+// Only GetAllRealms returns Keycloak's complete list, so only then may realms
+// missing from it be retired, and with the ids Keycloak listed, including a
+// realm whose save failed: it still exists.
+func TestMonitor_collectRealmInfo_RetiresRealmsKeycloakNoLongerLists(t *testing.T) {
+	client := newMockAdminAPI()
+	client.GetAllRealmsFunc = func(ctx context.Context) ([]*keycloakadmin.RealmRepresentation, error) {
+		return []*keycloakadmin.RealmRepresentation{
+			{ID: "id-a", Realm: "alpha", Enabled: true},
+			{ID: "id-b", Realm: "beta", Enabled: true},
+		}, nil
+	}
+	cfg := newTestConfig()
+	cfg.Realms = nil // monitor every realm
+	realmRepo := newMockRealmRepository()
+	realmRepo.SaveRealmFunc = func(ctx context.Context, realm *domain.KeycloakRealmInfo) error {
+		if realm.RealmID == "id-b" {
+			return fmt.Errorf("save failed")
+		}
+		return nil
+	}
+	monitor := NewMonitor("tenant-1", "Test Tenant", client, cfg, newTestLogger(),
+		newMockEventRepository(), newMockGeneralEventRepository(), newMockMetricsRepository(),
+		newMockHealthRepository(), realmRepo, nil, nil)
+
+	monitor.collectRealmInfo(context.Background())
+
+	if len(realmRepo.retiredWith) != 1 {
+		t.Fatalf("RetireRealmsNotIn called %d times, want 1", len(realmRepo.retiredWith))
+	}
+	if got := realmRepo.retiredWith[0]; len(got) != 2 || got[0] != "id-a" || got[1] != "id-b" {
+		t.Errorf("kept ids = %v, want [id-a id-b]", got)
+	}
+}
+
+func TestMonitor_collectRealmInfo_NeverRetiresOnAPartialList(t *testing.T) {
+	cases := map[string]func() (*mockAdminAPI, *config.KeycloakInstanceConfig){
+		// Each configured realm is fetched on its own and a failure skipped,
+		// so absence from the result proves nothing.
+		"configured realms": func() (*mockAdminAPI, *config.KeycloakInstanceConfig) {
+			return newMockAdminAPI(), newTestConfig()
+		},
+		"GetAllRealms failed": func() (*mockAdminAPI, *config.KeycloakInstanceConfig) {
+			client := newMockAdminAPI()
+			client.GetAllRealmsFunc = func(ctx context.Context) ([]*keycloakadmin.RealmRepresentation, error) {
+				return nil, fmt.Errorf("keycloak unreachable")
+			}
+			cfg := newTestConfig()
+			cfg.Realms = nil
+			return client, cfg
+		},
+	}
+	for name, build := range cases {
+		t.Run(name, func(t *testing.T) {
+			client, cfg := build()
+			realmRepo := newMockRealmRepository()
+			monitor := NewMonitor("tenant-1", "Test Tenant", client, cfg, newTestLogger(),
+				newMockEventRepository(), newMockGeneralEventRepository(), newMockMetricsRepository(),
+				newMockHealthRepository(), realmRepo, nil, nil)
+
+			monitor.collectRealmInfo(context.Background())
+
+			if len(realmRepo.retiredWith) != 0 {
+				t.Errorf("RetireRealmsNotIn called with %v, want no call", realmRepo.retiredWith)
+			}
+		})
 	}
 }

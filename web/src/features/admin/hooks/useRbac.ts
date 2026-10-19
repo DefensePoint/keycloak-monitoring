@@ -9,10 +9,12 @@ import type { CreateRoleRequest, CreateUserRequest, User } from "../types";
 
 // ============ Roles Hooks ============
 
-export function useRoles() {
+// includeInactive lists inactive roles too, for managing them; assigning
+// leaves it off.
+export function useRoles(includeInactive = false) {
   return useQuery({
-    queryKey: ["rbac", "roles"],
-    queryFn: () => rbacService.getRoles(),
+    queryKey: ["rbac", "roles", includeInactive ? "all" : "active"],
+    queryFn: () => rbacService.getRoles(includeInactive),
   });
 }
 
@@ -31,6 +33,19 @@ export function useCreateRole() {
     mutationFn: (data: CreateRoleRequest) => rbacService.createRole(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rbac", "roles"] });
+    },
+  });
+}
+
+export function useSetRoleActive() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ roleId, isActive }: { roleId: number; isActive: boolean }) =>
+      rbacService.updateRole(roleId, { is_active: isActive }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["rbac", "roles"] });
+      queryClient.invalidateQueries({ queryKey: ["rbac", "role"] });
     },
   });
 }

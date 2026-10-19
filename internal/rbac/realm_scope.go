@@ -10,12 +10,14 @@ import (
 // ResolveRealmScope reduces a user's tenant policy rows to the realms they may
 // read within one tenant.
 //
-// This is the single definition of what a tenant_policies row means. It exists
+// This is the shared definition used by web, MCP and Keycloak handlers. It exists
 // because there used to be two: the web resolver in internal/http/chi and the
 // MCP authorizer in internal/mcp disagreed on three of the five shapes a row
 // can take, and drifted apart twice, once when RealmsUnrestricted was added
 // and again when blank realms were dropped on only one side. Both callers now
-// share this, so a policy means one thing whatever transport reads it.
+// share this, so a policy means one thing whatever transport reads it. The legacy
+// TenantPolicyRepository.HasAccessToRealm method retains its first-row rule for
+// compatibility; the HTTP and MCP realm checks do not use that method.
 //
 // The contract, in the order the checks apply:
 //

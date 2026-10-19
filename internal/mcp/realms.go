@@ -30,7 +30,7 @@ type listRealmsOutput struct {
 func registerListRealms(srv *mcpsdk.Server, authz *Authorizer, realms RealmReader, g *toolGuard) {
 	handler := func(ctx context.Context, req *mcpsdk.CallToolRequest, in listRealmsInput) (*mcpsdk.CallToolResult, listRealmsOutput, error) {
 		caller := CallerFromRequest(req)
-		tenantID, err := TenantArg(caller, in.Tenant)
+		tenantID, err := TenantArg(ctx, caller, in.Tenant)
 		if err != nil {
 			return nil, listRealmsOutput{}, err
 		}
