@@ -367,14 +367,22 @@ func TestAmfaHandlers_RealmPolicy(t *testing.T) {
 			wantCode:   "amfa_all_realms_unsupported",
 		},
 		{
-			// Also a permission refusal, so it uses the same code rather than
-			// the generic realm denial.
+			// Also a permission refusal, but not "select one of your realms":
+			// this caller has no realm to select.
 			name:       "all-realm stats for a policy with an empty realm list",
 			rbac:       &mockRBACChecker{policies: policyFor("tA")},
 			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaStats },
 			path:       "/amfa/stats",
 			wantStatus: http.StatusForbidden,
-			wantCode:   "amfa_realm_scope_requires_realm",
+			wantCode:   "amfa_realm_scope_no_realms",
+		},
+		{
+			// Asking for a realm explicitly stays the generic realm denial.
+			name:       "one realm's stats for a policy with an empty realm list",
+			rbac:       &mockRBACChecker{policies: policyFor("tA")},
+			handler:    func(h *AmfaHandlers) http.HandlerFunc { return h.handleAmfaStats },
+			path:       "/amfa/stats?realm_id=master",
+			wantStatus: http.StatusForbidden,
 		},
 		{
 			name:       "geo for the caller's own realm",

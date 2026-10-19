@@ -27,6 +27,8 @@ describe("AlertActions", () => {
     onAcknowledge: mockOnAcknowledge,
     onIgnore: mockOnIgnore,
     onResolve: mockOnResolve,
+    canAcknowledge: true,
+    canResolve: true,
   };
 
   beforeEach(() => {
@@ -143,6 +145,47 @@ describe("AlertActions", () => {
 
       expect(
         screen.getByText(/This alert has been ignored/i),
+      ).toBeInTheDocument();
+    });
+  });
+
+  // Ignoring and resolving need alerts:resolve; acknowledging needs
+  // alerts:acknowledge. The buttons follow what the server allows.
+  describe("permissions", () => {
+    it("shows only Acknowledge with alerts:acknowledge alone", () => {
+      render(
+        <AlertActions status="active" {...defaultProps} canResolve={false} />,
+      );
+      expect(screen.getByText("Acknowledge")).toBeInTheDocument();
+      expect(screen.queryByText("Ignore")).not.toBeInTheDocument();
+      expect(screen.queryByText("Resolve")).not.toBeInTheDocument();
+    });
+
+    it("shows Ignore and Resolve with alerts:resolve alone", () => {
+      render(
+        <AlertActions
+          status="active"
+          {...defaultProps}
+          canAcknowledge={false}
+        />,
+      );
+      expect(screen.queryByText("Acknowledge")).not.toBeInTheDocument();
+      expect(screen.getByText("Ignore")).toBeInTheDocument();
+      expect(screen.getByText("Resolve")).toBeInTheDocument();
+    });
+
+    it("says so when the user may change nothing", () => {
+      render(
+        <AlertActions
+          status="active"
+          {...defaultProps}
+          canAcknowledge={false}
+          canResolve={false}
+        />,
+      );
+      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+      expect(
+        screen.getByText(/permission to change this alert/),
       ).toBeInTheDocument();
     });
   });

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -38,6 +39,9 @@ var MonitoringModule = fx.Module("monitoring",
 
 		// Provide health alert manager (creates alerts from health status)
 		provideHealthAlertManager,
+
+		// Provide event storage alert manager (alerts when events cannot be stored)
+		provideEventStorageAlertManager,
 
 		// Provide keycloak monitor factory
 		provideKeycloakMonitorFactory,
@@ -79,9 +83,13 @@ func provideSilenceManager(cfg *config.AppConfig, log *logger.Logger) alerts.Sil
 // - Sends notifications for new alerts
 type eventAlertConverterImpl struct {
 	alertRepo      alerts.Repository
-	notifier       notifications.Service
+	notifier       alertNotifier
 	silenceManager alerts.SilenceManager
 	log            *logger.Logger
+}
+
+type alertNotifier interface {
+	NotifyAlert(ctx context.Context, alert *domain.Alert) error
 }
 
 func provideEventAlertConverter(
@@ -100,7 +108,8 @@ func provideEventAlertConverter(
 
 // ConvertEvent converts a Keycloak event to an alert if needed.
 // Only alertable events (ERROR, UPDATE, DELETE) generate alerts.
-// Uses deterministic AlertID for deduplication - same event type/realm/client = same alert.
+// Uses deterministic AlertID for deduplication - same event type/realm/client = same alert,
+// with every unknown client folded into one (see generateAlertID).
 func (c *eventAlertConverterImpl) ConvertEvent(ctx context.Context, event *domain.KeycloakEvent) error {
 	// Determine severity - skip if not alertable
 	severity := c.mapEventTypeToSeverity(event.EventType)
@@ -110,7 +119,10 @@ func (c *eventAlertConverterImpl) ConvertEvent(ctx context.Context, event *domai
 	}
 
 	// Build metadata with event details for silence matching and context
+	// event_type is what a silence rule written as alert_type: "LOGIN_ERROR"
+	// matches on; the alert's own type is the generic "event".
 	metadata := map[string]string{
+		"event_type": event.EventType,
 		"client_id":  event.ClientID,
 		"username":   event.Username,
 		"user_id":    event.UserID,
@@ -120,7 +132,8 @@ func (c *eventAlertConverterImpl) ConvertEvent(ctx context.Context, event *domai
 	metadataJSON, _ := json.Marshal(metadata)
 
 	// Generate deterministic AlertID for deduplication
-	// Same tenant+event_type+realm+client = same AlertID = updates existing alert
+	// Same tenant+event_type+realm+client = same AlertID = updates existing alert;
+	// requests naming a client the realm lacks all share one alert
 	alertID := c.generateAlertID(event)
 
 	// Create alert from event
@@ -157,22 +170,34 @@ func (c *eventAlertConverterImpl) ConvertEvent(ctx context.Context, event *domai
 		}
 	}
 
-	// Check if alert already exists (for logging purposes - Save does upsert)
-	existingAlert, _ := c.alertRepo.GetByAlertID(ctx, alert.TenantID, alert.AlertID)
+	existingAlert, err := c.alertRepo.GetByAlertID(ctx, alert.TenantID, alert.AlertID)
+	if err != nil && !errors.Is(err, alerts.ErrNotFound) {
+		// Saving without knowing the stored status would reactivate an
+		// acknowledged or ignored alert.
+		return fmt.Errorf("failed to look up existing alert: %w", err)
+	}
 	isNewAlert := existingAlert == nil
+	// A retried, late-committed or restart-reread event can be older than
+	// the stored one: it was already applied, or would move last seen back.
+	if !isNewAlert && !event.Time.After(existingAlert.LastSeen) {
+		return nil
+	}
+	recurred := !isNewAlert && existingAlert.Status == domain.AlertStatusResolved
+	if !isNewAlert && !recurred {
+		alert.Status = existingAlert.Status
+	}
 
-	// Save alert (upsert - creates new or updates last_seen)
 	if err := c.alertRepo.Save(ctx, alert); err != nil {
 		return fmt.Errorf("failed to save alert: %w", err)
 	}
 
-	if isNewAlert {
+	if isNewAlert || recurred {
 		c.log.Info("Created alert from event",
 			logger.Str("alert_id", alert.AlertID),
 			logger.Str("event_type", event.EventType),
-			logger.Str("severity", string(alert.Severity)))
+			logger.Str("severity", string(alert.Severity)),
+			logger.Bool("recurred", recurred))
 
-		// Send notification only for new alerts
 		if c.notifier != nil {
 			if err := c.notifier.NotifyAlert(ctx, alert); err != nil {
 				c.log.Error("Failed to send alert notification",
@@ -190,14 +215,32 @@ func (c *eventAlertConverterImpl) ConvertEvent(ctx context.Context, event *domai
 	return nil
 }
 
+// unknownClientAlertKey takes the place of the client in the alert identity
+// when Keycloak rejected the event because no such client exists. Anyone can
+// send a token or login request naming any client_id without authenticating,
+// and Keycloak records the name as sent, so keying on it gave every made-up
+// name its own alert and notification. The leading NUL keeps it apart from
+// every real client: Keycloak stores client IDs in Postgres text, which cannot
+// hold one.
+const unknownClientAlertKey = "\x00unknown-client"
+
+// keycloakClientNotFound is the error Keycloak records for a request naming a
+// client the realm does not have.
+const keycloakClientNotFound = "client_not_found"
+
 // generateAlertID generates a deterministic alert ID for deduplication.
-// Same tenant+event_type+realm+client = same AlertID.
+// Same tenant+event_type+realm+client = same AlertID, and every client the
+// realm does not have shares one alert.
 func (c *eventAlertConverterImpl) generateAlertID(event *domain.KeycloakEvent) string {
+	client := event.ClientID
+	if event.EventError == keycloakClientNotFound {
+		client = unknownClientAlertKey
+	}
 	data := fmt.Sprintf("%s:%s:%s:%s",
 		event.TenantID,
 		event.EventType,
 		event.RealmName,
-		event.ClientID)
+		client)
 	hash := sha256.Sum256([]byte(data))
 	return fmt.Sprintf("%x", hash[:16])
 }
@@ -256,9 +299,8 @@ type healthAlertManagerImpl struct {
 	log            *logger.Logger
 
 	// Track previous health status to detect transitions
-	mu              sync.RWMutex
-	previousStatus  map[string]string    // tenantID -> last known status
-	lastAlertSentAt map[string]time.Time // alertID -> last notification time
+	mu             sync.RWMutex
+	previousStatus map[string]string // tenantID -> last known status
 }
 
 func provideHealthAlertManager(
@@ -268,12 +310,11 @@ func provideHealthAlertManager(
 	log *logger.Logger,
 ) *healthAlertManagerImpl {
 	return &healthAlertManagerImpl{
-		alertRepo:       alertspostgres.NewRepository(db.DB()),
-		notifier:        notifier,
-		silenceManager:  silenceManager,
-		log:             log.WithComponent("health_alert_manager"),
-		previousStatus:  make(map[string]string),
-		lastAlertSentAt: make(map[string]time.Time),
+		alertRepo:      alertspostgres.NewRepository(db.DB()),
+		notifier:       notifier,
+		silenceManager: silenceManager,
+		log:            log.WithComponent("health_alert_manager"),
+		previousStatus: make(map[string]string),
 	}
 }
 
@@ -285,12 +326,17 @@ func (m *healthAlertManagerImpl) ProcessHealthStatus(ctx context.Context, tenant
 	m.previousStatus[tenantID] = status
 	m.mu.Unlock()
 
-	// If this is the first check, don't alert yet (wait for transition)
+	// The first check after startup has no transition to go on, but the stored
+	// alerts may be out of date: the tenant may have recovered, or gone down,
+	// while the server was not running. Bring them in line with the current
+	// status. The resolves only touch an alert that is still active, and the
+	// creates are upserts notified at most once per occurrence, so an outage
+	// that was already announced before the restart is not announced again.
 	if !hasPrevious {
-		m.log.Debug("First health check for tenant, establishing baseline",
+		m.log.Debug("First health check for tenant, reconciling stored health alerts",
 			logger.Str("tenant_id", tenantID),
 			logger.Str("status", status))
-		return nil
+		return m.reconcileHealthAlerts(ctx, tenantID, tenantName, status, errorMessage, responseTime)
 	}
 
 	// No change in status - nothing to do
@@ -321,6 +367,37 @@ func (m *healthAlertManagerImpl) ProcessHealthStatus(ctx context.Context, tenant
 	}
 
 	return nil
+}
+
+// reconcileHealthAlerts sets the stored down and degraded alerts to match a
+// status seen without a previous one to compare against.
+func (m *healthAlertManagerImpl) reconcileHealthAlerts(ctx context.Context, tenantID, tenantName, status, errorMessage string, responseTime int) error {
+	switch status {
+	case "DOWN":
+		return m.createTenantDownAlert(ctx, tenantID, tenantName, errorMessage, responseTime)
+	case "DEGRADED":
+		if err := m.resolveTenantDownAlert(ctx, tenantID, tenantName, status); err != nil {
+			return err
+		}
+		return m.createTenantDegradedAlert(ctx, tenantID, tenantName, errorMessage, responseTime)
+	case "UP":
+		if err := m.resolveTenantDownAlert(ctx, tenantID, tenantName, status); err != nil {
+			return err
+		}
+		return m.resolveTenantDegradedAlert(ctx, tenantID, tenantName)
+	}
+	return nil
+}
+
+// healthAlertOpen reports whether a stored health alert is still open, and so
+// is resolved when the tenant recovers: active, or acknowledged. An
+// acknowledged alert must resolve too. A new occurrence starts only from a
+// resolved alert, so one left acknowledged after the recovery made the next
+// outage reopen it as the same occurrence, which the notification service had
+// already announced: the second outage reached no one. An alert someone chose
+// to ignore is left as they set it.
+func healthAlertOpen(status domain.AlertStatus) bool {
+	return status == domain.AlertStatusActive || status == domain.AlertStatusAcknowled
 }
 
 // createTenantDownAlert creates a critical alert when a tenant goes down.
@@ -380,25 +457,18 @@ func (m *healthAlertManagerImpl) createTenantDownAlert(ctx context.Context, tena
 		logger.Str("tenant_id", tenantID),
 		logger.Str("alert_id", alertID))
 
-	// Send notification with rate limiting
+	// Every new outage notifies. This runs only on a transition into DOWN, and
+	// the notification service sends at most once per occurrence, so a 5-minute
+	// cooldown kept here only dropped a genuine second outage that followed a
+	// quick recovery.
 	if m.notifier != nil {
-		m.mu.Lock()
-		lastSent := m.lastAlertSentAt[alertID]
-		m.mu.Unlock()
-
-		// Only send if we haven't sent recently (prevent spam)
-		if now.Sub(lastSent) > 5*time.Minute {
-			if err := m.notifier.NotifyAlert(ctx, alert); err != nil {
-				m.log.Error("Failed to send tenant down notification",
-					logger.Err(err),
-					logger.Str("tenant_id", tenantID))
-			} else {
-				m.mu.Lock()
-				m.lastAlertSentAt[alertID] = now
-				m.mu.Unlock()
-				m.log.Info("Sent tenant down notification",
-					logger.Str("tenant_id", tenantID))
-			}
+		if err := m.notifier.NotifyAlert(ctx, alert); err != nil {
+			m.log.Error("Failed to send tenant down notification",
+				logger.Err(err),
+				logger.Str("tenant_id", tenantID))
+		} else {
+			m.log.Info("Requested tenant down notification; the notification service logs each channel's outcome",
+				logger.Str("tenant_id", tenantID))
 		}
 	}
 
@@ -418,9 +488,8 @@ func (m *healthAlertManagerImpl) resolveTenantDownAlert(ctx context.Context, ten
 		return nil
 	}
 
-	// Only resolve if currently active
-	if alert.Status != domain.AlertStatusActive {
-		m.log.Debug("Tenant down alert already resolved",
+	if !healthAlertOpen(alert.Status) {
+		m.log.Debug("Tenant down alert is not open, nothing to resolve",
 			logger.Str("tenant_id", tenantID),
 			logger.Str("alert_id", alertID))
 		return nil
@@ -539,8 +608,8 @@ func (m *healthAlertManagerImpl) resolveTenantDegradedAlert(ctx context.Context,
 		return nil
 	}
 
-	if alert.Status != domain.AlertStatusActive {
-		m.log.Debug("Tenant degraded alert already resolved",
+	if !healthAlertOpen(alert.Status) {
+		m.log.Debug("Tenant degraded alert is not open, nothing to resolve",
 			logger.Str("tenant_id", tenantID),
 			logger.Str("alert_id", alertID))
 		return nil
@@ -575,13 +644,50 @@ func (m *healthAlertManagerImpl) resolveTenantDegradedAlert(ctx context.Context,
 	return nil
 }
 
+// TenantUnmonitored resolves the tenant's open down, degraded and event storage
+// alerts when it stops being monitored, with a note saying so: this is not a
+// recovery, and nothing else would ever resolve them. The tracked status is forgotten, so
+// the tenant's first check after it is enabled again reconciles afresh.
+func (m *healthAlertManagerImpl) TenantUnmonitored(ctx context.Context, tenantID, tenantName, reason string) error {
+	note := fmt.Sprintf("Tenant %s: it is no longer monitored, so this alert was closed without a recovery.", reason)
+	var firstErr error
+	for _, alertID := range []string{
+		fmt.Sprintf("tenant-health-down-%s", tenantID),
+		fmt.Sprintf("tenant-health-degraded-%s", tenantID),
+		eventStorageAlertID(tenantID),
+	} {
+		alert, err := m.alertRepo.GetByAlertID(ctx, tenantID, alertID)
+		if err != nil || alert == nil || !healthAlertOpen(alert.Status) {
+			continue
+		}
+		if err := m.alertRepo.Resolve(ctx, tenantID, alertID); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("failed to resolve %s: %w", alertID, err)
+			}
+			continue
+		}
+		m.log.Info("Resolved health alert for a tenant no longer monitored",
+			logger.Str("tenant_id", tenantID), logger.Str("alert_id", alertID), logger.Str("reason", reason))
+		if m.notifier != nil {
+			now := time.Now()
+			alert.Status = domain.AlertStatusResolved
+			alert.ResolvedAt = &now
+			alert.ResolutionNote = note
+			if err := m.notifier.NotifyAlertResolution(ctx, alert); err != nil {
+				m.log.Error("Failed to send resolution for a tenant no longer monitored",
+					logger.Err(err), logger.Str("tenant_id", tenantID))
+			}
+		}
+	}
+	m.ResetTenantStatus(tenantID)
+	return firstErr
+}
+
 // ResetTenantStatus resets the tracked status for a tenant (useful for testing or tenant removal).
 func (m *healthAlertManagerImpl) ResetTenantStatus(tenantID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.previousStatus, tenantID)
-	delete(m.lastAlertSentAt, fmt.Sprintf("tenant-health-down-%s", tenantID))
-	delete(m.lastAlertSentAt, fmt.Sprintf("tenant-health-degraded-%s", tenantID))
 }
 
 // ============================================================================
@@ -593,11 +699,12 @@ type keycloakMonitorFactory struct {
 	log           *logger.Logger
 	cfg           *config.AppConfig
 	healthUpdater keycloak.TenantHealthUpdater
+	eventStorage  keycloak.EventStorageReporter
 	metrics       metrics.Recorder
 }
 
-func provideKeycloakMonitorFactory(cfg *config.AppConfig, log *logger.Logger, svc tenant.Service, m *metrics.Registry) tenant.KeycloakMonitorFactory {
-	return &keycloakMonitorFactory{log: log, cfg: cfg, healthUpdater: svc, metrics: m}
+func provideKeycloakMonitorFactory(cfg *config.AppConfig, log *logger.Logger, svc tenant.Service, m *metrics.Registry, eventStorage *eventStorageAlertManager) tenant.KeycloakMonitorFactory {
+	return &keycloakMonitorFactory{log: log, cfg: cfg, healthUpdater: svc, eventStorage: eventStorage, metrics: m}
 }
 
 // CreateClient creates a new Keycloak client for a tenant
@@ -632,20 +739,19 @@ func (f *keycloakMonitorFactory) CreateClient(ctx context.Context, cfg *tenant.M
 
 	// Build keycloakadmin.ClientConfig from tenant.MonitorConfig and config.KeycloakInstanceConfig
 	clientConfig := &keycloakadmin.ClientConfig{
-		ServerURL:             cfg.ServerURL,
-		AdminRealm:            cfg.AdminRealm,
-		ClientID:              cfg.ClientID,
-		ClientSecret:          cfg.ClientSecret,
-		Timeout:               kcConfig.Connection.Timeout,
-		SkipTLSVerify:         kcConfig.Connection.SkipTLSVerify,
-		MaxRetries:            kcConfig.Connection.MaxRetries,
-		RetryBackoff:          kcConfig.Connection.RetryBackoff,
-		Realms:                kcConfig.Realms,
-		EventTypes:            kcConfig.Events.Types,
-		EventLookbackDuration: kcConfig.Events.LookbackDuration,
-		MaxEventsPerPoll:      kcConfig.Events.MaxEventsPerPoll,
-		InfinispanPort:        kcConfig.InfinispanPort,
-		HTTPClient:            saferequest.HTTPClient(policy),
+		ServerURL:        cfg.ServerURL,
+		AdminRealm:       cfg.AdminRealm,
+		ClientID:         cfg.ClientID,
+		ClientSecret:     cfg.ClientSecret,
+		Timeout:          kcConfig.Connection.Timeout,
+		SkipTLSVerify:    kcConfig.Connection.SkipTLSVerify,
+		MaxRetries:       kcConfig.Connection.MaxRetries,
+		RetryBackoff:     kcConfig.Connection.RetryBackoff,
+		Realms:           kcConfig.Realms,
+		EventTypes:       kcConfig.Events.Types,
+		MaxEventsPerPoll: kcConfig.Events.MaxEventsPerPoll,
+		InfinispanPort:   kcConfig.InfinispanPort,
+		HTTPClient:       saferequest.HTTPClient(policy),
 	}
 
 	// Create logger adapter for keycloakadmin
@@ -703,6 +809,7 @@ func (f *keycloakMonitorFactory) CreateMonitor(
 		eventAlertConverter,
 		healthAlertManager,
 		keycloak.WithTenantHealthUpdater(f.healthUpdater),
+		keycloak.WithEventStorageReporter(f.eventStorage),
 	)
 	mon.SetMetrics(f.metrics)
 

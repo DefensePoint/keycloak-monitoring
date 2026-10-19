@@ -105,6 +105,16 @@ describe("UserEventsFilters", () => {
     expect(mockOnSeverityChange).toHaveBeenCalledWith("error");
   });
 
+  it("reports critical when Critical is chosen", async () => {
+    const user = userEvent.setup();
+    render(<UserEventsFilters {...defaultProps} />);
+
+    await user.click(screen.getByLabelText(/severity/i));
+    await user.click(screen.getByRole("option", { name: /^critical$/i }));
+
+    expect(mockOnSeverityChange).toHaveBeenCalledWith("critical");
+  });
+
   it("should call onSourceChange when source filter changes", async () => {
     const user = userEvent.setup();
     render(<UserEventsFilters {...defaultProps} />);
@@ -186,6 +196,9 @@ describe("UserEventsFilters", () => {
       screen.getByRole("option", { name: /warning/i }),
     ).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /error/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: /^critical$/i }),
+    ).toBeInTheDocument();
   });
 
   it("should render limit options", async () => {

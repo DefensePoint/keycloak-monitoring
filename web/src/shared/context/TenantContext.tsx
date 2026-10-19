@@ -19,17 +19,17 @@ interface TenantContextType {
 
 const TenantContext = createContext<TenantContextType | undefined>(undefined);
 
+// Top-level paths that are not tenants. Compared as whole segments, so a tenant
+// whose ID merely starts with one (say "admin-kc") is still a tenant.
+const nonTenantSegments = new Set(["tenants", "admin", "theme-test", "login"]);
+
 // Extract tenantId from pathname (e.g., "/prod-keycloak/events" -> "prod-keycloak")
 function extractTenantIdFromPath(pathname: string): string | null {
-  // Skip known non-tenant paths
-  const nonTenantPaths = ["/tenants", "/admin", "/theme-test", "/login"];
-  if (nonTenantPaths.some((p) => pathname.startsWith(p)) || pathname === "/") {
+  const first = pathname.split("/").filter(Boolean)[0];
+  if (!first || nonTenantSegments.has(first)) {
     return null;
   }
-
-  // Extract first segment after leading slash
-  const segments = pathname.split("/").filter(Boolean);
-  return segments.length > 0 ? segments[0] : null;
+  return first;
 }
 
 export function TenantProvider({ children }: { children: ReactNode }) {
@@ -59,54 +59,31 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const error = queryError instanceof Error ? queryError.message : null;
   const isLoading = isTenantsLoading || isAuthLoading;
 
-  // Check if user has access to the tenant from URL
-  const accessCheck = useMemo(() => {
-    // No tenant in URL, no access check needed
-    if (!tenantId) {
-      return { hasAccess: true, tenantExists: false };
+  // A tenant named in the URL is the only tenant that page may show. One the
+  // user cannot see is refused, never replaced by another: the tenant list
+  // holds only the tenants the user can access, so a missing one may exist
+  // and belong to someone else.
+  const urlTenant = useMemo(() => {
+    if (!tenantId || isLoading || !tenantsResponse) {
+      return null;
     }
+    const tenant = tenants.find((t) => t.tenant_id === tenantId);
+    return tenant && hasAccessToTenant(tenantId) ? tenant : null;
+  }, [tenantId, tenants, tenantsResponse, hasAccessToTenant, isLoading]);
 
-    // Still loading, defer the check
-    if (isLoading || tenants.length === 0) {
-      return { hasAccess: true, tenantExists: false };
-    }
-
-    // Check if tenant exists
-    const tenantExists = tenants.some((t) => t.tenant_id === tenantId);
-    if (!tenantExists) {
-      // Tenant doesn't exist, let the page handle it
-      return { hasAccess: true, tenantExists: false };
-    }
-
-    // Tenant exists, check access
-    const hasAccess = hasAccessToTenant(tenantId);
-    return { hasAccess, tenantExists: true };
-  }, [tenantId, tenants, hasAccessToTenant, isLoading]);
-
-  // Selected tenant is simply the one from URL, or fallback to localStorage
+  // Selected tenant is the one from the URL, or, on pages without one, the
+  // last selected from localStorage
   const selectedTenant = useMemo(() => {
-    if (tenants.length === 0) return null;
-
-    // Priority 1: Use tenant from URL if available and user has access
-    if (tenantId && accessCheck.hasAccess) {
-      const tenant = tenants.find((t) => t.tenant_id === tenantId);
-      if (tenant) {
-        localStorage.setItem("selectedTenantId", tenant.tenant_id);
-        return tenant;
+    if (tenantId) {
+      if (urlTenant) {
+        localStorage.setItem("selectedTenantId", urlTenant.tenant_id);
       }
+      return urlTenant;
     }
 
-    // Priority 2: Fallback to last selected from localStorage
     const savedId = localStorage.getItem("selectedTenantId");
-    if (savedId) {
-      const savedTenant = tenants.find((t) => t.tenant_id === savedId);
-      if (savedTenant) {
-        return savedTenant;
-      }
-    }
-
-    return null;
-  }, [tenantId, tenants, accessCheck.hasAccess]);
+    return tenants.find((t) => t.tenant_id === savedId) ?? null;
+  }, [tenantId, urlTenant, tenants]);
 
   const refreshTenants = async () => {
     await refetch();
@@ -122,8 +99,10 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Compute access denied state
-  const accessDenied = !accessCheck.hasAccess && accessCheck.tenantExists;
+  // Denied once the tenant list has loaded without the URL's tenant in it. A
+  // failed load is not a denial: the error is reported instead.
+  const accessDenied =
+    !!tenantId && !isLoading && !!tenantsResponse && !urlTenant;
   const accessDeniedTenantId = accessDenied ? tenantId : null;
 
   // Show loading while checking access

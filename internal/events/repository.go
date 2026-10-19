@@ -12,6 +12,9 @@ import (
 // ErrNotFound is returned when the requested event does not exist.
 var ErrNotFound = errors.New("event not found")
 
+// ErrMissingTenant is returned when an event is written without a tenant.
+var ErrMissingTenant = errors.New("event has no tenant")
+
 // ListOptions defines filtering and pagination options for event queries.
 type ListOptions struct {
 	Limit  int
@@ -36,6 +39,9 @@ type ListOptions struct {
 	// MinRisk filters rows whose risk_level is at least this value. Rows with
 	// a NULL risk_level (no AMFA counterpart) never match.
 	MinRisk *int
+	// UserID filters rows by exact user_id: the Keycloak user id, which both
+	// Keycloak events and AMFA-mirrored events record.
+	UserID string
 }
 
 // KeysetPosition identifies a row in the keyset ordering (timestamp DESC,
@@ -66,16 +72,15 @@ type Stats struct {
 
 // Repository defines the interface for event persistence operations.
 type Repository interface {
-	// Save inserts or updates an event in the database.
+	// Save inserts or updates an event in the database. An event with no
+	// TenantID is refused with ErrMissingTenant and nothing is written.
 	Save(ctx context.Context, event *domain.Event) error
 
-	// GetByID retrieves an event by its event ID.
-	GetByID(ctx context.Context, eventID string) (*domain.Event, error)
-
-	// GetByTenantAndEventID retrieves one tenant's event by its event ID.
-	// Unlike GetByID it filters on both columns, so two tenants monitoring the
-	// same Keycloak (and therefore seeing the same event ids) each get only
-	// their own row.
+	// GetByTenantAndEventID retrieves one tenant's event by its event ID. It
+	// filters on both columns, so two tenants monitoring the same Keycloak (and
+	// therefore seeing the same event ids) each get only their own row. It is
+	// the only single-event lookup on purpose: one keyed on event_id alone
+	// could return another tenant's row.
 	GetByTenantAndEventID(ctx context.Context, tenantID, eventID string) (*domain.Event, error)
 
 	// List retrieves events with pagination and filtering.

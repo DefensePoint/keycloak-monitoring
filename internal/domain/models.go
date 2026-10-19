@@ -77,6 +77,7 @@ type User struct {
 	IsBlocked          bool       `json:"is_blocked"`
 	BlockedReason      string     `json:"blocked_reason,omitempty"`
 	BlockedAt          *time.Time `json:"blocked_at,omitempty"`
+	SessionEpoch       int64      `json:"-"`
 	LastLoginAt        *time.Time `json:"last_login_at,omitempty"`
 	LastLoginIP        string     `json:"last_login_ip,omitempty"`
 	LastAccessedAt     *time.Time `json:"last_accessed_at,omitempty"`
@@ -212,8 +213,11 @@ type KeycloakRealmInfo struct {
 	LastChecked               time.Time `json:"last_checked"`
 	IsHealthy                 bool      `json:"is_healthy"`
 	HealthMessage             string    `json:"health_message,omitempty"`
-	CreatedAt                 time.Time `json:"created_at"`
-	UpdatedAt                 time.Time `json:"updated_at"`
+	// UnreadableSince is when the monitoring client stopped being able to
+	// read the realm, nil while it can; the other fields are as of LastChecked.
+	UnreadableSince *time.Time `json:"unreadable_since,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 // ============================================================================
@@ -297,6 +301,16 @@ type Alert struct {
 	AcknowledgedBy string        `json:"acknowledged_by"` // Who acknowledged
 	CreatedAt      time.Time     `json:"created_at"`
 	UpdatedAt      time.Time     `json:"updated_at"`
+
+	// ResolutionNote, when set, tells the resolution notice why the alert was
+	// resolved, for a resolution that is not a recovery (a tenant disabled
+	// while its alert was open). Not stored; empty means a normal recovery.
+	ResolutionNote string `json:"-"`
+
+	// Supersedes lists alert IDs this detection replaces, such as the
+	// "expiring soon" warning for a certificate that has now expired. Saving
+	// this alert resolves them. Not stored.
+	Supersedes []string `json:"-"`
 }
 
 // ConfigurationAlert is an alias for backward compatibility
@@ -394,6 +408,16 @@ type UserRole struct {
 	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
+// Grants reports whether the assignment confers its role at now: the role
+// exists (a soft-deleted role preloads as nil), is active, and the
+// assignment has not expired.
+func (ur *UserRole) Grants(now time.Time) bool {
+	if ur.Role == nil || !ur.Role.IsActive {
+		return false
+	}
+	return ur.ExpiresAt == nil || ur.ExpiresAt.After(now)
+}
+
 // TenantPolicy represents tenant-level access restrictions for a user.
 type TenantPolicy struct {
 	ID       uint   `json:"id"`
@@ -404,7 +428,7 @@ type TenantPolicy struct {
 	AllowedRealms []string `json:"allowed_realms,omitempty"`
 	// RealmsUnrestricted reports an allowed_realms column holding no list at
 	// all, which grants every realm.
-	RealmsUnrestricted bool      `json:"-"`
+	RealmsUnrestricted bool      `json:"realms_unrestricted"`
 	GrantedBy          string    `json:"granted_by,omitempty"`
 	GrantedAt          time.Time `json:"granted_at"`
 	CreatedAt          time.Time `json:"created_at"`
@@ -441,10 +465,13 @@ type OperatorAction struct {
 	TimeFromPreviousActionSeconds int        `json:"TimeFromPreviousActionSeconds"`
 	ResponseTimeSeconds           int        `json:"ResponseTimeSeconds"`
 	ResolutionTimeSeconds         int        `json:"ResolutionTimeSeconds"`
-	Comment                       string     `json:"Comment"`
-	Metadata                      []byte     `json:"Metadata"`
-	CreatedAt                     time.Time  `json:"CreatedAt"`
-	UpdatedAt                     time.Time  `json:"UpdatedAt"`
+	// OccurrenceStartedAt is when the alert's occurrence this action belongs
+	// to began. Nil on actions recorded before it was stored.
+	OccurrenceStartedAt *time.Time `json:"OccurrenceStartedAt,omitempty"`
+	Comment             string     `json:"Comment"`
+	Metadata            []byte     `json:"Metadata"`
+	CreatedAt           time.Time  `json:"CreatedAt"`
+	UpdatedAt           time.Time  `json:"UpdatedAt"`
 }
 
 // OperatorMetricsSummary represents aggregated metrics for an operator over a time period
@@ -464,9 +491,9 @@ type OperatorMetricsSummary struct {
 
 	// By severity
 	CriticalAlertsHandled int `json:"critical_alerts_handled"`
-	HighAlertsHandled     int `json:"high_alerts_handled"`
-	MediumAlertsHandled   int `json:"medium_alerts_handled"`
-	LowAlertsHandled      int `json:"low_alerts_handled"`
+	ErrorAlertsHandled    int `json:"error_alerts_handled"`
+	WarningAlertsHandled  int `json:"warning_alerts_handled"`
+	InfoAlertsHandled     int `json:"info_alerts_handled"`
 
 	// By type
 	AlertsByType map[string]int `json:"alerts_by_type"` // "configuration": 10, "security": 5, etc.

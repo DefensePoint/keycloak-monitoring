@@ -143,6 +143,7 @@ func wrapTool[In, Out any](g *toolGuard, name string, h mcpsdk.ToolHandlerFor[In
 		outcome := outcomeError
 
 		ctx, rows := withRowCount(ctx)
+		ctx = withResolvedTenant(ctx)
 		defer func() {
 			if r := recover(); r != nil {
 				g.log.Error("Panic in MCP tool",
@@ -152,6 +153,9 @@ func wrapTool[In, Out any](g *toolGuard, name string, h mcpsdk.ToolHandlerFor[In
 				var zero Out
 				res, out, err = nil, zero, errInternal
 				outcome = outcomeError
+			}
+			if resolved, ok := resolvedTenantOf(ctx); ok {
+				tenant = resolved
 			}
 			g.finish(name, outcome, caller, tenant, realm, rows.Load(), time.Since(start))
 		}()
@@ -283,6 +287,37 @@ func scopeArgs(req *mcpsdk.CallToolRequest) (tenant, realm string) {
 		return "", ""
 	}
 	return Clean(scope.Tenant, auditFieldCap), Clean(scope.Realm, auditFieldCap)
+}
+
+type resolvedTenantKey struct{}
+
+// resolvedTenant is filled by TenantArg once it has chosen the tenant the
+// tool will actually read. finish prefers it over the raw argument, which a
+// single-tenant token is required to omit.
+type resolvedTenant struct {
+	value string
+	set   bool
+}
+
+func withResolvedTenant(ctx context.Context) context.Context {
+	return context.WithValue(ctx, resolvedTenantKey{}, &resolvedTenant{})
+}
+
+func recordResolvedTenant(ctx context.Context, tenant string) {
+	holder, ok := ctx.Value(resolvedTenantKey{}).(*resolvedTenant)
+	if !ok {
+		return
+	}
+	holder.value = Clean(tenant, auditFieldCap)
+	holder.set = true
+}
+
+func resolvedTenantOf(ctx context.Context) (string, bool) {
+	holder, ok := ctx.Value(resolvedTenantKey{}).(*resolvedTenant)
+	if !ok || !holder.set {
+		return "", false
+	}
+	return holder.value, true
 }
 
 type rowCountKey struct{}

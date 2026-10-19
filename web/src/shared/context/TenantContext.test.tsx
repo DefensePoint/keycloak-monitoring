@@ -6,12 +6,14 @@ import { tenantService } from "@/shared/services";
 import type { Tenant } from "@/shared/types";
 
 const mockNavigate = vi.fn();
+let mockPathname = "/tenant-1/dashboard";
+let mockHasAccessToTenant: (tenantId: string) => boolean = () => true;
 
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>();
   return {
     ...actual,
-    useLocation: () => ({ pathname: "/tenant-1/dashboard" }),
+    useLocation: () => ({ pathname: mockPathname }),
     useParams: () => ({ tenantId: "tenant-1" }),
     useNavigate: () => mockNavigate,
   };
@@ -25,7 +27,7 @@ vi.mock("@/shared/services", () => ({
 
 vi.mock("./AuthContext", () => ({
   useAuth: () => ({
-    hasAccessToTenant: () => true,
+    hasAccessToTenant: (tenantId: string) => mockHasAccessToTenant(tenantId),
     isLoading: false,
   }),
 }));
@@ -78,6 +80,8 @@ describe("TenantContext", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    mockPathname = "/tenant-1/dashboard";
+    mockHasAccessToTenant = () => true;
   });
 
   describe("TenantProvider", () => {
@@ -204,6 +208,115 @@ describe("TenantContext", () => {
 
       // selectedTenant is set from URL params (tenant-1)
       expect(localStorage.getItem("selectedTenantId")).toBe("tenant-1");
+    });
+  });
+
+  // The tenant list holds only the tenants the user can access. A link to
+  // any other tenant used to fall back to the last selected one, so the page
+  // showed that tenant's data under the linked tenant's name.
+  describe("a tenant named in the URL", () => {
+    const renderAt = async (
+      pathname: string,
+      tenants: Tenant[] = mockTenants,
+    ) => {
+      mockPathname = pathname;
+      vi.mocked(tenantService.getTenants).mockResolvedValue({ tenants });
+      const { result } = renderHook(() => useTenant(), {
+        wrapper: createWrapper(),
+      });
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+      return result;
+    };
+
+    it("is refused, not replaced, when the user cannot see it", async () => {
+      localStorage.setItem("selectedTenantId", "tenant-2");
+
+      const result = await renderAt("/other-customer/alerts");
+
+      await waitFor(() => {
+        expect(result.current.accessDenied).toBe(true);
+      });
+      expect(result.current.accessDeniedTenantId).toBe("other-customer");
+      expect(result.current.selectedTenant).toBeNull();
+      expect(localStorage.getItem("selectedTenantId")).toBe("tenant-2");
+    });
+
+    it("is refused when listed but the user's roles do not reach it", async () => {
+      localStorage.setItem("selectedTenantId", "tenant-1");
+      mockHasAccessToTenant = (tenantId) => tenantId !== "tenant-2";
+
+      const result = await renderAt("/tenant-2/events");
+
+      await waitFor(() => {
+        expect(result.current.accessDenied).toBe(true);
+      });
+      expect(result.current.selectedTenant).toBeNull();
+    });
+
+    it("is refused for a user with no tenants at all", async () => {
+      const result = await renderAt("/tenant-1/alerts", []);
+
+      await waitFor(() => {
+        expect(result.current.accessDenied).toBe(true);
+      });
+      expect(result.current.selectedTenant).toBeNull();
+    });
+
+    it("is not refused when the tenant list failed to load", async () => {
+      mockPathname = "/tenant-1/alerts";
+      vi.mocked(tenantService.getTenants).mockRejectedValue(
+        new Error("Failed to fetch tenants"),
+      );
+      const { result } = renderHook(() => useTenant(), {
+        wrapper: createWrapper(),
+      });
+
+      await waitFor(() => {
+        expect(result.current.error).toBe("Failed to fetch tenants");
+      });
+      expect(result.current.accessDenied).toBe(false);
+      expect(result.current.selectedTenant).toBeNull();
+    });
+
+    it("is selected when its ID starts with a non-tenant path", async () => {
+      const prefixed = ["admin-kc", "tenants-prod"].map((id) => ({
+        ...mockTenants[0],
+        tenant_id: id,
+      }));
+
+      for (const tenant of prefixed) {
+        localStorage.setItem("selectedTenantId", "tenant-1");
+        const result = await renderAt(`/${tenant.tenant_id}/alerts`, [
+          ...mockTenants,
+          ...prefixed,
+        ]);
+        await waitFor(() => {
+          expect(result.current.selectedTenant?.tenant_id).toBe(
+            tenant.tenant_id,
+          );
+        });
+        expect(result.current.accessDenied).toBe(false);
+      }
+    });
+  });
+
+  describe("a page without a tenant in the URL", () => {
+    it("keeps the last selected tenant", async () => {
+      localStorage.setItem("selectedTenantId", "tenant-2");
+      mockPathname = "/tenants";
+      vi.mocked(tenantService.getTenants).mockResolvedValue({
+        tenants: mockTenants,
+      });
+      const { result } = renderHook(() => useTenant(), {
+        wrapper: createWrapper(),
+      });
+
+      await waitFor(() => {
+        expect(result.current.selectedTenant?.tenant_id).toBe("tenant-2");
+      });
+      expect(result.current.accessDenied).toBe(false);
     });
   });
 

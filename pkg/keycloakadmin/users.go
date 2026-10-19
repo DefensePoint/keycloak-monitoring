@@ -9,7 +9,11 @@ import (
 
 // GetRealmUsers fetches all users from a realm with pagination
 func (c *Client) GetRealmUsers(ctx context.Context, realmName string, first, max int) ([]UserRepresentation, error) {
-	path := fmt.Sprintf("/admin/realms/%s/users?first=%d&max=%d", realmName, first, max)
+	realmSeg, err := pathSegment(realmName)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/admin/realms/%s/users?first=%d&max=%d", realmSeg, first, max)
 	resp, err := c.get(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get users: %w", err)
@@ -22,7 +26,7 @@ func (c *Client) GetRealmUsers(ctx context.Context, realmName string, first, max
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("unexpected status code %d%s", resp.StatusCode, c.replyDetail("get realm users", resp.StatusCode, body))
 	}
 
 	var users []UserRepresentation
@@ -38,7 +42,11 @@ func (c *Client) GetRealmUsers(ctx context.Context, realmName string, first, max
 
 // GetUsers returns a list of users in a realm (pointer version for compatibility)
 func (c *Client) GetUsers(ctx context.Context, realmName string, first, max int) ([]*UserRepresentation, error) {
-	path := fmt.Sprintf("/admin/realms/%s/users?first=%d&max=%d", realmName, first, max)
+	realmSeg, err := pathSegment(realmName)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/admin/realms/%s/users?first=%d&max=%d", realmSeg, first, max)
 
 	resp, err := c.get(ctx, path)
 	if err != nil {
@@ -52,7 +60,7 @@ func (c *Client) GetUsers(ctx context.Context, realmName string, first, max int)
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("failed to get users, status: %d, body: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("failed to get users, status: %d%s", resp.StatusCode, c.replyDetail("get users", resp.StatusCode, body))
 	}
 
 	var users []*UserRepresentation
@@ -65,7 +73,15 @@ func (c *Client) GetUsers(ctx context.Context, realmName string, first, max int)
 
 // GetUserByID fetches a specific user by their ID
 func (c *Client) GetUserByID(ctx context.Context, realmName, userID string) (*UserRepresentation, error) {
-	path := fmt.Sprintf("/admin/realms/%s/users/%s", realmName, userID)
+	realmSeg, err := pathSegment(realmName)
+	if err != nil {
+		return nil, err
+	}
+	userSeg, err := pathSegment(userID)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/admin/realms/%s/users/%s", realmSeg, userSeg)
 
 	resp, err := c.get(ctx, path)
 	if err != nil {
@@ -79,7 +95,7 @@ func (c *Client) GetUserByID(ctx context.Context, realmName, userID string) (*Us
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("failed to get user, status: %d, body: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("failed to get user, status: %d%s", resp.StatusCode, c.replyDetail("get user", resp.StatusCode, body))
 	}
 
 	var user UserRepresentation
@@ -92,7 +108,15 @@ func (c *Client) GetUserByID(ctx context.Context, realmName, userID string) (*Us
 
 // GetUserGroups fetches the groups a user belongs to
 func (c *Client) GetUserGroups(ctx context.Context, realmName, userID string) ([]GroupRepresentation, error) {
-	path := fmt.Sprintf("/admin/realms/%s/users/%s/groups", realmName, userID)
+	realmSeg, err := pathSegment(realmName)
+	if err != nil {
+		return nil, err
+	}
+	userSeg, err := pathSegment(userID)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/admin/realms/%s/users/%s/groups", realmSeg, userSeg)
 
 	resp, err := c.get(ctx, path)
 	if err != nil {
@@ -106,7 +130,7 @@ func (c *Client) GetUserGroups(ctx context.Context, realmName, userID string) ([
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("failed to get user groups, status: %d, body: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("failed to get user groups, status: %d%s", resp.StatusCode, c.replyDetail("get user groups", resp.StatusCode, body))
 	}
 
 	var groups []GroupRepresentation
@@ -119,7 +143,15 @@ func (c *Client) GetUserGroups(ctx context.Context, realmName, userID string) ([
 
 // GetUserRoleMappings fetches the role mappings for a user
 func (c *Client) GetUserRoleMappings(ctx context.Context, realmName, userID string) (*RoleMappingsRepresentation, error) {
-	path := fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings", realmName, userID)
+	realmSeg, err := pathSegment(realmName)
+	if err != nil {
+		return nil, err
+	}
+	userSeg, err := pathSegment(userID)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings", realmSeg, userSeg)
 
 	resp, err := c.get(ctx, path)
 	if err != nil {
@@ -133,7 +165,7 @@ func (c *Client) GetUserRoleMappings(ctx context.Context, realmName, userID stri
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("failed to get user role mappings, status: %d, body: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("failed to get user role mappings, status: %d%s", resp.StatusCode, c.replyDetail("get user role mappings", resp.StatusCode, body))
 	}
 
 	var roleMappings RoleMappingsRepresentation

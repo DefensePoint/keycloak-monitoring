@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/amfa"
@@ -23,24 +22,21 @@ type VPNRiskyCheck struct {
 	realmsFn RealmsFunc
 	repo     amfa.Repository
 	minRisk  int
-	lookback time.Duration
 	logger   Logger
-
-	mu       sync.Mutex
-	lastSeen map[string]time.Time
+	events   *eventCursor
 }
 
 // NewVPNRiskyCheck constructs rule 3.
-func NewVPNRiskyCheck(tenantID string, realmsFn RealmsFunc, repo amfa.Repository, lookback time.Duration, log Logger) *VPNRiskyCheck {
-	return &VPNRiskyCheck{
+func NewVPNRiskyCheck(tenantID string, realmsFn RealmsFunc, repo amfa.Repository, lookback time.Duration, log Logger, opts ...EventCheckOption) *VPNRiskyCheck {
+	c := &VPNRiskyCheck{
 		tenantID: tenantID,
 		realmsFn: realmsFn,
 		repo:     repo,
 		minRisk:  vpnRiskyMinRisk,
-		lookback: lookback,
 		logger:   log.WithComponent("amfa-vpn-risky"),
-		lastSeen: make(map[string]time.Time),
 	}
+	c.events = newEventCursor(c.GetCheckType(), lookback, c.logger, opts)
+	return c
 }
 
 func (c *VPNRiskyCheck) GetCheckType() string { return "amfa-vpn-risky" }
@@ -53,23 +49,18 @@ func (c *VPNRiskyCheck) Execute(ctx context.Context) ([]*domain.Alert, error) {
 	if err != nil {
 		return nil, fmt.Errorf("amfa-vpn-risky: load realms: %w", err)
 	}
-	var alerts []*domain.Alert
-	for _, realm := range realms {
-		since := c.getLastSeen(realm)
-		events, err := c.repo.ListVPNRiskyEventsSince(ctx, realm, since, c.minRisk)
-		if err != nil {
-			return nil, fmt.Errorf("amfa-vpn-risky: realm=%s: %w", realm, err)
-		}
-		for _, ev := range events {
-			alerts = append(alerts, c.toAlert(realm, ev))
-			if ev.EventTime.After(since) {
-				since = ev.EventTime
-			}
-		}
-		c.setLastSeen(realm, since)
+	alerts, err := c.events.read(ctx, realms,
+		func(ctx context.Context, realm string, since time.Time) ([]amfa.EventRow, error) {
+			return c.repo.ListVPNRiskyEventsSince(ctx, realm, since, c.minRisk)
+		}, c.toAlert)
+	if err != nil {
+		err = fmt.Errorf("amfa-vpn-risky: %w", err)
 	}
-	return alerts, nil
+	return alerts, err
 }
+
+// Commit implements EventCheck.
+func (c *VPNRiskyCheck) Commit(stored map[string]bool) { c.events.Commit(stored) }
 
 func (c *VPNRiskyCheck) toAlert(realm string, ev amfa.EventRow) *domain.Alert {
 	eventID := ev.EventID
@@ -102,19 +93,4 @@ func (c *VPNRiskyCheck) toAlert(realm string, ev amfa.EventRow) *domain.Alert {
 		Recommendation: "Review the source IP and the user's recent activity. Anonymizing networks combined with elevated risk warrant a closer look at the session.",
 		Metadata:       string(md),
 	}
-}
-
-func (c *VPNRiskyCheck) getLastSeen(realm string) time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if ts, ok := c.lastSeen[realm]; ok {
-		return ts
-	}
-	return time.Now().Add(-c.lookback)
-}
-
-func (c *VPNRiskyCheck) setLastSeen(realm string, ts time.Time) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.lastSeen[realm] = ts
 }

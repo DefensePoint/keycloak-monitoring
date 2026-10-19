@@ -1,5 +1,15 @@
 const API_BASE_URL = "/api";
 
+// Dispatched on window when the API answers 401. The auth context signs the
+// user out, so the login form shows at the current URL and signing in again
+// returns to the same page.
+export const SESSION_EXPIRED_EVENT = "kmt:session-expired";
+
+function sessionExpired(): Error {
+  window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+  return new Error("Session expired");
+}
+
 interface RequestConfig extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
 }
@@ -46,16 +56,17 @@ class ApiClient {
     });
 
     if (response.status === 401) {
-      // Redirect to login page instead of reloading to avoid infinite loop
-      window.location.href = "/login?session=expired";
-      throw new Error("Session expired");
+      throw sessionExpired();
     }
 
     if (!response.ok) {
       const error = await response
         .json()
         .catch(() => ({ error: "Request failed" }));
-      throw new Error(error.error || `HTTP ${response.status}`);
+      throw httpError(
+        error.error || `HTTP ${response.status}`,
+        response.status,
+      );
     }
 
     // Handle empty responses
@@ -114,8 +125,12 @@ class ApiClient {
       credentials: "include",
     });
 
+    if (response.status === 401) {
+      throw sessionExpired();
+    }
+
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw httpError(`HTTP ${response.status}`, response.status);
     }
 
     return response.blob();
@@ -124,3 +139,18 @@ class ApiClient {
 
 export const apiClient = new ApiClient();
 export { ApiClient };
+
+/** An Error from a request the server answered with a failing status. */
+export interface HttpError extends Error {
+  status: number;
+}
+
+function httpError(message: string, status: number): HttpError {
+  return Object.assign(new Error(message), { status });
+}
+
+/** The HTTP status a failed request was answered with, if it got one. */
+export function httpStatusOf(error: unknown): number | undefined {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === "number" ? status : undefined;
+}

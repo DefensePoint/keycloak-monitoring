@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts/clearing"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
@@ -62,14 +63,23 @@ func (c *ClientSecurityCheck) GetDescription() string {
 
 // Execute performs the configuration check.
 func (c *ClientSecurityCheck) Execute(ctx context.Context) ([]*domain.Alert, error) {
+	eval, err := c.Evaluate(ctx)
+	return eval.Alerts, err
+}
+
+// Evaluate performs the configuration check and reports the realms whose
+// clients it read. A realm whose clients could not be read is not marked, so
+// its alerts stay as they are; a client deleted from a realm that was read
+// counts as fixed.
+func (c *ClientSecurityCheck) Evaluate(ctx context.Context) (Evaluation, error) {
 	c.logger.Debug("Executing client security check")
+	eval := Evaluation{Evaluation: clearing.Evaluation{TenantID: c.tenantID}}
 
-	realms, err := c.getRealmsToCheck(ctx)
+	realms, scope, err := scopeRealms(ctx, c.keycloakClient, c.realms)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get realms: %w", err)
+		return eval, fmt.Errorf("failed to get realms: %w", err)
 	}
-
-	var alerts []*domain.Alert
+	eval.scope = scope
 
 	for _, realmName := range realms {
 		clients, err := c.keycloakClient.GetClients(ctx, realmName)
@@ -81,36 +91,32 @@ func (c *ClientSecurityCheck) Execute(ctx context.Context) ([]*domain.Alert, err
 		}
 
 		for _, client := range clients {
-			clientAlerts := c.checkClient(realmName, client)
-			alerts = append(alerts, clientAlerts...)
+			eval.Alerts = append(eval.Alerts, c.checkClient(realmName, client)...)
 		}
+		eval.MarkRealmEvaluated(realmName)
 	}
 
 	c.logger.Info("Client security check completed",
-		logger.Int("total_alerts", len(alerts)))
+		logger.Int("total_alerts", len(eval.Alerts)))
 
-	return alerts, nil
+	return eval, nil
 }
 
-// getRealmsToCheck returns the list of realms to check.
-func (c *ClientSecurityCheck) getRealmsToCheck(ctx context.Context) ([]string, error) {
-	if len(c.realms) > 0 {
-		return c.realms, nil
+// looksFor reports whether the sub-check that raises alertType is on.
+func (c *ClientSecurityCheck) looksFor(alertType string) bool {
+	switch alertType {
+	case "wildcard_redirect_uri", "localhost_redirect_uri", "http_redirect_uri":
+		return c.config.CheckRedirectURIs
+	case "public_client_service_account":
+		return c.config.CheckPublicClients
+	case "direct_access_grants_enabled":
+		return c.config.CheckDirectAccessGrants
+	case "missing_client_secret":
+		return c.config.CheckClientSecret
+	case "implicit_flow_enabled":
+		return c.config.CheckImplicitFlow
 	}
-
-	allRealms, err := c.keycloakClient.GetAllRealms(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch all realms: %w", err)
-	}
-
-	realmNames := make([]string, 0, len(allRealms))
-	for _, realm := range allRealms {
-		if realm.Enabled {
-			realmNames = append(realmNames, realm.Realm)
-		}
-	}
-
-	return realmNames, nil
+	return true
 }
 
 // checkClient checks all security configurations for a client.

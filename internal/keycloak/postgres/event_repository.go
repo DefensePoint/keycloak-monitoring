@@ -3,6 +3,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -129,6 +130,58 @@ func (r *EventRepository) CountEvents(ctx context.Context, tenantID string) (int
 	return count, nil
 }
 
+// storedEventIDsChunk bounds the ids per StoredEventIDs query.
+const storedEventIDsChunk = 1000
+
+// legacyEventIDPattern matches the ids the poller made before hashing them:
+// the realm id, the epoch milliseconds and the type. Keycloak's own ids are
+// UUIDs and do not match; event types can hold digits (OAUTH2_DEVICE_AUTH).
+const legacyEventIDPattern = `-[0-9]{12,}-[A-Z0-9_]+$`
+
+// StoredEventIDs returns which of ids the tenant has keycloak_events rows
+// stored under with a time from from to to. A row's time is its event's own,
+// so the range keeps the query to the primary key and the chunks it covers.
+func (r *EventRepository) StoredEventIDs(ctx context.Context, tenantID string, ids []string, from, to time.Time) (map[string]bool, error) {
+	stored := make(map[string]bool)
+	for start := 0; start < len(ids); start += storedEventIDsChunk {
+		end := min(start+storedEventIDsChunk, len(ids))
+		var found []string
+		if err := r.db.WithContext(ctx).Model(&database.KeycloakEvent{}).
+			Where("tenant_id = ? AND time BETWEEN ? AND ? AND event_id IN ?", tenantID, from, to, ids[start:end]).
+			Distinct().Pluck("event_id", &found).Error; err != nil {
+			return nil, fmt.Errorf("failed to look up stored event ids: %w", err)
+		}
+		for _, id := range found {
+			stored[id] = true
+		}
+	}
+	return stored, nil
+}
+
+// IDlessEventTimes returns the times of the tenant's newest events at or
+// after since stored under an id the poller made for an event Keycloak gave
+// none: one under a legacy id and one under a "kcev-" hash, zero if none.
+func (r *EventRepository) IDlessEventTimes(ctx context.Context, tenantID string, since time.Time) (legacy, hashed time.Time, err error) {
+	// max over no rows is NULL, the usual case for a tenant whose Keycloak
+	// always returned ids.
+	var l, h sql.NullTime
+	err = r.db.WithContext(ctx).Model(&database.KeycloakEvent{}).
+		Where("tenant_id = ? AND time >= ?", tenantID, since).
+		Where("event_id LIKE 'kcev-%' OR event_id ~ ?", legacyEventIDPattern).
+		Select("max(time) FILTER (WHERE event_id ~ ?), max(time) FILTER (WHERE event_id LIKE 'kcev-%')", legacyEventIDPattern).
+		Row().Scan(&l, &h)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("failed to look up events stored without a Keycloak id: %w", err)
+	}
+	if l.Valid {
+		legacy = l.Time
+	}
+	if h.Valid {
+		hashed = h.Time
+	}
+	return legacy, hashed, nil
+}
+
 // CountEventsByType counts events by type within a time range.
 func (r *EventRepository) CountEventsByType(ctx context.Context, tenantID, realmName, eventType string, from, to time.Time) (int64, error) {
 	var count int64
@@ -172,6 +225,11 @@ func (r *EventRepository) SaveEvent(ctx context.Context, event *domain.KeycloakE
 	return nil
 }
 
+// saveEventsBatchSize caps the rows per INSERT. The database client caches a
+// prepared statement per distinct SQL text, and an INSERT's text changes with
+// its row count, so unbounded batches cached a statement for every size seen.
+const saveEventsBatchSize = 100
+
 // SaveEvents saves multiple events.
 func (r *EventRepository) SaveEvents(ctx context.Context, events []*domain.KeycloakEvent) error {
 	if len(events) == 0 {
@@ -186,7 +244,7 @@ func (r *EventRepository) SaveEvents(ctx context.Context, events []*domain.Keycl
 	result := r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "time"}, {Name: "event_id"}},
 		DoNothing: true,
-	}).Create(&dbEvents)
+	}).CreateInBatches(&dbEvents, saveEventsBatchSize)
 
 	if result.Error != nil {
 		return fmt.Errorf("failed to save events: %w", result.Error)

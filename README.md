@@ -131,6 +131,9 @@ After following the quick start:
 
 See the **[Quick Start Guide](docs/quickstart.md)** for comprehensive setup instructions, including notification configuration and security best practices.
 
+For a self-contained demo with two automatically configured Keycloaks, see
+[Local setup](docs/setup.md#self-contained-demo) and run `make docker-demo-up`.
+
 ## Documentation
 
 Comprehensive documentation is available in the `docs/` directory:
@@ -216,14 +219,17 @@ cp config.yaml.example config.yaml
 
 # 2. Edit config.yaml with your settings
 
-# 3. Build images
+# 3. Create .env and set the initial admin password in it
+cp .env.example .env
+
+# 4. Build images
 make docker-build
 
-# 4. Start services
-docker-compose -f deployments/local/docker-compose.yml up -d
+# 5. Start services
+make docker-up
 
-# 5. Check logs
-docker-compose -f deployments/local/docker-compose.yml logs -f
+# 6. Check logs
+make docker-logs
 ```
 
 ### Manual Deployment
@@ -273,7 +279,7 @@ keycloak:
       server_url: "https://keycloak.example.com"
       admin_realm: "master"
       client_id: "monitoring-service"
-      client_secret: "${KEYCLOAK_CLIENT_SECRET}"
+      client_secret: "${PROD_KEYCLOAK_CLIENT_SECRET}"
       tags: ["production", "critical"]
 ```
 
@@ -326,11 +332,8 @@ auth:
     client_secret: "your-secret"
 ```
 
-**Security Requirements for Initial Admin Password:**
-
-- Minimum 12 characters
-- At least one uppercase letter, one lowercase letter, one number, and one special character
-- Cannot be a common weak password (e.g., admin123, password123, etc.)
+Initial administrator credentials are needed when the database has no users. See
+[environment requirements and password rules](docs/configuration.md#deployment-variable-requirements).
 
 Change the password after first login. The platform does not rotate it automatically, so the initial password remains valid until changed.
 
@@ -338,14 +341,17 @@ For complete configuration reference, see the [configuration documents](docs/con
 
 ### Environment Variables
 
-All configuration can be overridden with environment variables using the prefix `MONITORING_`:
+Use `MONITORING_*` overrides for keys with a built-in default or a key present in
+`config.yaml`. Other variables are ignored. See the
+[environment variable reference](docs/configuration.md#environment-variables).
 
 ```bash
 export MONITORING_DATABASE_HOST=localhost
 export MONITORING_DATABASE_PASSWORD=secure_password
-export MONITORING_KEYCLOAK_SERVER_URL=https://keycloak.example.com
 export MONITORING_AUTH_SESSION_SECRET=$(openssl rand -base64 32)
 ```
+
+Keycloak tenants are configured under `keycloak.tenants` in `config.yaml`. Keep their client secrets out of the file with a placeholder, `client_secret: "${PROD_KEYCLOAK_CLIENT_SECRET}"`, and set that variable in the environment.
 
 ## Contributing
 

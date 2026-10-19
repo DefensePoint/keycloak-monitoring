@@ -15,5 +15,9 @@ var LoggerModule = fx.Module("logger",
 )
 
 func provideLogger(cfg *config.AppConfig) *logger.Logger {
-	return logger.NewConsole(cfg.Logging.Level, cfg.Logging.Output.Pretty)
+	log := logger.NewConsole(cfg.Logging.Level, cfg.Logging.Output.Pretty)
+	for _, w := range cfg.PlaceholderWarnings {
+		log.Warn(w)
+	}
+	return log
 }

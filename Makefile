@@ -3,10 +3,18 @@
 # Build settings
 VERSION := $(shell git describe --tags 2>/dev/null || echo "dev")
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+SWAG_VERSION ?= v1.16.6
+SWAG = go run github.com/swaggo/swag/cmd/swag@$(SWAG_VERSION)
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Other variables
 DOCKER_COMPOSE_LOCAL_FILE := "./deployments/local/docker-compose.yml"
+DOCKER_DEMO_PROJECT ?= kmt-demo
+DOCKER_DEMO_COMPOSE = docker compose --env-file .env -p $(DOCKER_DEMO_PROJECT) -f $(DOCKER_COMPOSE_LOCAL_FILE) -f deployments/local/docker-compose.bundled.yml --profile bundled-kc
+# A restarted setup container keeps the logs of its earlier runs, so a failure prints only this run's.
+DOCKER_DEMO_UP = since=$$(date -u +%Y-%m-%dT%H:%M:%SZ); \
+	$(DOCKER_DEMO_COMPOSE) up -d $(1) --wait --wait-timeout 600 || \
+	{ status=$$?; $(DOCKER_DEMO_COMPOSE) logs --no-log-prefix --since "$$since" keycloak-setup; exit $$status; }
 
 # Build flags
 LDFLAGS := -w -s \
@@ -165,23 +173,51 @@ docker-build-mcp-server: ## Build MCP server Docker image
 docker-build: docker-build-server docker-build-web docker-build-mcp-server ## Build all Docker images
 
 .PHONY: docker-up
-docker-up: ## Start services with docker-compose
+docker-up: docker-env-check docker-config-check ## Start services with docker-compose
 	@docker compose -f $(DOCKER_COMPOSE_LOCAL_FILE) up -d
 
+# The local compose file loads .env into the containers and mounts
+# config.yaml; without them Compose fails with a bare "env file not found",
+# or Docker mounts an empty directory in place of config.yaml.
+.PHONY: docker-env-check
+docker-env-check:
+	@test -f .env || { echo "Missing .env. Create it from the example and set MONITORING_AUTH_SIMPLE_DEFAULT_PASS:"; echo "  cp .env.example .env"; exit 1; }
+
+.PHONY: docker-config-check
+docker-config-check:
+	@test -f config.yaml || { echo "Missing config.yaml. Create it from the example and add your Keycloak tenants:"; echo "  cp config.yaml.example config.yaml"; exit 1; }
+
 .PHONY: docker-down
-docker-down: ## Stop all services
+.PHONY: docker-demo-up docker-demo-down docker-demo-restart docker-demo-clean docker-demo-logs
+docker-demo-up: docker-env-check ## Build and start the self-contained two-Keycloak demo
+	@$(call DOCKER_DEMO_UP,--build)
+
+docker-demo-down: docker-env-check ## Stop the bundled demo, retaining its data
+	@$(DOCKER_DEMO_COMPOSE) down
+
+docker-demo-restart: docker-env-check ## Restart the bundled demo with retained data
+	@$(DOCKER_DEMO_COMPOSE) stop
+	@$(call DOCKER_DEMO_UP,--no-build)
+
+docker-demo-clean: docker-env-check ## Stop the bundled demo and remove only its volumes
+	@$(DOCKER_DEMO_COMPOSE) down -v
+
+docker-demo-logs: docker-env-check ## Follow bundled demo logs
+	@$(DOCKER_DEMO_COMPOSE) logs -f
+
+docker-down: docker-env-check ## Stop all services
 	@docker compose -f $(DOCKER_COMPOSE_LOCAL_FILE) down
 
 .PHONY: docker-restart
-docker-restart: ## Restart all services
+docker-restart: docker-env-check docker-config-check ## Restart all services
 	@docker compose -f $(DOCKER_COMPOSE_LOCAL_FILE) restart
 
 .PHONY: docker-logs
-docker-logs: ## Show docker-compose logs
+docker-logs: docker-env-check ## Show docker-compose logs
 	@docker compose -f $(DOCKER_COMPOSE_LOCAL_FILE) logs -f
 
 .PHONY: docker-clean
-docker-clean: ## Stop services and remove volumes
+docker-clean: docker-env-check ## Stop services and remove volumes
 	@docker compose -f $(DOCKER_COMPOSE_LOCAL_FILE) down -v
 
 .PHONY: docker-rebuild
@@ -191,14 +227,11 @@ docker-rebuild: docker-build docker-down docker-up ## Rebuild images and restart
 # SWAGGER TARGETS
 # -----------------------------------------------------------------
 
-# Use a locally installed swag when available; otherwise run it in a
-# Go container so no local toolchain is required. The named volume
-# caches the module downloads between runs.
-ifneq ($(shell command -v swag 2>/dev/null),)
-SWAG := swag
-else
-SWAG := docker run --rm -v $(CURDIR):/app -v kmt-swag-cache:/go -w /app \
-	golang:1.26 go run github.com/swaggo/swag/cmd/swag@latest
+# Without a local Go toolchain, run swag in a Go container instead. The named
+# volume caches the module downloads between runs.
+ifeq ($(shell command -v go 2>/dev/null),)
+SWAG = docker run --rm -v $(CURDIR):/app -v kmt-swag-cache:/go -w /app \
+	golang:1.27.2 go run github.com/swaggo/swag/cmd/swag@$(SWAG_VERSION)
 endif
 
 # --parseDependency is deliberately absent: it makes swag name every schema after
@@ -207,9 +240,19 @@ endif
 # resolve, and expect every schema name to change if you do.
 .PHONY: swagger
 swagger: ## Generate Swagger documentation
-	@echo "Generating Swagger documentation..."
+	@echo "Generating Swagger documentation with swag $(SWAG_VERSION)..."
 	@$(SWAG) init -g cmd/server/main.go -o docs/swagger --parseInternal
 	@echo "Swagger docs generated at docs/swagger/"
+
+.PHONY: swagger-check
+swagger-check: ## Fail if docs/swagger differs from what make swagger generates
+	@$(MAKE) --no-print-directory swagger || { echo "make swagger failed: fix the annotation it reports above, then run make swagger and commit docs/swagger."; exit 1; }
+	@if [ -n "$$(git status --porcelain -- docs/swagger)" ]; then \
+		git status --short -- docs/swagger; git diff --stat -- docs/swagger; \
+		echo "docs/swagger is out of date: run make swagger (swag $(SWAG_VERSION)) and commit docs/swagger."; \
+		exit 1; \
+	fi
+	@echo "docs/swagger is up to date"
 
 .PHONY: swagger-fmt
 swagger-fmt: ## Format Swagger annotations

@@ -62,23 +62,63 @@ func NewUserHandlers(
 //   - POST   /api/users        - Create user (requires platform_users:write)
 //   - GET    /api/users/{id}   - Get user (requires platform_users:read)
 //   - PUT    /api/users/{id}   - Update user (requires platform_users:write)
-//   - DELETE /api/users/{id}   - Delete user (requires platform_users:write)
+//   - DELETE /api/users/{id}   - Delete user (requires platform_users:delete)
+//
+// User accounts are platform-wide, so each permission must be granted for
+// every tenant; a grant for one tenant is not enough. Only an admin can
+// change or delete an admin account.
 func (h *UserHandlers) RegisterRoutes(r chi.Router) {
 	r.Route("/api/users", func(r chi.Router) {
 		r.Use(h.authMiddleware)
-		r.Use(h.rbacMiddleware.RequirePermission(rbac.PermissionPlatformUsersRead))
+		r.Use(h.rbacMiddleware.RequireGlobalPermission(rbac.PermissionPlatformUsersRead))
 
 		r.Get("/", h.listUsers)
-		// Create user requires write permission
-		r.With(h.rbacMiddleware.RequirePermission(rbac.PermissionPlatformUsersWrite)).Post("/", h.createUser)
+		r.With(h.rbacMiddleware.RequireGlobalPermission(rbac.PermissionPlatformUsersWrite)).Post("/", h.createUser)
 
 		r.Route("/{userID}", func(r chi.Router) {
 			r.Get("/", h.getUser)
-			// Update and Delete require write permission
-			r.With(h.rbacMiddleware.RequirePermission(rbac.PermissionPlatformUsersWrite)).Put("/", h.updateUser)
-			r.With(h.rbacMiddleware.RequirePermission(rbac.PermissionPlatformUsersWrite)).Delete("/", h.deleteUser)
+			r.With(h.rbacMiddleware.RequireGlobalPermission(rbac.PermissionPlatformUsersWrite)).Put("/", h.updateUser)
+			r.With(h.rbacMiddleware.RequireGlobalPermission(rbac.PermissionPlatformUsersDelete)).Delete("/", h.deleteUser)
 		})
 	})
+}
+
+// allowedToManage refuses a non-admin acting on another user who holds any
+// role, and writes the response. platform_users:write can reset a password,
+// so without this anyone holding it could sign in as an operator, or an
+// admin, and use every permission that user's roles give. Only an admin
+// assigns roles, so only an admin manages anyone who has one; others manage
+// the users with none, and themselves.
+func (h *UserHandlers) allowedToManage(w http.ResponseWriter, r *http.Request, targetID uint) bool {
+	ctx := r.Context()
+
+	caller := GetUserFromContext(ctx)
+	if caller == nil {
+		httputil.RespondUnauthorized(w, h.log, "Unauthorized")
+		return false
+	}
+
+	callerIsAdmin, err := h.rbacService.IsAdmin(ctx, caller.ID)
+	if err != nil {
+		h.log.Error("Failed to check caller admin status", logger.Err(err))
+		httputil.RespondInternalError(w, h.log, "Failed to check permissions")
+		return false
+	}
+	if callerIsAdmin || targetID == caller.ID {
+		return true
+	}
+
+	targetHoldsRole, err := h.rbacService.HoldsAnyRole(ctx, targetID)
+	if err != nil {
+		h.log.Error("Failed to check the target's roles", logger.Err(err))
+		httputil.RespondInternalError(w, h.log, "Failed to check permissions")
+		return false
+	}
+	if targetHoldsRole {
+		httputil.RespondForbidden(w, h.log, "Only an administrator can change or delete a user who holds a role")
+		return false
+	}
+	return true
 }
 
 // listUsers handles GET /api/users
@@ -213,7 +253,7 @@ func (h *UserHandlers) getUser(w http.ResponseWriter, r *http.Request) {
 // updateUser handles PUT /api/users/{id}
 //
 //	@Summary		Update user
-//	@Description	Updates an existing user. OAuth users can only have their status changed.
+//	@Description	Updates an existing user. OAuth users can only have their status changed. Deactivating, blocking, reactivating or unblocking a user revokes their live API tokens: they stop working immediately, and a reactivated or unblocked user starts with none and issues new ones.
 //	@Tags			users
 //	@Accept			json
 //	@Produce		json
@@ -222,7 +262,7 @@ func (h *UserHandlers) getUser(w http.ResponseWriter, r *http.Request) {
 //	@Success		200		{object}	domain.User
 //	@Failure		400		{object}	dto.ErrorResponse	"Invalid user ID or request"
 //	@Failure		401		{object}	dto.ErrorResponse
-//	@Failure		403		{object}	dto.ErrorResponse	"OAuth users cannot be modified"
+//	@Failure		403		{object}	dto.ErrorResponse	"OAuth users cannot be modified, or a non-admin targeted another user who holds a role"
 //	@Failure		404		{object}	dto.ErrorResponse	"User not found"
 //	@Failure		409		{object}	dto.ErrorResponse	"Username already taken"
 //	@Failure		500		{object}	dto.ErrorResponse
@@ -254,6 +294,10 @@ func (h *UserHandlers) updateUser(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondNotFound(w, h.log, "User not found")
 		return
 	}
+	if !h.allowedToManage(w, r, user.ID) {
+		return
+	}
+	wasActive, wasBlocked := user.IsActive, user.IsBlocked
 
 	// OAuth users can only have their status changed
 	if user.AuthMethod == domain.AuthMethodOAuth {
@@ -311,6 +355,18 @@ func (h *UserHandlers) updateUser(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondInternalError(w, h.log, "Failed to update user")
 		return
 	}
+	if wasActive && !user.IsActive {
+		h.logDeactivation(ctx, user.ID)
+	}
+	if !wasActive && user.IsActive {
+		h.logRestore(ctx, user.ID, "User reactivated; any API tokens they still held are revoked", "reactivated_by")
+	}
+	if !wasBlocked && user.IsBlocked {
+		h.logBlock(ctx, user.ID)
+	}
+	if wasBlocked && !user.IsBlocked {
+		h.logRestore(ctx, user.ID, "User unblocked; any API tokens they still held are revoked", "unblocked_by")
+	}
 
 	httputil.RespondSuccess(w, h.log, user)
 }
@@ -330,18 +386,18 @@ func (h *UserHandlers) updateUser(w http.ResponseWriter, r *http.Request) {
 // 24 hours by default. The middleware does re-read the account on every
 // request, but only to recover the ID that RBAC needs: UserDetails carries no
 // status field, so is_active is never consulted once a session exists. API
-// tokens are not affected; they check the account on every call and stop
-// working at once.
+// tokens are different: deactivating an active account revokes them, so they
+// stop working at once and do not come back if the account is reactivated.
 //
 //	@Summary		Deactivate user
-//	@Description	Deactivates a user by their ID. The account, its roles and its history are kept, and the change is reversible. It takes effect at the next sign-in: an existing session stays valid until it expires (session max_age, 24h by default). API tokens stop working immediately.
+//	@Description	Deactivates a user by their ID. The account, its roles and its history are kept, and the change is reversible. It takes effect at the next sign-in: an existing session stays valid until it expires (session max_age, 24h by default). Deactivating an active user revokes their API tokens: they stop working immediately and are not restored by reactivation.
 //	@Tags			users
 //	@Produce		json
 //	@Param			userID	path		int	true	"User ID"
 //	@Success		200		{object}	dto.MessageResponse
 //	@Failure		400		{object}	dto.ErrorResponse	"Invalid user ID"
 //	@Failure		401		{object}	dto.ErrorResponse
-//	@Failure		403		{object}	dto.ErrorResponse
+//	@Failure		403		{object}	dto.ErrorResponse	"A non-admin targeted another user who holds a role"
 //	@Failure		500		{object}	dto.ErrorResponse
 //	@Security		BearerAuth
 //	@Router			/api/users/{userID} [delete]
@@ -355,13 +411,52 @@ func (h *UserHandlers) deleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !h.allowedToManage(w, r, uint(userID)) {
+		return
+	}
+
 	if err := h.service.DeleteUser(ctx, uint(userID)); err != nil {
 		h.log.Error("Failed to delete user", logger.Err(err))
 		httputil.RespondInternalError(w, h.log, "Failed to delete user")
 		return
 	}
+	h.logDeactivation(ctx, uint(userID))
 
 	httputil.RespondSuccess(w, h.log, map[string]string{"message": "User deleted successfully"})
+}
+
+// logDeactivation records who deactivated a user. Deactivating an active user
+// revokes their API tokens, so this is also the audit line for those
+// revocations, the counterpart of the revoked_by an individual revoke logs.
+func (h *UserHandlers) logDeactivation(ctx context.Context, userID uint) {
+	h.log.Info("User deactivated; an active user's API tokens are revoked with it",
+		logger.Uint("user_id", userID),
+		logger.Uint("deactivated_by", actorIDFrom(ctx)))
+}
+
+// logBlock records who blocked a user, and so who revoked their API tokens;
+// see logDeactivation.
+func (h *UserHandlers) logBlock(ctx context.Context, userID uint) {
+	h.log.Info("User blocked; their API tokens are revoked with it",
+		logger.Uint("user_id", userID),
+		logger.Uint("blocked_by", actorIDFrom(ctx)))
+}
+
+// logRestore records who reactivated or unblocked a user. Restoring a user
+// revokes any API tokens they still hold, so this is the audit line for those.
+func (h *UserHandlers) logRestore(ctx context.Context, userID uint, msg, actorField string) {
+	h.log.Info(msg,
+		logger.Uint("user_id", userID),
+		logger.Uint(actorField, actorIDFrom(ctx)))
+}
+
+// actorIDFrom returns the ID of the user making the request, or 0 when the
+// request carries none.
+func actorIDFrom(ctx context.Context) uint {
+	if actor := GetUserFromContext(ctx); actor != nil {
+		return actor.ID
+	}
+	return 0
 }
 
 // hashPassword hashes a password using bcrypt.

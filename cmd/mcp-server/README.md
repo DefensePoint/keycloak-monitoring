@@ -59,7 +59,7 @@ A fresh database also has no administrator to log in as. The first admin user is
 
 The login step below assumes simple authentication is enabled; `/auth/login/simple` answers 403 when it is not. In that case authenticate in the web UI and reuse the session cookie, or send `Authorization: Bearer <OAuth2 access token>` on the `/api/tokens` calls in place of `-b cookies.txt`.
 
-The login also writes a session cookie, so `auth.session.secret` has to be set before the call can succeed at all. Left unset, a correct username and password still answer `500 {"error":"Failed to create session"}`, with `securecookie: hash key is not set` in the main server's log. `config.yaml.example` ships the key with the placeholder `change-this-to-a-random-secret-key-at-least-32-chars`; replace it with at least 32 random characters (`openssl rand -base64 32`). Supplying the value through `MONITORING_AUTH_SESSION_SECRET` works only while the key stays in `config.yaml`, for the `AutomaticEnv` reason above: no default is registered for it either.
+The login also writes a session cookie, so `auth.session.secret` has to be set: the main server refuses to start while it is empty or one of the example values this project has published. `config.yaml.example` ships the key empty; set it to at least 32 random characters (`openssl rand -base64 32`). Supplying the value through `MONITORING_AUTH_SESSION_SECRET` works only while the key stays in `config.yaml`, for the `AutomaticEnv` reason above: no default is registered for it either.
 
 Log in and keep the session cookie:
 
@@ -107,6 +107,23 @@ Revoke a token by its `id`. Revocation is immediate:
 
 ```bash
 curl -sS -b cookies.txt -X DELETE http://your-monitoring-host:7888/api/tokens/7
+```
+
+### Tokens of SSO users
+
+A token whose user signs in through SSO keeps working only while that user keeps signing in. Once their last SSO sign-in is older than `mcp.sso_signin_max_age` (14 days by default), every request the token makes answers 401, and the MCP server logs `api token user has not signed in through SSO recently enough`. Signing in through SSO again makes the same token work again, so nothing has to be reissued. Tokens of local users are not affected, and `0` turns the check off. The MCP server logs the limit in force at startup (`sso_signin_max_age`), and logs a warning instead when it is off.
+
+The point is offboarding: a user disabled in the IdP can no longer sign in, so their tokens stop within the limit even if nobody touches the platform. Nothing here asks the IdP, so the platform adds no per-user load on it.
+
+On the upgrade to this release, no SSO user has a recorded sign-in yet. Their tokens keep working until the API server's next startup records a start time for them, and from then on they age like any other, so no token stops on release day whether the MCP server or the API server starts first.
+
+### Offboarding a user
+
+When someone leaves, disabling them in the IdP is not enough to cut off a token at once: it only stops working when the sign-in limit runs out. To cut it off immediately, also block the user on the platform, which revokes all their tokens:
+
+```bash
+curl -sS -b cookies.txt -X PUT http://your-monitoring-host:7888/api/users/<user id> \
+  -H 'Content-Type: application/json' -d '{"is_blocked": true}'
 ```
 
 ## Connecting a client

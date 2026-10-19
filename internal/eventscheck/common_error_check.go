@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts/clearing"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
@@ -15,7 +16,7 @@ type CommonErrorCheck struct {
 	eventsRepo KeycloakEventReader
 	logger     Logger
 	tenantID   string
-	realms     []string
+	realmsFn   RealmsFunc
 	threshold  int
 	timeWindow time.Duration
 	eventTypes []string
@@ -26,7 +27,7 @@ func NewCommonErrorCheck(
 	eventsRepo KeycloakEventReader,
 	log Logger,
 	tenantID string,
-	realms []string,
+	realmsFn RealmsFunc,
 	threshold int,
 	timeWindow time.Duration,
 	eventTypes []string,
@@ -50,7 +51,7 @@ func NewCommonErrorCheck(
 		eventsRepo: eventsRepo,
 		logger:     log.WithComponent("common_error_check"),
 		tenantID:   tenantID,
-		realms:     realms,
+		realmsFn:   realmsFn,
 		threshold:  threshold,
 		timeWindow: timeWindow,
 		eventTypes: eventTypes,
@@ -69,15 +70,27 @@ func (c *CommonErrorCheck) GetDescription() string {
 
 // Execute performs the common error check.
 func (c *CommonErrorCheck) Execute(ctx context.Context) ([]*domain.Alert, error) {
+	ev, err := c.Evaluate(ctx)
+	return ev.Alerts, err
+}
+
+// Evaluate runs the check and reports, besides the alerts, every realm and event type whose
+// count it read, so a condition that cleared there can resolve. A realm whose
+// count failed is left out: its condition was not evaluated.
+func (c *CommonErrorCheck) Evaluate(ctx context.Context) (clearing.Evaluation, error) {
 	c.logger.Debug("Checking common error events")
 
 	start := time.Now().Add(-c.timeWindow)
 	end := time.Now()
 
-	var alerts []*domain.Alert
+	realms, err := c.realmsFn(ctx)
+	if err != nil {
+		return clearing.Evaluation{}, fmt.Errorf("list realms: %w", err)
+	}
 
-	// Check each realm for each error type
-	for _, realmName := range c.realms {
+	ev := clearing.Evaluation{TenantID: c.tenantID}
+
+	for _, realmName := range realms {
 		for _, eventType := range c.eventTypes {
 			count, err := c.eventsRepo.CountEventsByType(ctx, c.tenantID, realmName, eventType, start, end)
 			if err != nil {
@@ -88,13 +101,14 @@ func (c *CommonErrorCheck) Execute(ctx context.Context) ([]*domain.Alert, error)
 				continue
 			}
 
+			ev.MarkEvaluated(c.generateAlertID(realmName, eventType))
 			if count >= int64(c.threshold) {
-				alerts = append(alerts, c.createAlert(realmName, eventType, int(count)))
+				ev.Alerts = append(ev.Alerts, c.createAlert(realmName, eventType, int(count)))
 			}
 		}
 	}
 
-	return alerts, nil
+	return ev, nil
 }
 
 // createAlert creates an alert for common errors.

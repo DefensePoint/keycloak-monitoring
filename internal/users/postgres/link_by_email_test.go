@@ -2,9 +2,14 @@ package postgres
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
+	"gorm.io/gorm"
+
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/users"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
@@ -12,6 +17,16 @@ import (
 // tests cover the case where it is not — and, at greater length, every case
 // where a familiar-looking address must not be enough, because that is where
 // linking by email stops being a convenience and becomes a way in.
+
+// newLinkingRepo is newDeletedAccountRepo with linking by verified email
+// switched on, as an administrator would for a planned rebuild. Every condition
+// below must hold even then.
+func newLinkingRepo(t *testing.T) (*Repository, *gorm.DB) {
+	t.Helper()
+	r, db := newDeletedAccountRepo(t)
+	r.linkByVerifiedEmail = true
+	return r, db
+}
 
 // signInAs is signIn with the verified flag under the test's control; the
 // address being verified is the only thing separating adoption from a takeover.
@@ -23,7 +38,7 @@ func signInAs(r *Repository, subject, email string, verified bool) (*domain.User
 }
 
 func TestLinkByEmail_ARebuiltRealmKeepsTheSameAccount(t *testing.T) {
-	r, db := newDeletedAccountRepo(t)
+	r, db := newLinkingRepo(t)
 
 	first, err := signInAs(r, "del-old-sub", "del-person@example.invalid", true)
 	if err != nil {
@@ -55,7 +70,7 @@ func TestLinkByEmail_ARebuiltRealmKeepsTheSameAccount(t *testing.T) {
 // The condition the whole feature rests on. An unverified address is a claim
 // somebody made about themselves.
 func TestLinkByEmail_AnUnverifiedAddressLinksToNothing(t *testing.T) {
-	r, db := newDeletedAccountRepo(t)
+	r, db := newLinkingRepo(t)
 
 	victim, err := signInAs(r, "del-victim", "del-shared@example.invalid", true)
 	if err != nil {
@@ -81,7 +96,7 @@ func TestLinkByEmail_AnUnverifiedAddressLinksToNothing(t *testing.T) {
 // Adopting a username-and-password account would let an SSO login take over
 // local credentials: a wider trust boundary than a realm rebuild needs.
 func TestLinkByEmail_ASimpleAuthAccountIsNotAdopted(t *testing.T) {
-	r, db := newDeletedAccountRepo(t)
+	r, db := newLinkingRepo(t)
 
 	local := &database.User{
 		Subject: "del-local", Email: "del-local@example.invalid", EmailVerified: true,
@@ -108,7 +123,7 @@ func TestLinkByEmail_ASimpleAuthAccountIsNotAdopted(t *testing.T) {
 
 // Accounts with no address are not all the same person.
 func TestLinkByEmail_ABlankAddressLinksToNothing(t *testing.T) {
-	r, db := newDeletedAccountRepo(t)
+	r, db := newLinkingRepo(t)
 
 	first, err := signInAs(r, "del-blank-1", "", true)
 	if err != nil {
@@ -132,7 +147,7 @@ func TestLinkByEmail_ABlankAddressLinksToNothing(t *testing.T) {
 // Adoption must not resurrect somebody an administrator removed: the deleted
 // check runs first, and this pins that ordering.
 func TestLinkByEmail_ADeletedAccountIsNotAdopted(t *testing.T) {
-	r, db := newDeletedAccountRepo(t)
+	r, db := newLinkingRepo(t)
 
 	gone, err := signInAs(r, "del-gone-sub", "del-gone@example.invalid", true)
 	if err != nil {
@@ -150,7 +165,7 @@ func TestLinkByEmail_ADeletedAccountIsNotAdopted(t *testing.T) {
 
 // A first sign-in is still a first sign-in.
 func TestLinkByEmail_ANewPersonStillGetsAnAccount(t *testing.T) {
-	r, _ := newDeletedAccountRepo(t)
+	r, _ := newLinkingRepo(t)
 
 	u, err := signInAs(r, "del-newcomer-sub", "del-newcomer@example.invalid", true)
 	if err != nil {
@@ -161,41 +176,106 @@ func TestLinkByEmail_ANewPersonStillGetsAnAccount(t *testing.T) {
 	}
 }
 
-// role_sync builds its profile without an AuthMethod and the update writes that
-// blank through, so every account Keycloak has synced sits at "" until the next
-// restart repairs it. Keying adoption on auth_method therefore skipped exactly
-// the accounts a Keycloak deployment has most of, and did so silently: the
-// person simply got a second account, which is the outcome this feature exists
-// to prevent.
-func TestLinkByEmail_ARoleSyncedAccountIsStillAdopted(t *testing.T) {
+// auth_method is a label that can lag behind the account: rows written before
+// the column existed, or with it left unset, read "" or the "simple" default
+// until the boot-time migration repairs them. Adoption keys on the password, so
+// a stale label must not stop it: the person would silently get a second
+// account, which is the outcome this feature exists to prevent.
+func TestLinkByEmail_AStaleAuthMethodIsStillAdopted(t *testing.T) {
+	for _, stale := range []string{"", "simple"} {
+		t.Run(fmt.Sprintf("auth_method=%q", stale), func(t *testing.T) {
+			r, db := newLinkingRepo(t)
+
+			first, err := signInAs(r, "del-sync-old", "del-sync@example.invalid", true)
+			if err != nil {
+				t.Fatalf("first sign-in: %v", err)
+			}
+			if err := db.Exec("UPDATE users SET auth_method = ? WHERE id = ?", stale, first.ID).Error; err != nil {
+				t.Fatalf("set stale auth_method: %v", err)
+			}
+
+			second, err := signInAs(r, "del-sync-new", "del-sync@example.invalid", true)
+			if err != nil {
+				t.Fatalf("sign-in after the realm was rebuilt: %v", err)
+			}
+			if second.ID != first.ID {
+				t.Errorf("an account with auth_method %q was not adopted (id %d then %d), so a stale "+
+					"label still splits the person into two accounts after a rebuild", stale, first.ID, second.ID)
+			}
+		})
+	}
+}
+
+// Off by default, because a verified address does not show the login is the
+// person holding the account: a realm allowing duplicate emails, a trusted
+// identity broker, or a realm user administrator can each produce a second
+// identity carrying it. With linking off, a new subject arriving with the
+// address of an existing account is refused by name, and the account is left
+// exactly as it was.
+func TestLinkByEmail_OffByDefault_ANewSubjectIsRefusedNotAdopted(t *testing.T) {
 	r, db := newDeletedAccountRepo(t)
 
-	first, err := signInAs(r, "del-sync-old", "del-sync@example.invalid", true)
+	victim, err := signInAs(r, "del-off-victim", "del-off@example.invalid", true)
 	if err != nil {
 		t.Fatalf("first sign-in: %v", err)
 	}
 
-	// A role sync passes through, shaped exactly as keycloak/role_sync.go does.
-	if _, err := r.FindOrCreateBySubject(context.Background(), &domain.User{
-		Subject: "del-sync-old", Email: "del-sync@example.invalid",
-		EmailVerified: true, IsActive: true,
-	}); err != nil {
-		t.Fatalf("role sync: %v", err)
+	got, err := signInAs(r, "del-off-other", "del-off@example.invalid", true)
+	if err == nil {
+		t.Fatalf("a different subject with the same verified address was let in as account %d", got.ID)
+	}
+	var inUse *users.EmailInUseError
+	if !errors.As(err, &inUse) {
+		t.Fatalf("refused, but not as ErrEmailInUse: %v", err)
+	}
+	if inUse.UserID != victim.ID {
+		t.Errorf("the refusal names account %d, want the one holding the address, %d", inUse.UserID, victim.ID)
 	}
 
-	var authMethod string
-	db.Raw("SELECT auth_method FROM users WHERE id = ?", first.ID).Scan(&authMethod)
-	if authMethod != "" {
-		t.Logf("auth_method survived the sync as %q; the premise of this test no longer "+
-			"holds, though the assertion below is still the one that matters", authMethod)
+	var stored database.User
+	if err := db.Where("id = ?", victim.ID).First(&stored).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if stored.Subject != "del-off-victim" {
+		t.Errorf("the account was taken over: subject is now %q", stored.Subject)
+	}
+	var n int64
+	db.Model(&database.User{}).Where("email = ?", "del-off@example.invalid").Count(&n)
+	if n != 1 {
+		t.Errorf("expected one account for the address, found %d", n)
 	}
 
-	second, err := signInAs(r, "del-sync-new", "del-sync@example.invalid", true)
+	// The original identity still gets in.
+	again, err := signInAs(r, "del-off-victim", "del-off@example.invalid", true)
+	if err != nil || again.ID != victim.ID {
+		t.Errorf("the account holder could not sign in afterwards: id %v, err %v", again, err)
+	}
+}
+
+// An unverified address colliding is refused the same way, by name, rather
+// than as a constraint violation from the insert.
+func TestLinkByEmail_OffByDefault_AnUnverifiedCollisionIsNamed(t *testing.T) {
+	r, _ := newDeletedAccountRepo(t)
+
+	if _, err := signInAs(r, "del-offu-victim", "del-offu@example.invalid", true); err != nil {
+		t.Fatalf("first sign-in: %v", err)
+	}
+	_, err := signInAs(r, "del-offu-other", "del-offu@example.invalid", false)
+	if !errors.Is(err, users.ErrEmailInUse) {
+		t.Fatalf("want ErrEmailInUse, got %v", err)
+	}
+}
+
+// Switching it off changes nothing for anyone signing in as themselves.
+func TestLinkByEmail_OffByDefault_ANewPersonStillGetsAnAccount(t *testing.T) {
+	r, _ := newDeletedAccountRepo(t)
+
+	u, err := signInAs(r, "del-offnew-sub", "del-offnew@example.invalid", true)
 	if err != nil {
-		t.Fatalf("sign-in after the realm was rebuilt: %v", err)
+		t.Fatalf("a new person could not sign in: %v", err)
 	}
-	if second.ID != first.ID {
-		t.Errorf("a role-synced account was not adopted (id %d then %d), so anyone Keycloak has "+
-			"synced still gets a second account after a rebuild", first.ID, second.ID)
+	again, err := signInAs(r, "del-offnew-sub", "del-offnew@example.invalid", true)
+	if err != nil || again.ID != u.ID {
+		t.Fatalf("a returning person did not get their account back: %v, %v", again, err)
 	}
 }

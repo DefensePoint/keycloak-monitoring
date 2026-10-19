@@ -4,11 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"testing"
-	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -32,11 +29,9 @@ func newDeletedAccountRepo(t *testing.T) (*Repository, *gorm.DB) {
 	if testing.Short() {
 		t.Skip("skipping database test in short mode")
 	}
-	dsn := os.Getenv("KMT_DESTRUCTIVE_TEST_DATABASE_DSN")
-	if dsn == "" {
-		t.Skip("KMT_DESTRUCTIVE_TEST_DATABASE_DSN not set; skipping destructive integration test")
-	}
+	dsn := testdb.DSN(t, "KMT_DESTRUCTIVE_TEST_DATABASE_DSN")
 	testdb.RequireDisposable(t, dsn)
+	testdb.Lock(t, dsn)
 
 	// Boot the real client rather than auto-migrating the model alone. The
 	// unique indexes on users only reach their production shape through the
@@ -78,19 +73,10 @@ func newDeletedAccountRepo(t *testing.T) (*Repository, *gorm.DB) {
 
 func deletedAccountDBConfig(t *testing.T, dsn string) *config.DatabaseConfig {
 	t.Helper()
-	parsed, err := pgconn.ParseConfig(dsn)
-	if err != nil {
-		t.Fatalf("parse KMT_DESTRUCTIVE_TEST_DATABASE_DSN: %v", err)
-	}
-	sslMode := "require"
-	if parsed.TLSConfig == nil {
-		sslMode = "disable"
-	}
-	return &config.DatabaseConfig{
-		Host: parsed.Host, Port: int(parsed.Port), Database: parsed.Database,
-		User: parsed.User, Password: parsed.Password, SSLMode: sslMode,
-		MaxConns: 5, MinConns: 1, Timeout: 30 * time.Second,
-	}
+	// The shared helper, not a local reading of the DSN: inferring sslmode from
+	// the parsed TLS config asked for TLS whenever the DSN left sslmode out,
+	// and a local Postgres refuses that.
+	return testdb.DatabaseConfig(t, dsn)
 }
 
 // signIn is what the OAuth paths do: hand the repository a profile built from

@@ -11,6 +11,7 @@ import (
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/pgdsn"
 )
 
 // NewClient opens a read-only GORM connection to one tenant's AMFA database.
@@ -85,15 +86,8 @@ func NewClient(cfg config.AmfaDatabaseConfig, log *logger.Logger) (*gorm.DB, err
 // write is refused by the server even where the configured AMFA credentials
 // would allow it.
 func buildDSN(cfg config.AmfaDatabaseConfig) string {
-	host := hostUsed(cfg)
-	sslmode := cfg.SSLMode
-	if sslmode == "" {
-		sslmode = "require"
-	}
-	return fmt.Sprintf(
-		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s options='-c default_transaction_read_only=on'",
-		host, cfg.Port, cfg.Database, cfg.User, cfg.Password, sslmode,
-	)
+	return pgdsn.Format(hostUsed(cfg), cfg.Port, cfg.Database, cfg.User, cfg.Password, cfg.SSLMode) +
+		" options='-c default_transaction_read_only=on'"
 }
 
 // hostUsed returns the host that will be connected to. When a read replica is

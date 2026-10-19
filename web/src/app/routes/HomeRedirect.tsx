@@ -4,13 +4,14 @@ import { LoadingSkeleton } from "@/shared/components";
 import { useTenant, useAuth } from "@/shared/context";
 
 /**
- * Smart redirect component that sends users to the first ACCESSIBLE tenant dashboard.
- * - Admins: redirected to first tenant in the list
- * - Operators/Viewers: redirected to first tenant they have access to
+ * Smart redirect component that sends users to the first ACCESSIBLE tenant dashboard,
+ * by the same check that guards each tenant's pages: admins and users with a
+ * global role reach every tenant, others the tenants their roles or policies
+ * name.
  */
 export function HomeRedirect() {
   const { tenants, isLoading, error } = useTenant();
-  const { isAdmin, getAccessibleTenantIds } = useAuth();
+  const { hasAccessToTenant } = useAuth();
   const navigate = useNavigate();
   const hasNavigated = useRef(false);
 
@@ -23,20 +24,8 @@ export function HomeRedirect() {
       return;
     }
 
-    // Admins can access all tenants, go to first one
-    if (isAdmin()) {
-      const firstTenant = tenants[0];
-      if (firstTenant?.tenant_id) {
-        hasNavigated.current = true;
-        navigate(`/${firstTenant.tenant_id}`, { replace: true });
-        return;
-      }
-    }
-
-    // Non-admins: find first tenant they have access to
-    const accessibleIds = getAccessibleTenantIds();
-    const accessibleTenant = tenants.find((t) =>
-      accessibleIds.includes(t.tenant_id),
+    const accessibleTenant = tenants.find(
+      (t) => t.tenant_id && hasAccessToTenant(t.tenant_id),
     );
 
     if (accessibleTenant) {
@@ -47,7 +36,7 @@ export function HomeRedirect() {
       hasNavigated.current = true;
       navigate("/tenants", { replace: true });
     }
-  }, [tenants, isLoading, error, navigate, isAdmin, getAccessibleTenantIds]);
+  }, [tenants, isLoading, error, navigate, hasAccessToTenant]);
 
   return <LoadingSkeleton variant="spinner" message="Redirecting..." />;
 }

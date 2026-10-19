@@ -410,6 +410,15 @@ func (h *AmfaHandlers) statsRealm(ctx context.Context, w http.ResponseWriter, te
 	if len(scope) == 1 {
 		return scope[0], true, true
 	}
+	// No realm at all: telling this caller to select one of their realms
+	// points them at a choice they do not have.
+	if len(scope) == 0 {
+		h.log.Warn("All-realms stats refused: the caller's realm scope is empty",
+			logger.Uint("user_id", user.ID),
+			logger.Str("tenant_id", tenantID))
+		respondRealmScopeNoRealms(w, h.log)
+		return "", false, false
+	}
 
 	h.log.Warn("All-realms stats refused by realm scope",
 		logger.Uint("user_id", user.ID),
@@ -470,6 +479,17 @@ func respondRealmScopeRequiresRealm(w http.ResponseWriter, log *logger.Logger) {
 	httputil.RespondJSON(w, log, http.StatusForbidden, map[string]interface{}{
 		"error":   "amfa_realm_scope_requires_realm",
 		"message": "Your access is limited to specific realms, so these metrics cannot be shown across all of them. Select one of your realms.",
+	})
+}
+
+// respondRealmScopeNoRealms refuses all-realms stats for a caller whose realm
+// scope in this tenant is empty. Still a permission refusal, like
+// respondRealmScopeRequiresRealm, but with its own code: that one tells the
+// caller to select a realm, and this caller has none to select.
+func respondRealmScopeNoRealms(w http.ResponseWriter, log *logger.Logger) {
+	httputil.RespondJSON(w, log, http.StatusForbidden, map[string]interface{}{
+		"error":   "amfa_realm_scope_no_realms",
+		"message": "Your access does not include any realm in this tenant, so there are no AMFA metrics to show. Ask an administrator if you expect to see some.",
 	})
 }
 

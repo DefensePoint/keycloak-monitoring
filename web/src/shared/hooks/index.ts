@@ -28,7 +28,12 @@ export {
   useUpdateAlertStatus,
   useResolveAlert,
 } from "./useAlerts";
-export { useEvents, useEventStats } from "./useEvents";
+export {
+  useEvent,
+  useEvents,
+  useEventStats,
+  isEventNotFoundError,
+} from "./useEvents";
 export {
   useAmfaStats,
   isAllRealmsUnsupportedError,

@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/pgdsn"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/secretcrypto"
 )
 
@@ -19,13 +21,19 @@ import (
 type Client struct {
 	db     *gorm.DB
 	logger *logger.Logger
+	// preTenantOwner is the tenant a single-tenant database's rows are given
+	// to; see migratePreTenantSchema.
+	preTenantOwner string
 }
 
 // NewClient creates a new GORM database client and auto-migrates the schema.
-func NewClient(cfg *config.DatabaseConfig, log *logger.Logger) (*Client, error) {
+func NewClient(cfg *config.DatabaseConfig, log *logger.Logger, opts ...ClientOption) (*Client, error) {
 	client, err := openClient(cfg, log)
 	if err != nil {
 		return nil, err
+	}
+	for _, opt := range opts {
+		opt(client)
 	}
 
 	// Auto-migrate schema
@@ -63,18 +71,41 @@ func NewReadOnlyClient(cfg *config.DatabaseConfig, log *logger.Logger) (*Client,
 	return client, nil
 }
 
+// connMaxLifetime is how long a pooled connection is kept before it is closed
+// and replaced. Long enough that reconnecting, and preparing statements again
+// on the new connection, costs nothing noticeable; short enough that a
+// connection a proxy, failover or DNS change has silently left dead does not
+// linger.
+const connMaxLifetime = 30 * time.Minute
+
+// defaultTimeout bounds opening a connection and the startup check when the
+// timeout is not set, as mcp.database.timeout usually is not: it has no
+// default so that a missing mcp.database block still fails startup.
+const defaultTimeout = 10 * time.Second
+
+// effectiveTimeout is cfg.Timeout, or defaultTimeout when it is not set.
+func effectiveTimeout(cfg *config.DatabaseConfig) time.Duration {
+	if cfg.Timeout > 0 {
+		return cfg.Timeout
+	}
+	return defaultTimeout
+}
+
+// connectionString is the driver DSN for cfg. The timeout becomes the
+// driver's connect_timeout, which bounds every attempt to open a connection,
+// including the one gorm.Open makes before openClient can pass a deadline;
+// without it a database that accepts the connection and never answers holds
+// startup forever. It is whole seconds, rounded up so a sub-second value
+// still sets a limit.
+func connectionString(cfg *config.DatabaseConfig) string {
+	dsn := pgdsn.Format(cfg.Host, cfg.Port, cfg.Database, cfg.User, cfg.Password, cfg.SSLMode)
+	seconds := int64((effectiveTimeout(cfg) + time.Second - 1) / time.Second)
+	return dsn + fmt.Sprintf(" connect_timeout=%d", seconds)
+}
+
 // openClient opens the GORM connection, configures the pool and pings.
 func openClient(cfg *config.DatabaseConfig, log *logger.Logger) (*Client, error) {
-	// Build connection DSN
-	dsn := fmt.Sprintf(
-		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s",
-		cfg.Host,
-		cfg.Port,
-		cfg.Database,
-		cfg.User,
-		cfg.Password,
-		cfg.SSLMode,
-	)
+	dsn := connectionString(cfg)
 
 	// Configure GORM
 	gormConfig := &gorm.Config{
@@ -100,12 +131,13 @@ func openClient(cfg *config.DatabaseConfig, log *logger.Logger) (*Client, error)
 	if cfg.MinConns > 0 {
 		sqlDB.SetMaxIdleConns(cfg.MinConns)
 	}
-	if cfg.Timeout > 0 {
-		sqlDB.SetConnMaxLifetime(cfg.Timeout)
-	}
+	// Not database.timeout: used as the lifetime, it closed and reopened every
+	// connection each timeout period, 30s by default, and threw away its
+	// prepared statements.
+	sqlDB.SetConnMaxLifetime(connMaxLifetime)
 
 	// Test connection
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), effectiveTimeout(cfg))
 	defer cancel()
 
 	if err := sqlDB.PingContext(ctx); err != nil {
@@ -119,68 +151,96 @@ func openClient(cfg *config.DatabaseConfig, log *logger.Logger) (*Client, error)
 	}, nil
 }
 
-// backfillEventTenantIDs attributes pre-existing event rows to a tenant where
-// that can be established, and leaves the rest alone.
+// lockSchema holds a session advisory lock until the caller releases it.
+// The lock sits on a pooled connection, so the pool needs a second connection
+// for the migration. Unlock on that same connection: Close returns it to the
+// pool and would otherwise keep the lock.
 //
-// Rows written before events.tenant_id existed recorded no tenant. The only
-// tenant signal they carry is the realm name inside source
-// ("keycloak:<realm>", "amfa:<realm>"), so a row is attributable exactly when
-// its realm name belongs to one tenant and no other. Where a realm name is
-// shared, and "master" is shared by every Keycloak, the owner is genuinely
-// unrecoverable and the row keeps its empty tenant_id: excluded from every
-// tenant-scoped query, and still awaiting a decision on whether to delete it.
-//
-// Deliberately not a guess. Attributing a shared-realm row to whichever tenant
-// happens to hold that realm now would assert ownership of personal data that
-// cannot be verified, which is the opposite of the point.
-//
-// One honest limit: "unique today" is not quite "always was". If a realm was
-// previously owned by a tenant that has since been deleted, its rows attribute
-// to the current holder of that name. Nothing recorded enough to do better.
-//
-// Idempotent: it only touches rows with no tenant, of which writers create
-// none, so after the first successful run this is a no-op.
-func (c *Client) backfillEventTenantIDs() error {
-	const backfill = `
-		UPDATE events AS e
-		SET tenant_id = unambiguous.tenant_id
-		FROM (
-			SELECT realm_name, MIN(tenant_id) AS tenant_id
-			FROM keycloak_realms
-			WHERE deleted_at IS NULL
-			GROUP BY realm_name
-			HAVING COUNT(DISTINCT tenant_id) = 1
-		) AS unambiguous
-		WHERE (e.tenant_id IS NULL OR e.tenant_id = '')
-		  AND split_part(e.source, ':', 2) = unambiguous.realm_name`
-
-	res := c.db.Exec(backfill)
-	if res.Error != nil {
-		return res.Error
+// It polls with pg_try_advisory_lock rather than blocking in pg_advisory_lock:
+// a blocked statement keeps a snapshot open, and CREATE INDEX CONCURRENTLY run
+// by the holder waits for every such snapshot, so the two would wait on each
+// other forever without Postgres seeing a deadlock.
+func (c *Client) lockSchema() (func(), error) {
+	sqlDB, err := c.db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("schema lock: %w", err)
 	}
-	if res.RowsAffected > 0 {
-		c.logger.Info("Attributed pre-existing events to a tenant",
-			logger.Int64("rows", res.RowsAffected))
+	if n := sqlDB.Stats().MaxOpenConnections; n > 0 && n < 2 {
+		sqlDB.SetMaxOpenConns(2)
 	}
-
-	var unattributed int64
-	if err := c.db.Raw(
-		`SELECT count(*) FROM events WHERE tenant_id IS NULL OR tenant_id = ''`).
-		Scan(&unattributed).Error; err == nil && unattributed > 0 {
-		c.logger.Warn("Events remain unattributed to any tenant: their realm name is shared "+
-			"between tenants so the owner cannot be established. They are excluded from "+
-			"tenant-scoped queries and are not removed by tenant deletion",
-			logger.Int64("rows", unattributed))
+	ctx := context.Background()
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("schema lock connection: %w", err)
 	}
-	return nil
+	start := time.Now()
+	lastLog := start
+	for {
+		var locked bool
+		if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtext($1)::bigint)`, schemaAdvisoryLockKey).Scan(&locked); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("schema lock: %w", err)
+		}
+		if locked {
+			break
+		}
+		if time.Since(lastLog) >= schemaLockLogEvery || lastLog.Equal(start) {
+			c.logger.Info("Waiting for another instance to finish its schema migration",
+				logger.Dur("waited", time.Since(start).Round(time.Second)))
+			lastLog = time.Now()
+		}
+		time.Sleep(schemaLockPoll)
+	}
+	return func() {
+		unlockCtx := context.Background()
+		if _, err := conn.ExecContext(unlockCtx, `SELECT pg_advisory_unlock(hashtext($1)::bigint)`, schemaAdvisoryLockKey); err != nil {
+			_, _ = conn.ExecContext(unlockCtx, `SELECT pg_terminate_backend(pg_backend_pid())`)
+		}
+		_ = conn.Close()
+	}, nil
 }
+
+// schemaAdvisoryLockKey serializes AutoMigrate across processes. Two startups
+// against an empty database both CREATE TABLE, and one fails on pg_class
+// before the events backfill runs. The backfill takes its own transaction
+// lock later, on a different connection.
+const schemaAdvisoryLockKey = "kmt.schema"
+
+const (
+	schemaLockPoll     = 250 * time.Millisecond
+	schemaLockLogEvery = 30 * time.Second
+	indexBuildLogEvery = 30 * time.Second
+)
 
 // AutoMigrate automatically migrates the database schema.
 func (c *Client) AutoMigrate() error {
+	release, err := c.lockSchema()
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	c.logger.Info("Running GORM auto-migration")
 
+	// A database from a single-tenant release has no tenant_id anywhere, which
+	// AutoMigrate cannot add on its own.
+	if err := c.migratePreTenantSchema(); err != nil {
+		return err
+	}
+
 	// Migrate regular tables first (without OperatorAction to avoid FK issues)
-	err := c.db.AutoMigrate(&Event{}, &User{}, &KeycloakTenant{}, &KeycloakRealmInfo{}, &Alert{}, &AlertRule{}, &NotificationLog{}, &PendingTenantPurge{}, &AmfaMirrorWatermark{})
+	err = c.db.AutoMigrate(
+		&Event{},
+		&User{},
+		&KeycloakTenant{},
+		&KeycloakRealmInfo{},
+		&Alert{},
+		&AlertRule{},
+		&NotificationLog{},
+		&PendingTenantPurge{},
+		&AmfaMirrorWatermark{},
+		&DataMigration{},
+	)
 	if err != nil {
 		return fmt.Errorf("failed to auto-migrate regular tables: %w", err)
 	}
@@ -260,9 +320,15 @@ func (c *Client) AutoMigrate() error {
 		return fmt.Errorf("failed to auto-migrate api tokens table: %w", err)
 	}
 
-	// Data migration: Ensure amfa:read permission exists and is granted to default roles
+	if err := c.revokeCutOffUsersTokens(); err != nil {
+		c.logger.Warn("Could not revoke the API tokens of users cut off before this release; "+
+			"until it succeeds, reactivating such a user brings their old tokens back. "+
+			"Retried next startup", logger.Err(err))
+	}
+
+	// Data migration: grant amfa:read to the default roles, once
 	if err := c.migrateAmfaReadPermission(); err != nil {
-		c.logger.Warn("amfa:read permission migration failed", logger.Err(err))
+		c.logger.Warn("amfa:read permission migration failed; retried next startup", logger.Err(err))
 	}
 
 	// Data migration: Set auth_method for existing users
@@ -273,6 +339,13 @@ func (c *Client) AutoMigrate() error {
 	// Data migration: clear email_verified that was asserted rather than observed
 	if err := c.migrateUnprovenEmailVerified(); err != nil {
 		c.logger.Warn("Failed to clear unproven email_verified, continuing", logger.Err(err))
+	}
+
+	// Data migration: start the SSO sign-in clock for users who have none. After
+	// the email_verified migration, which reads last_login_at.
+	if err := c.baselineSSOLastLogin(); err != nil {
+		c.logger.Warn("Failed to record a baseline SSO sign-in time; SSO users with none are not "+
+			"held to the MCP sign-in limit until it succeeds, which is retried next startup", logger.Err(err))
 	}
 
 	// Data migration: Fix username unique index to allow multiple NULL/empty values
@@ -291,6 +364,14 @@ func (c *Client) AutoMigrate() error {
 	}
 
 	// Data migration: Detect InfiniSpan for existing tenants
+	if err := c.migrateRoleNameIndex(); err != nil {
+		return fmt.Errorf("failed to migrate role name index: %w", err)
+	}
+
+	if err := c.removeDeletedRoleAssignments(); err != nil {
+		return fmt.Errorf("failed to remove deleted roles' assignments: %w", err)
+	}
+
 	if err := c.migrateInfinispanDetection(); err != nil {
 		c.logger.Warn("Failed to migrate InfiniSpan detection, continuing", logger.Err(err))
 	}
@@ -303,6 +384,10 @@ func (c *Client) AutoMigrate() error {
 	// Data migration: Fix alert_id unique index to be scoped per-tenant
 	if err := c.migrateAlertIDIndex(); err != nil {
 		c.logger.Warn("Failed to migrate alert_id index, continuing", logger.Err(err))
+	}
+
+	if err := c.ensureAlertLookupIndex(); err != nil {
+		c.logger.Warn("Failed to build idx_alerts_tenant_alert_id, continuing; the next start retries it", logger.Err(err))
 	}
 
 	// Data migration: enqueue orphaned data left by the old tenant delete
@@ -393,11 +478,20 @@ func (c *Client) migrateUsernameIndex() error {
 }
 
 // migrateRealmNameIndex recreates idx_keycloak_realms_tenant_realm_name as a
-// composite (tenant_id, realm_name) unique index. It was originally created
-// on realm_name alone, which made a realm name globally unique across the
-// whole table instead of unique per tenant — any second tenant pointed at a
-// Keycloak instance already monitored by another tenant would fail to save
-// realm info for every realm name that tenant had already saved.
+// composite (tenant_id, realm_name) unique index over live rows. It was
+// originally created on realm_name alone, which made a realm name globally
+// unique across the whole table instead of unique per tenant — any second
+// tenant pointed at a Keycloak instance already monitored by another tenant
+// would fail to save realm info for every realm name that tenant had already
+// saved.
+//
+// The index must also ignore soft-deleted rows: a realm deleted and recreated
+// in Keycloak keeps its name but gets a new id, and SaveRealm retires the old
+// row before inserting the new one. AutoMigrate creates the index from the
+// model tag without that predicate, so on a database it created, the index
+// already named tenant_id and the tenant_id check alone skipped it, leaving
+// fresh and upgraded databases with different indexes. Anything short of the
+// tenant-scoped, live-rows-only form is rebuilt.
 func (c *Client) migrateRealmNameIndex() error {
 	c.logger.Info("Checking realm_name unique index scope")
 
@@ -412,17 +506,17 @@ func (c *Client) migrateRealmNameIndex() error {
 		return nil
 	}
 
-	if strings.Contains(indexDef, "tenant_id") {
-		c.logger.Info("Realm name index is already scoped per tenant, skipping migration")
+	if strings.Contains(indexDef, "tenant_id") && strings.Contains(indexDef, "deleted_at IS NULL") {
+		c.logger.Info("Realm name index is already scoped per tenant over live rows, skipping migration")
 		return nil
 	}
 
-	c.logger.Info("Dropping globally-unique realm_name index")
+	c.logger.Info("Dropping realm_name index that is not tenant-scoped over live rows")
 	if err := c.db.Exec("DROP INDEX IF EXISTS idx_keycloak_realms_tenant_realm_name").Error; err != nil {
 		return fmt.Errorf("failed to drop old index: %w", err)
 	}
 
-	c.logger.Info("Creating tenant-scoped realm_name index")
+	c.logger.Info("Creating tenant-scoped realm_name index over live rows")
 	createIndexSQL := `CREATE UNIQUE INDEX idx_keycloak_realms_tenant_realm_name ON keycloak_realms(tenant_id, realm_name) WHERE deleted_at IS NULL`
 	if err := c.db.Exec(createIndexSQL).Error; err != nil {
 		return fmt.Errorf("failed to create tenant-scoped index: %w", err)
@@ -523,14 +617,29 @@ func (c *Client) MigrateEncryptClientSecrets(encryptor *secretcrypto.Encryptor) 
 }
 
 // migrateAlertIDIndex recreates idx_alert_tenant as a composite
-// (tenant_id, alert_id) unique index. It was originally created on alert_id
-// alone, which made an alert_id globally unique across the whole table
-// instead of unique per tenant. configuration_alerts IDs are a hash of
+// (tenant_id, alert_id) unique index over live rows. It was originally created
+// on alert_id alone, which made an alert_id globally unique across the whole
+// table instead of unique per tenant. configuration_alerts IDs are a hash of
 // check_type/realm_name/alert_type with no tenant in the input, so two
 // tenants with a same-named realm produced identical alert_ids: the second
 // tenant's Save (an upsert keyed on alert_id) silently updated the first
 // tenant's row instead of creating its own, with no error and no ownership
 // change.
+//
+// The index must also ignore soft-deleted rows. Save upserts with ON CONFLICT
+// (tenant_id, alert_id) WHERE deleted_at IS NULL, and PostgreSQL may satisfy
+// that from any unique index on the two columns, partial or not. AutoMigrate
+// creates the index from the model tag without the predicate, so on a database
+// it created the index already named tenant_id and the tenant_id check alone
+// skipped it: there, a deleted alert detected again was written into its
+// deleted row and never showed again. Anything short of the tenant-scoped,
+// live-rows-only form is rebuilt, the same rule migrateRealmNameIndex applies.
+//
+// The drop and the create run in one transaction. The checkers save alerts on
+// every poll, and between the two statements their upserts would find no
+// index to resolve the conflict against and fail. Narrowing a unique index
+// cannot fail on rows the wider one accepted, so the create cannot undo the
+// drop.
 //
 // This migration only fixes the index so future writes can't collide again.
 // It does not attempt to repair rows that already merged this way — that
@@ -550,24 +659,80 @@ func (c *Client) migrateAlertIDIndex() error {
 		return nil
 	}
 
-	if strings.Contains(indexDef, "tenant_id") {
-		c.logger.Info("Alert ID index is already scoped per tenant, skipping migration")
+	if strings.Contains(indexDef, "tenant_id") && strings.Contains(indexDef, "deleted_at IS NULL") {
+		c.logger.Info("Alert ID index is already scoped per tenant over live rows, skipping migration")
 		return nil
 	}
 
-	c.logger.Info("Dropping globally-unique alert_id index")
-	if err := c.db.Exec("DROP INDEX IF EXISTS idx_alert_tenant").Error; err != nil {
-		return fmt.Errorf("failed to drop old index: %w", err)
-	}
-
-	c.logger.Info("Creating tenant-scoped alert_id index")
+	c.logger.Info("Rebuilding alert_id index as tenant-scoped over live rows",
+		logger.Str("current", indexDef))
 	createIndexSQL := `CREATE UNIQUE INDEX idx_alert_tenant ON configuration_alerts(tenant_id, alert_id) WHERE deleted_at IS NULL`
-	if err := c.db.Exec(createIndexSQL).Error; err != nil {
-		return fmt.Errorf("failed to create tenant-scoped index: %w", err)
+	err := c.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DROP INDEX IF EXISTS idx_alert_tenant").Error; err != nil {
+			return fmt.Errorf("failed to drop old index: %w", err)
+		}
+		if err := tx.Exec(createIndexSQL).Error; err != nil {
+			return fmt.Errorf("failed to create tenant-scoped index: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
-	c.logger.Info("Successfully migrated alert_id index to be tenant-scoped")
+	c.logger.Info("Successfully migrated alert_id index to be tenant-scoped over live rows")
 	return nil
+}
+
+// ensureAlertLookupIndex builds a plain (tenant_id, alert_id) index when
+// idx_alert_tenant covers live rows only, as migrateAlertIDIndex leaves it on
+// every database, fresh ones included. The per-event AMFA checks look an alert
+// up including deleted rows, which the partial index cannot serve, so without
+// this every lookup of a new event scans the table. A full index, left only
+// when that migration failed, already serves it. CONCURRENTLY keeps alerts
+// writable during the build; an index an interrupted build left invalid is
+// dropped and built again.
+func (c *Client) ensureAlertLookupIndex() error {
+	var indexDef string
+	if err := c.db.Raw(`SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_alert_tenant'`).
+		Scan(&indexDef).Error; err != nil {
+		return fmt.Errorf("failed to inspect idx_alert_tenant: %w", err)
+	}
+	if !isLiveOnly(indexDef) {
+		return nil
+	}
+
+	var valid []bool
+	if err := c.db.Raw(`SELECT i.indisvalid FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid
+		WHERE ic.relname = 'idx_alerts_tenant_alert_id'`).Scan(&valid).Error; err != nil {
+		return fmt.Errorf("failed to inspect idx_alerts_tenant_alert_id: %w", err)
+	}
+	if len(valid) == 1 && valid[0] {
+		return nil
+	}
+	if len(valid) == 1 {
+		c.logger.Warn("Dropping an invalid idx_alerts_tenant_alert_id left by an interrupted build")
+		if err := c.db.Exec(`DROP INDEX CONCURRENTLY IF EXISTS idx_alerts_tenant_alert_id`).Error; err != nil {
+			return fmt.Errorf("failed to drop invalid idx_alerts_tenant_alert_id: %w", err)
+		}
+	}
+	c.logger.Info("Building idx_alerts_tenant_alert_id for alert lookups that include deleted alerts")
+	built := make(chan error, 1)
+	go func() {
+		built <- c.db.Exec(`CREATE INDEX CONCURRENTLY idx_alerts_tenant_alert_id ON configuration_alerts (tenant_id, alert_id)`).Error
+	}()
+	start := time.Now()
+	ticker := time.NewTicker(indexBuildLogEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case err := <-built:
+			return err
+		case <-ticker.C:
+			c.logger.Info("Still building idx_alerts_tenant_alert_id; the build waits for transactions already open on the database",
+				logger.Dur("elapsed", time.Since(start).Round(time.Second)))
+		}
+	}
 }
 
 // emailVerifiedFixCutoff is the moment the OAuth login path started recording
@@ -682,6 +847,42 @@ func (i userUniqueIndex) createSQL() string {
 // spelling of the whole predicate.
 func isLiveOnly(indexDef string) bool {
 	return strings.Contains(indexDef, "deleted_at IS NULL")
+}
+
+// migrateRoleNameIndex rewrites idx_roles_name to cover live roles only, so a
+// deleted role's name can be given to a new role. Role names are only looked
+// up among live roles, so a deleted duplicate is never matched.
+func (c *Client) migrateRoleNameIndex() error {
+	var indexDef string
+	if err := c.db.Raw(`SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_roles_name'`).
+		Scan(&indexDef).Error; err != nil {
+		return fmt.Errorf("failed to inspect idx_roles_name: %w", err)
+	}
+	if isLiveOnly(indexDef) {
+		return nil
+	}
+	c.logger.Info("Rewriting the role name index to cover live roles only")
+	if err := c.db.Exec(`DROP INDEX IF EXISTS idx_roles_name`).Error; err != nil {
+		return fmt.Errorf("failed to drop idx_roles_name: %w", err)
+	}
+	return c.db.Exec(`CREATE UNIQUE INDEX idx_roles_name ON roles (name) WHERE deleted_at IS NULL`).Error
+}
+
+// removeDeletedRoleAssignments deletes the user assignments of deleted roles.
+// DeleteRole removes them now, but roles deleted before it did left theirs
+// behind: they grant nothing, yet show as blank roles on users. Running it
+// again finds nothing.
+func (c *Client) removeDeletedRoleAssignments() error {
+	result := c.db.Exec(`DELETE FROM user_roles USING roles
+		WHERE user_roles.role_id = roles.id AND roles.deleted_at IS NOT NULL`)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		c.logger.Info("Removed user assignments of deleted roles",
+			logger.Int64("assignments", result.RowsAffected))
+	}
+	return nil
 }
 
 // migrateUserUniqueIndexes rewrites the unique indexes on users so they cover
@@ -1058,69 +1259,80 @@ func (c *Client) migrateInfinispanDetection() error {
 	return nil
 }
 
-// migrateAmfaReadPermission ensures the amfa:read permission exists and is
-// granted to the default admin, operator, and viewer roles. This is idempotent:
-// running it multiple times will not produce duplicates or errors.
+// amfaReadGrantKey marks the one-time amfa:read grant as applied.
+const amfaReadGrantKey = "rbac.grant_amfa_read"
+
+// migrateAmfaReadPermission creates the amfa:read permission and grants it to
+// the default admin, operator, and viewer roles, which existed before it did.
 //
-// If any of the default roles do not exist yet (e.g. fresh install before the
-// seeder has run), this migration skips them silently. The seeder will create
-// them with the permission included via GetSystemRoles().
+// It runs once, marked in data_migrations. Run on every startup, it put back
+// a grant that had been taken away since. On a fresh database the default
+// roles do not exist yet; the seeder creates them, and GetSystemRoles gives
+// them amfa:read.
 func (c *Client) migrateAmfaReadPermission() error {
-	c.logger.Info("Running amfa:read permission data migration")
-
-	// Ensure the permission row exists
-	permission := Permission{
-		Name:        "amfa:read",
-		DisplayName: "Read AMFA Events",
-		Description: "View AMFA (Adaptive MFA) events, risk metrics, and geolocation data",
-		Resource:    "amfa",
-		Action:      "read",
-		IsSystem:    true,
-	}
-	if err := c.db.Where(Permission{Name: "amfa:read"}).
-		Attrs(permission).
-		FirstOrCreate(&permission).Error; err != nil {
-		return fmt.Errorf("failed to ensure amfa:read permission exists: %w", err)
+	applied, err := dataMigrationApplied(c.db, amfaReadGrantKey)
+	if err != nil || applied {
+		return err
 	}
 
-	// Grant the permission to each default role (admin, operator, viewer)
-	defaultRoles := []string{"admin", "operator", "viewer"}
-	for _, roleName := range defaultRoles {
-		var role Role
-		err := c.db.Where("name = ?", roleName).First(&role).Error
-		if err != nil {
-			if err == gorm.ErrRecordNotFound {
-				c.logger.Debug("Default role not found yet, skipping (seeder will create it)",
-					logger.Str("role", roleName))
+	var granted []string
+	err = c.db.Transaction(func(tx *gorm.DB) error {
+		// Held until this transaction ends, so a second startup waits and
+		// then sees the marker instead of granting again.
+		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext(?)::bigint)`, amfaReadGrantKey).Error; err != nil {
+			return err
+		}
+		applied, err := dataMigrationApplied(tx, amfaReadGrantKey)
+		if err != nil || applied {
+			return err
+		}
+
+		permission := Permission{
+			Name:        "amfa:read",
+			DisplayName: "Read AMFA Events",
+			Description: "View AMFA (Adaptive MFA) events, risk metrics, and geolocation data",
+			Resource:    "amfa",
+			Action:      "read",
+			IsSystem:    true,
+		}
+		if err := tx.Where(Permission{Name: "amfa:read"}).
+			Attrs(permission).
+			FirstOrCreate(&permission).Error; err != nil {
+			return fmt.Errorf("failed to ensure amfa:read permission exists: %w", err)
+		}
+
+		for _, roleName := range []string{"admin", "operator", "viewer"} {
+			var role Role
+			err := tx.Where("name = ?", roleName).First(&role).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
 				continue
 			}
-			return fmt.Errorf("failed to look up role %q: %w", roleName, err)
+			if err != nil {
+				return fmt.Errorf("failed to look up role %q: %w", roleName, err)
+			}
+
+			var n int64
+			if err := tx.Model(&RolePermission{}).
+				Where("role_id = ? AND permission_id = ?", role.ID, permission.ID).
+				Count(&n).Error; err != nil {
+				return fmt.Errorf("failed to check role-permission for role %q: %w", roleName, err)
+			}
+			if n > 0 {
+				continue
+			}
+			if err := tx.Create(&RolePermission{RoleID: role.ID, PermissionID: permission.ID}).Error; err != nil {
+				return fmt.Errorf("failed to grant amfa:read to role %q: %w", roleName, err)
+			}
+			granted = append(granted, roleName)
 		}
 
-		// Check if the role-permission join row already exists
-		var existing RolePermission
-		err = c.db.Where("role_id = ? AND permission_id = ?", role.ID, permission.ID).
-			First(&existing).Error
-		if err == nil {
-			// Already granted; nothing to do.
-			continue
-		}
-		if err != gorm.ErrRecordNotFound {
-			return fmt.Errorf("failed to check role-permission for role %q: %w", roleName, err)
-		}
-
-		// Insert the join row
-		rp := RolePermission{
-			RoleID:       role.ID,
-			PermissionID: permission.ID,
-		}
-		if err := c.db.Create(&rp).Error; err != nil {
-			return fmt.Errorf("failed to grant amfa:read to role %q: %w", roleName, err)
-		}
-		c.logger.Info("Granted amfa:read permission to role",
-			logger.Str("role", roleName))
+		return tx.Create(&DataMigration{Key: amfaReadGrantKey, AppliedAt: time.Now()}).Error
+	})
+	if err != nil {
+		return err
 	}
-
-	c.logger.Info("amfa:read permission migration completed")
+	for _, roleName := range granted {
+		c.logger.Info("Granted amfa:read permission to role", logger.Str("role", roleName))
+	}
 	return nil
 }

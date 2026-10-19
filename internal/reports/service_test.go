@@ -55,6 +55,7 @@ func reqScoped(scope RealmScope) *GenerateRequest {
 		StartDate: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		EndDate:   time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC),
 		Scope:     scope,
+		Access:    SectionAccess{Alerts: true, Events: true, Operators: true},
 	}
 }
 

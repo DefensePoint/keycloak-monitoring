@@ -3,14 +3,63 @@ import type { UserInfo, AuthConfig } from "@/shared/types/auth.types";
 // Always use /auth - the web server proxies to the backend
 const AUTH_BASE_URL = "/auth";
 
+/** The server answered that there is no signed-in session (401). */
+export class NotAuthenticatedError extends Error {
+  constructor(message = "Not authenticated") {
+    super(message);
+    this.name = "NotAuthenticatedError";
+  }
+}
+
+/**
+ * The server could not be reached, or answered with an error other than 401,
+ * as the web server's proxy does while the backend is down. That says nothing
+ * about the session, so the caller should try again rather than show the
+ * user as signed out.
+ */
+export class ServerUnavailableError extends Error {
+  constructor(message = "Server unavailable") {
+    super(message);
+    this.name = "ServerUnavailableError";
+  }
+}
+
+// A startup call that has not been answered after this long counts as the
+// server being unavailable. Without it a backend that accepts connections but
+// never answers left startup waiting on whatever timeouts the proxies in front
+// have, 90 seconds through the web server.
+const STARTUP_REQUEST_TIMEOUT_MS = 10000;
+
+// fetchOrUnavailable turns a network failure, or no answer within
+// STARTUP_REQUEST_TIMEOUT_MS, into ServerUnavailableError.
+async function fetchOrUnavailable(
+  input: string,
+  init?: RequestInit,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    STARTUP_REQUEST_TIMEOUT_MS,
+  );
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch {
+    throw new ServerUnavailableError(`Could not reach ${input}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 class AuthService {
   /**
    * Get auth configuration (which methods are enabled)
    */
   async getAuthConfig(): Promise<AuthConfig> {
-    const response = await fetch(`${AUTH_BASE_URL}/config`);
+    const response = await fetchOrUnavailable(`${AUTH_BASE_URL}/config`);
     if (!response.ok) {
-      throw new Error("Failed to get auth config");
+      throw new ServerUnavailableError(
+        `Failed to get auth config: HTTP ${response.status}`,
+      );
     }
     return response.json();
   }
@@ -61,19 +110,37 @@ class AuthService {
       // Silently fail if sessionStorage is unavailable
     }
 
-    window.location.href = `${AUTH_BASE_URL}/logout`;
+    // Logout is a POST: as a GET, any page could end the session just by
+    // linking to it. Go home whatever the outcome, so the button never seems
+    // to do nothing; a failed logout leaves the session, which the next page
+    // load shows.
+    void fetch(`${AUTH_BASE_URL}/logout`, {
+      method: "POST",
+      credentials: "include",
+    })
+      .catch(() => {
+        // Network failure: still leave the page
+      })
+      .finally(() => {
+        window.location.href = "/";
+      });
   }
 
   /**
    * Get current user info with RBAC data
    */
   async getUserInfo(): Promise<UserInfo> {
-    const response = await fetch(`/api/rbac/me`, {
+    const response = await fetchOrUnavailable(`/api/rbac/me`, {
       credentials: "include",
     });
 
+    if (response.status === 401) {
+      throw new NotAuthenticatedError();
+    }
     if (!response.ok) {
-      throw new Error("Not authenticated");
+      throw new ServerUnavailableError(
+        `Failed to get user info: HTTP ${response.status}`,
+      );
     }
 
     return response.json();

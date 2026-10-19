@@ -6,8 +6,10 @@ import {
   useAmfaStats,
   isAllRealmsUnsupportedError,
   isRealmScopeRequiresRealmError,
+  isRealmScopeNoRealmsError,
   AMFA_ALL_REALMS_UNSUPPORTED,
   AMFA_REALM_SCOPE_REQUIRES_REALM,
+  AMFA_REALM_SCOPE_NO_REALMS,
 } from "./useAmfaStats";
 import { apiClient } from "@/shared/lib/apiClient";
 
@@ -135,6 +137,24 @@ describe("useAmfaStats", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
 
     expect(apiClient.get).toHaveBeenCalledTimes(1);
+  });
+
+  // A caller with no realm gets this on every poll until an administrator
+  // grants one, so it must stop the retry and the 30-second poll too.
+  it("stops retrying once the backend reports the caller has no realm", async () => {
+    vi.mocked(apiClient.get).mockRejectedValue(
+      new Error(AMFA_REALM_SCOPE_NO_REALMS),
+    );
+
+    const { result } = renderHook(
+      () => useAmfaStats({ tenantId: "tenant-1" }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(apiClient.get).toHaveBeenCalledTimes(1);
+    expect(isRealmScopeNoRealmsError(result.current.error)).toBe(true);
   });
 
   it("surfaces the realm an all-realms request was narrowed to", async () => {

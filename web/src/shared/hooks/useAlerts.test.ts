@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
@@ -163,6 +163,63 @@ describe("useAlerts hooks", () => {
 
       expect(alertsService.getAlertStats).toHaveBeenCalledWith("tenant-1");
       expect(result.current.data).toEqual(mockData);
+    });
+
+    // The dashboard tile reads these counts, and nothing else refetches them:
+    // without polling, a failed first request stays failed and a new alert
+    // never shows until the page is reloaded.
+    describe("polling", () => {
+      beforeEach(() => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("recovers on its own after a failed request", async () => {
+        const stats = { total_active: 2, by_severity: { critical: 1 } };
+        vi.mocked(alertsService.getAlertStats)
+          .mockRejectedValueOnce(new Error("HTTP 500"))
+          .mockResolvedValue(stats);
+
+        const { result } = renderHook(() => useAlertStats("tenant-1"), {
+          wrapper,
+        });
+        await waitFor(() => {
+          expect(result.current.isError).toBe(true);
+        });
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(10_000);
+        });
+
+        await waitFor(() => {
+          expect(result.current.isError).toBe(false);
+        });
+        expect(result.current.data).toEqual(stats);
+      });
+
+      it("picks up a changed count without a remount", async () => {
+        vi.mocked(alertsService.getAlertStats)
+          .mockResolvedValueOnce({ total_active: 0, by_severity: {} })
+          .mockResolvedValue({ total_active: 1, by_severity: { critical: 1 } });
+
+        const { result } = renderHook(() => useAlertStats("tenant-1"), {
+          wrapper,
+        });
+        await waitFor(() => {
+          expect(result.current.data?.total_active).toBe(0);
+        });
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(10_000);
+        });
+
+        await waitFor(() => {
+          expect(result.current.data?.total_active).toBe(1);
+        });
+      });
     });
   });
 

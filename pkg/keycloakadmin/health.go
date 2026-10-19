@@ -39,7 +39,7 @@ func (c *Client) GetServerInfo(ctx context.Context) (*ServerInfoRepresentation, 
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("failed to get server info, status: %d, body: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("failed to get server info, status: %d%s", resp.StatusCode, c.replyDetail("get server info", resp.StatusCode, body))
 	}
 
 	var serverInfo ServerInfoRepresentation

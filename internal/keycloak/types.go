@@ -45,6 +45,12 @@ type RealmSummary struct {
 	EventsEnabled   bool                    `json:"events_enabled"`
 	EventsListeners []string                `json:"events_listeners,omitempty"`
 	Metrics         *domain.KeycloakMetrics `json:"metrics,omitempty"`
+	// LastChecked is when the realm's settings were last read.
+	LastChecked time.Time `json:"last_checked"`
+	// UnreadableSince is when the monitoring client stopped being able to
+	// read the realm, omitted while it can; the summary is then as of
+	// LastChecked.
+	UnreadableSince *time.Time `json:"unreadable_since,omitempty"`
 }
 
 // RecentEventStats represents recent event statistics.

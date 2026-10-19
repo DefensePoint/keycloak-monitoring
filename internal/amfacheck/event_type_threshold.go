@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts/clearing"
 	"github.com/DefensePoint/keycloak-monitoring/internal/amfa"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
@@ -33,20 +34,23 @@ type eventTypeThresholdParams struct {
 // bucket boundary. The AlertID is stable per (realm, eventType): repeated polls
 // and manual runs dedup to one alert row (the service bumps LastSeen on
 // recurrence), matching how eventscheck handles its error-threshold alerts.
-func runEventTypeThresholdCheck(ctx context.Context, p eventTypeThresholdParams) ([]*domain.Alert, error) {
+// It reports every realm it counted as evaluated. A failed count fails the
+// whole run, so on success every realm was evaluated.
+func runEventTypeThresholdCheck(ctx context.Context, p eventTypeThresholdParams) (clearing.Evaluation, error) {
 	realms, err := p.realmsFn(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%s: load realms: %w", p.checkType, err)
+		return clearing.Evaluation{}, fmt.Errorf("%s: load realms: %w", p.checkType, err)
 	}
 	now := time.Now().UTC()
 	start := now.Add(-p.window) // rolling window: always covers the last p.window
 
-	var alerts []*domain.Alert
+	ev := clearing.Evaluation{TenantID: p.tenantID}
 	for _, realm := range realms {
 		count, err := p.repo.CountByEventTypeInWindow(ctx, realm, p.eventType, start, now)
 		if err != nil {
-			return nil, fmt.Errorf("%s: realm=%s: %w", p.checkType, realm, err)
+			return clearing.Evaluation{}, fmt.Errorf("%s: realm=%s: %w", p.checkType, realm, err)
 		}
+		ev.MarkEvaluated(alertID(p.idPrefix, p.tenantID, realm))
 		if count < int64(p.threshold) {
 			continue
 		}
@@ -58,7 +62,7 @@ func runEventTypeThresholdCheck(ctx context.Context, p eventTypeThresholdParams)
 			"window_start": start.Format(time.RFC3339),
 			"realm_name":   realm,
 		})
-		alerts = append(alerts, &domain.Alert{
+		ev.Alerts = append(ev.Alerts, &domain.Alert{
 			TenantID:       p.tenantID,
 			AlertID:        alertID(p.idPrefix, p.tenantID, realm),
 			Source:         domain.AlertSourceEvent,
@@ -76,5 +80,5 @@ func runEventTypeThresholdCheck(ctx context.Context, p eventTypeThresholdParams)
 			Metadata:       string(md),
 		})
 	}
-	return alerts, nil
+	return ev, nil
 }

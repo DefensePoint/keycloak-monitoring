@@ -1,0 +1,55 @@
+database:
+  host: postgres
+  port: 5432
+  database: monitoring
+  user: monitoring
+  password: "${BUNDLED_DB_PASSWORD}"
+  ssl_mode: disable
+
+http:
+  server:
+    host: 0.0.0.0
+    port: 7888
+
+web:
+  server:
+    host: 0.0.0.0
+    port: 7880
+    static_dir: web/dist
+    api_host_url: http://api-server:7888
+
+auth:
+  simple:
+    enabled: true
+    default_user: ""
+    default_pass: ""
+    default_email: ""
+  session:
+    secret: "${BUNDLED_SESSION_SECRET}"
+    secure: false
+
+keycloak:
+  global:
+    connection:
+      allow_private_ranges: true
+    polling:
+      events_interval: 10s
+      metrics_interval: 15s
+      health_interval: 10s
+      realm_info_interval: 30s
+  tenants:
+    demo1:
+      enabled: true
+      is_default: true
+      name: Bundled Keycloak 1
+      server_url: http://keycloak-1:8080
+      admin_realm: master
+      client_id: monitoring-service
+      client_secret: "${BUNDLED_KC1_CLIENT_SECRET}"
+    demo2:
+      enabled: true
+      name: Bundled Keycloak 2
+      server_url: http://keycloak-2:8080
+      admin_realm: master
+      client_id: monitoring-service
+      client_secret: "${BUNDLED_KC2_CLIENT_SECRET}"

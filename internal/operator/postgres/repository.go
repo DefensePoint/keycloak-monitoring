@@ -4,6 +4,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"gorm.io/gorm"
@@ -25,6 +26,18 @@ func NewRepository(db operator.DB) operator.Repository {
 
 // RecordAction records a new action taken by an operator.
 func (r *Repository) RecordAction(ctx context.Context, action *domain.OperatorAction) error {
+	if action.OccurrenceStartedAt == nil {
+		// The occurrence the action belongs to, read when it is recorded: the
+		// alert's occurrence start moves when the alert comes back after being
+		// resolved. Left unset if the alert cannot be read; the row then keeps
+		// the old figures rather than failing the recording.
+		var started []time.Time
+		if err := r.db.DB().WithContext(ctx).Raw(
+			`SELECT COALESCE(occurrence_started_at, first_detected) FROM configuration_alerts WHERE id = ?`,
+			action.AlertID).Scan(&started).Error; err == nil && len(started) == 1 {
+			action.OccurrenceStartedAt = &started[0]
+		}
+	}
 	dbAction := convertToDBAction(action)
 	if err := r.db.DB().WithContext(ctx).Create(dbAction).Error; err != nil {
 		return fmt.Errorf("failed to record operator action: %w", err)
@@ -62,22 +75,13 @@ func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEm
 
 	// Query for action counts
 	type ActionMetrics struct {
-		ActionType           string
-		Count                int64
-		TotalWorkTimeSeconds int64
-		MinResponseTime      int
-		MaxResponseTime      int
+		ActionType string
+		Count      int64
 	}
 
 	var actionMetrics []ActionMetrics
 	err := actions().
-		Select(`
-			action_type,
-			COUNT(*) as count,
-			SUM(CASE WHEN resolution_time_seconds > 0 THEN resolution_time_seconds ELSE response_time_seconds END) as total_work_time_seconds,
-			MIN(response_time_seconds) as min_response_time,
-			MAX(response_time_seconds) as max_response_time
-		`).
+		Select("action_type, COUNT(*) as count").
 		Group("action_type").
 		Find(&actionMetrics).Error
 
@@ -85,7 +89,6 @@ func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEm
 		return nil, fmt.Errorf("failed to get operator action metrics: %w", err)
 	}
 
-	// Aggregate metrics
 	for _, am := range actionMetrics {
 		switch am.ActionType {
 		case "acknowledged":
@@ -97,61 +100,56 @@ func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEm
 		case "commented":
 			summary.AlertsCommented = int(am.Count)
 		}
-
-		summary.TotalWorkTimeSeconds += int(am.TotalWorkTimeSeconds)
-		if am.MinResponseTime < summary.MinResponseTime || summary.MinResponseTime == 0 {
-			summary.MinResponseTime = am.MinResponseTime
-		}
-		if am.MaxResponseTime > summary.MaxResponseTime {
-			summary.MaxResponseTime = am.MaxResponseTime
-		}
 	}
 
-	// Calculate overall average metrics
-	var overallMetrics struct {
-		AvgResponseTime      float64
-		MedianResponseTime   float64
-		AvgResolutionTime    float64
-		MedianResolutionTime float64
+	t, err := r.timings(ctx, tenantID, operatorEmail, startDate, endDate, realmNames)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get operator time metrics: %w", err)
 	}
-	err = actions().
-		Select(`
-			AVG(response_time_seconds) as avg_response_time,
-			PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY response_time_seconds) as median_response_time,
-			AVG(CASE WHEN resolution_time_seconds > 0 THEN resolution_time_seconds END) as avg_resolution_time,
-			PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY resolution_time_seconds) FILTER (WHERE resolution_time_seconds > 0) as median_resolution_time
-		`).
-		Scan(&overallMetrics).Error
+	summary.TotalWorkTimeSeconds = int(math.Round(t.WorkSeconds))
+	summary.AvgResponseTime = t.AvgResponse
+	summary.MedianResponseTime = t.MedianResponse
+	summary.MinResponseTime = int(math.Round(t.MinResponse))
+	summary.MaxResponseTime = int(math.Round(t.MaxResponse))
+	summary.AvgResolutionTime = t.AvgResolution
+	summary.MedianResolutionTime = t.MedianResolution
+	summary.AvgTimeToAcknowledge = t.AvgTimeToAcknowledge
+	summary.AvgTimeToResolve = t.AvgTimeToResolve
+	summary.AvgTimeToIgnore = t.AvgTimeToIgnore
+	summary.AvgAcknowledgeToResolveTime = t.AvgAcknowledgeToResolve
+	summary.AvgAcknowledgeToIgnoreTime = t.AvgAcknowledgeToIgnore
+	summary.AvgActiveToAcknowledgeTime = t.AvgActiveToAcknowledge
+	summary.AvgActiveToResolveTime = t.AvgActiveToResolve
+	summary.AvgActiveToIgnoreTime = t.AvgActiveToIgnore
 
-	if err == nil {
-		summary.AvgResponseTime = overallMetrics.AvgResponseTime
-		summary.MedianResponseTime = overallMetrics.MedianResponseTime
-		summary.AvgResolutionTime = overallMetrics.AvgResolutionTime
-		summary.MedianResolutionTime = overallMetrics.MedianResolutionTime
-	}
-
-	// Get severity breakdown
+	// Get severity breakdown. Each alert counts once, like the total, under the
+	// severity it had at the latest action: a re-detection can change an
+	// alert's severity between two actions on it.
 	type SeverityCount struct {
 		Severity string
 		Count    int64
 	}
 	var severityCounts []SeverityCount
-	err = actions().
+	latest := actions().
+		Select("DISTINCT ON (alert_id) alert_id, alert_severity").
+		Order("alert_id, action_time DESC, id DESC")
+	err = r.db.DB().WithContext(ctx).
+		Table("(?) AS latest", latest).
 		Select("alert_severity as severity, COUNT(*) as count").
 		Group("alert_severity").
 		Find(&severityCounts).Error
 
 	if err == nil {
 		for _, sc := range severityCounts {
-			switch sc.Severity {
-			case "critical":
+			switch domain.AlertSeverity(sc.Severity) {
+			case domain.AlertSeverityCritical:
 				summary.CriticalAlertsHandled = int(sc.Count)
-			case "high":
-				summary.HighAlertsHandled = int(sc.Count)
-			case "medium":
-				summary.MediumAlertsHandled = int(sc.Count)
-			case "low":
-				summary.LowAlertsHandled = int(sc.Count)
+			case domain.AlertSeverityError:
+				summary.ErrorAlertsHandled = int(sc.Count)
+			case domain.AlertSeverityWarning:
+				summary.WarningAlertsHandled = int(sc.Count)
+			case domain.AlertSeverityInfo:
+				summary.InfoAlertsHandled = int(sc.Count)
 			}
 		}
 	}
@@ -171,52 +169,6 @@ func (r *Repository) GetMetricsSummary(ctx context.Context, tenantID, operatorEm
 		for _, tc := range typeCounts {
 			summary.AlertsByType[tc.Type] = int(tc.Count)
 		}
-	}
-
-	// Calculate action-specific time metrics
-	var actionTimings struct {
-		AvgTimeToAcknowledge float64
-		AvgTimeToResolve     float64
-		AvgTimeToIgnore      float64
-	}
-	err = actions().
-		Select(`
-			AVG(CASE WHEN action_type = 'acknowledged' THEN time_from_detection_seconds END) as avg_time_to_acknowledge,
-			AVG(CASE WHEN action_type = 'resolved' THEN time_from_detection_seconds END) as avg_time_to_resolve,
-			AVG(CASE WHEN action_type = 'ignored' THEN time_from_detection_seconds END) as avg_time_to_ignore
-		`).
-		Scan(&actionTimings).Error
-
-	if err == nil {
-		summary.AvgTimeToAcknowledge = actionTimings.AvgTimeToAcknowledge
-		summary.AvgTimeToResolve = actionTimings.AvgTimeToResolve
-		summary.AvgTimeToIgnore = actionTimings.AvgTimeToIgnore
-	}
-
-	// Calculate transition time metrics
-	var transitionTimings struct {
-		AvgAcknowledgeToResolve float64
-		AvgAcknowledgeToIgnore  float64
-		AvgActiveToAcknowledge  float64
-		AvgActiveToResolve      float64
-		AvgActiveToIgnore       float64
-	}
-	err = actions().
-		Select(`
-			AVG(CASE WHEN action_type = 'resolved' AND previous_status = 'acknowledged' THEN time_from_previous_action_seconds END) as avg_acknowledge_to_resolve,
-			AVG(CASE WHEN action_type = 'ignored' AND previous_status = 'acknowledged' THEN time_from_previous_action_seconds END) as avg_acknowledge_to_ignore,
-			AVG(CASE WHEN action_type = 'acknowledged' AND previous_status = 'active' THEN time_from_previous_action_seconds END) as avg_active_to_acknowledge,
-			AVG(CASE WHEN action_type = 'resolved' AND previous_status = 'active' THEN time_from_previous_action_seconds END) as avg_active_to_resolve,
-			AVG(CASE WHEN action_type = 'ignored' AND previous_status = 'active' THEN time_from_previous_action_seconds END) as avg_active_to_ignore
-		`).
-		Scan(&transitionTimings).Error
-
-	if err == nil {
-		summary.AvgAcknowledgeToResolveTime = transitionTimings.AvgAcknowledgeToResolve
-		summary.AvgAcknowledgeToIgnoreTime = transitionTimings.AvgAcknowledgeToIgnore
-		summary.AvgActiveToAcknowledgeTime = transitionTimings.AvgActiveToAcknowledge
-		summary.AvgActiveToResolveTime = transitionTimings.AvgActiveToResolve
-		summary.AvgActiveToIgnoreTime = transitionTimings.AvgActiveToIgnore
 	}
 
 	// Calculate total alerts handled
@@ -335,6 +287,7 @@ func convertAction(db *database.OperatorAction) *domain.OperatorAction {
 		TimeFromPreviousActionSeconds: db.TimeFromPreviousActionSeconds,
 		ResponseTimeSeconds:           db.ResponseTimeSeconds,
 		ResolutionTimeSeconds:         db.ResolutionTimeSeconds,
+		OccurrenceStartedAt:           db.OccurrenceStartedAt,
 		Comment:                       db.Comment,
 		Metadata:                      db.Metadata,
 		CreatedAt:                     db.CreatedAt,
@@ -373,6 +326,7 @@ func convertToDBAction(action *domain.OperatorAction) *database.OperatorAction {
 		TimeFromPreviousActionSeconds: action.TimeFromPreviousActionSeconds,
 		ResponseTimeSeconds:           action.ResponseTimeSeconds,
 		ResolutionTimeSeconds:         action.ResolutionTimeSeconds,
+		OccurrenceStartedAt:           action.OccurrenceStartedAt,
 		Comment:                       action.Comment,
 		Metadata:                      action.Metadata,
 		CreatedAt:                     action.CreatedAt,
@@ -382,3 +336,116 @@ func convertToDBAction(action *domain.OperatorAction) *database.OperatorAction {
 
 // Ensure Repository implements operator.Repository
 var _ operator.Repository = (*Repository)(nil)
+
+// operatorTimings are an operator's time metrics over a period, in seconds.
+type operatorTimings struct {
+	WorkSeconds             float64
+	AvgResponse             float64
+	MedianResponse          float64
+	MinResponse             float64
+	MaxResponse             float64
+	AvgResolution           float64
+	MedianResolution        float64
+	AvgTimeToAcknowledge    float64
+	AvgTimeToResolve        float64
+	AvgTimeToIgnore         float64
+	AvgAcknowledgeToResolve float64
+	AvgAcknowledgeToIgnore  float64
+	AvgActiveToAcknowledge  float64
+	AvgActiveToResolve      float64
+	AvgActiveToIgnore       float64
+}
+
+// timingsSQL measures each action against the occurrence of the alert it
+// belongs to. For actions that carry an occurrence:
+//   - response is the operator's first acknowledge, resolve or ignore of the
+//     occurrence, from the occurrence's start; later actions are not responses
+//   - resolution is a resolve, from the occurrence's start
+//   - work is a resolve or ignore, from the operator's first action on the
+//     occurrence: how long they had it in hand, counted once
+//   - a previous action from an earlier occurrence is not a previous action
+//
+// first_own also reads the operator's actions from before the period, so
+// handling that began before the period counts in full where it ends. Only
+// occurrences that began before the period can have such actions, so only
+// those are looked up there. Actions recorded before occurrences
+// were stored (occ IS NULL) keep the figures they always produced.
+const timingsSQL = `
+WITH period AS (
+	SELECT alert_id, action_type, action_time, previous_status, previous_action_time,
+		time_from_detection_seconds, time_from_previous_action_seconds,
+		response_time_seconds, resolution_time_seconds,
+		occurrence_started_at AS occ
+	FROM "operator_actions"
+	WHERE tenant_id = ? AND operator_email = ?%s AND action_time BETWEEN ? AND ?
+), firsts AS (
+	SELECT alert_id, occ, MIN(action_time) AS first_own
+	FROM (
+		SELECT alert_id, occ, action_time FROM period
+		WHERE occ IS NOT NULL AND action_type IN ('acknowledged', 'resolved', 'ignored')
+		UNION ALL
+		SELECT alert_id, occurrence_started_at, action_time FROM "operator_actions"
+		WHERE tenant_id = ? AND operator_email = ? AND action_time < ?
+			AND action_type IN ('acknowledged', 'resolved', 'ignored')
+			AND (alert_id, occurrence_started_at) IN (SELECT alert_id, occ FROM period WHERE occ < ?)
+	) acted
+	GROUP BY alert_id, occ
+), own AS (
+	SELECT p.*, f.first_own
+	FROM period p LEFT JOIN firsts f ON f.alert_id = p.alert_id AND f.occ = p.occ
+), m AS (
+	SELECT action_type, action_time,
+		CASE WHEN occ IS NULL THEN response_time_seconds::float8
+			WHEN action_type IN ('acknowledged', 'resolved', 'ignored') AND action_time = first_own
+				THEN GREATEST(EXTRACT(EPOCH FROM action_time - occ), 0) END AS response,
+		CASE WHEN occ IS NULL THEN NULLIF(resolution_time_seconds, 0)::float8
+			WHEN action_type = 'resolved' THEN GREATEST(EXTRACT(EPOCH FROM action_time - occ), 0) END AS resolution,
+		CASE WHEN occ IS NULL
+				THEN (CASE WHEN resolution_time_seconds > 0 THEN resolution_time_seconds ELSE response_time_seconds END)::float8
+			WHEN action_type IN ('resolved', 'ignored') THEN GREATEST(EXTRACT(EPOCH FROM action_time - first_own), 0)
+			ELSE 0 END AS work,
+		CASE WHEN occ IS NULL THEN time_from_detection_seconds::float8
+			ELSE GREATEST(EXTRACT(EPOCH FROM action_time - occ), 0) END AS since_start,
+		CASE WHEN occ IS NULL THEN previous_status
+			WHEN previous_action_time IS NULL OR previous_action_time < occ THEN 'active'
+			ELSE previous_status END AS prev_status,
+		CASE WHEN occ IS NULL THEN time_from_previous_action_seconds::float8
+			WHEN previous_action_time IS NULL OR previous_action_time < occ
+				THEN GREATEST(EXTRACT(EPOCH FROM action_time - occ), 0)
+			ELSE time_from_previous_action_seconds::float8 END AS since_previous
+	FROM own
+)
+SELECT
+	COALESCE(SUM(work), 0) AS work_seconds,
+	COALESCE(AVG(response), 0) AS avg_response,
+	COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY response), 0) AS median_response,
+	COALESCE(MIN(response), 0) AS min_response,
+	COALESCE(MAX(response), 0) AS max_response,
+	COALESCE(AVG(resolution), 0) AS avg_resolution,
+	COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY resolution), 0) AS median_resolution,
+	COALESCE(AVG(since_start) FILTER (WHERE action_type = 'acknowledged'), 0) AS avg_time_to_acknowledge,
+	COALESCE(AVG(since_start) FILTER (WHERE action_type = 'resolved'), 0) AS avg_time_to_resolve,
+	COALESCE(AVG(since_start) FILTER (WHERE action_type = 'ignored'), 0) AS avg_time_to_ignore,
+	COALESCE(AVG(since_previous) FILTER (WHERE action_type = 'resolved' AND prev_status = 'acknowledged'), 0) AS avg_acknowledge_to_resolve,
+	COALESCE(AVG(since_previous) FILTER (WHERE action_type = 'ignored' AND prev_status = 'acknowledged'), 0) AS avg_acknowledge_to_ignore,
+	COALESCE(AVG(since_previous) FILTER (WHERE action_type = 'acknowledged' AND prev_status = 'active'), 0) AS avg_active_to_acknowledge,
+	COALESCE(AVG(since_previous) FILTER (WHERE action_type = 'resolved' AND prev_status = 'active'), 0) AS avg_active_to_resolve,
+	COALESCE(AVG(since_previous) FILTER (WHERE action_type = 'ignored' AND prev_status = 'active'), 0) AS avg_active_to_ignore
+FROM m`
+
+// timings reads an operator's time metrics for the period.
+func (r *Repository) timings(ctx context.Context, tenantID, operatorEmail string, startDate, endDate time.Time, realmNames []string) (*operatorTimings, error) {
+	realmClause := ""
+	args := []any{tenantID, operatorEmail}
+	if len(realmNames) > 0 {
+		realmClause = " AND realm_name IN ?"
+		args = append(args, realmNames)
+	}
+	args = append(args, startDate, endDate, tenantID, operatorEmail, startDate, startDate)
+
+	var t operatorTimings
+	if err := r.db.DB().WithContext(ctx).Raw(fmt.Sprintf(timingsSQL, realmClause), args...).Scan(&t).Error; err != nil {
+		return nil, err
+	}
+	return &t, nil
+}

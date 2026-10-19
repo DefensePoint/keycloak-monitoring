@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
@@ -24,11 +25,30 @@ const (
 // Repository implements users.Repository using GORM.
 type Repository struct {
 	db *gorm.DB
+
+	// linkByVerifiedEmail lets a login with an unknown subject adopt the
+	// account holding its verified address. Off unless configured: see
+	// adoptByVerifiedEmail.
+	linkByVerifiedEmail bool
+}
+
+// Option configures a Repository.
+type Option func(*Repository)
+
+// WithLinkByVerifiedEmail turns linking a login to an existing account by
+// verified email on or off. Meant for a planned realm rebuild or migration and
+// switched off again afterwards; see adoptByVerifiedEmail.
+func WithLinkByVerifiedEmail(on bool) Option {
+	return func(r *Repository) { r.linkByVerifiedEmail = on }
 }
 
 // NewRepository creates a new users Repository.
-func NewRepository(db *gorm.DB) users.Repository {
-	return &Repository{db: db}
+func NewRepository(db *gorm.DB, opts ...Option) users.Repository {
+	r := &Repository{db: db}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // FindOrCreateBySubject finds a user by subject (OAuth2 sub claim) or creates a new one.
@@ -97,8 +117,31 @@ func (r *Repository) FindOrCreateBySubject(ctx context.Context, user *domain.Use
 			return nil, err
 		}
 		if !adopted {
-			if err := r.db.WithContext(ctx).Create(dbUser).Error; err != nil {
-				return nil, fmt.Errorf("failed to create user: %w", err)
+			// Not adopted, so an account already holding the address belongs
+			// to somebody this login has not been shown to be. Refuse by name
+			// rather than leave it to the unique index on email.
+			if err := r.refuseIfEmailInUse(ctx, dbUser); err != nil {
+				return nil, err
+			}
+			err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+				if err := tx.Create(dbUser).Error; err != nil {
+					return fmt.Errorf("failed to create user: %w", err)
+				}
+				// GORM inserts the default:true tag in place of a false
+				// is_active, and writes it back into dbUser too.
+				res := tx.Model(&database.User{}).Where("id = ?", dbUser.ID).
+					UpdateColumn("is_active", user.IsActive)
+				if res.Error != nil {
+					return fmt.Errorf("failed to set is_active on new user: %w", res.Error)
+				}
+				if res.RowsAffected != 1 {
+					return fmt.Errorf("failed to set is_active on new user: %d rows affected, want 1", res.RowsAffected)
+				}
+				dbUser.IsActive = user.IsActive
+				return nil
+			})
+			if err != nil {
+				return nil, err
 			}
 			return toDomainUser(dbUser), nil
 		}
@@ -122,11 +165,20 @@ func (r *Repository) FindOrCreateBySubject(ctx context.Context, user *domain.Use
 		"family_name":        dbUser.FamilyName,
 		"preferred_username": dbUser.PreferredUsername,
 		"locale":             dbUser.Locale,
-		"auth_method":        dbUser.AuthMethod,
-		"last_login_at":      dbUser.LastLoginAt,
-		"last_login_ip":      dbUser.LastLoginIP,
-		"login_count":        gorm.Expr("login_count + 1"),
-		"last_accessed_at":   dbUser.LastAccessedAt,
+		// The caller refuses an inactive or blocked account only after this
+		// returns, so a sign-in it will refuse still arrives here. It must not
+		// count as a sign-in: the MCP token check reads last_login_at as the
+		// last sign-in that let the user in.
+		"last_login_at":    onlyIfUsable("last_login_at", dbUser.LastLoginAt),
+		"last_login_ip":    onlyIfUsable("last_login_ip", dbUser.LastLoginIP),
+		"login_count":      gorm.Expr("login_count + 1"),
+		"last_accessed_at": dbUser.LastAccessedAt,
+	}
+	// Written only when the caller set it. auth_method is what keeps an SSO
+	// account's identity fields and password out of local editing, so a caller
+	// that leaves it out must not blank it and switch that guard off.
+	if dbUser.AuthMethod != "" {
+		updates["auth_method"] = dbUser.AuthMethod
 	}
 
 	if err := r.db.WithContext(ctx).Model(&existingUser).Updates(updates).Error; err != nil {
@@ -139,6 +191,13 @@ func (r *Repository) FindOrCreateBySubject(ctx context.Context, user *domain.Use
 	}
 
 	return toDomainUser(&existingUser), nil
+}
+
+// onlyIfUsable sets column to value when the row is active and not blocked,
+// and keeps it otherwise. The check runs in the UPDATE itself, against the
+// row as it is when written.
+func onlyIfUsable(column string, value any) clause.Expr {
+	return gorm.Expr("CASE WHEN is_active AND NOT is_blocked THEN ? ELSE "+column+" END", value)
 }
 
 // adoptByVerifiedEmail finds the account this login belongs to when the subject
@@ -165,17 +224,26 @@ func (r *Repository) FindOrCreateBySubject(ctx context.Context, user *domain.Use
 // the way back in when the identity provider is unreachable, which is exactly
 // when nobody can afford to have lost them.
 //
-// Tested on the password rather than on auth_method, which looks like the
-// natural column and is not trustworthy here: role_sync builds its profile
-// without an AuthMethod, and the update below writes that blank through, so
-// every account Keycloak has synced sits at "" until the next restart repairs
-// it. Keying on auth_method meant adoption silently skipped exactly the
-// accounts a Keycloak deployment has most of. The password is the thing that
-// would actually be taken over, so it is the thing to ask about.
+// Tested on the password rather than on auth_method. auth_method is a label
+// that can lag behind the account: rows written before the column existed, or
+// with it left unset, read "" or the "simple" default until the boot-time
+// migration repairs them. The password is the thing that would actually be
+// taken over, so it is the thing to ask about.
 //
 // At most one account can match: the unique index on email covers live rows
 // carrying an address, so there is no ambiguity to resolve.
+//
+// Off unless configured. A verified address shows the provider checked it, not
+// that it is the only identity holding it: a realm that allows duplicate
+// emails, an identity broker trusted to vouch for addresses, or anyone able to
+// create realm users and mark them verified can produce a second identity with
+// the same address, and adoption would hand it the account and every role it
+// carries. The login cannot tell that from a rebuild, so it is an
+// administrator's call, made for a planned migration and undone after it.
 func (r *Repository) adoptByVerifiedEmail(ctx context.Context, candidate *database.User, existing *database.User) (bool, error) {
+	if !r.linkByVerifiedEmail {
+		return false, nil
+	}
 	if !candidate.EmailVerified || candidate.Email == "" || candidate.Subject == "" {
 		return false, nil
 	}
@@ -191,6 +259,30 @@ func (r *Repository) adoptByVerifiedEmail(ctx context.Context, candidate *databa
 	}
 
 	return true, nil
+}
+
+// refuseIfEmailInUse reports users.ErrEmailInUse when a live account already
+// holds the address of a login that was not adopted. Without it the insert
+// fails on the unique index anyway, but as a bare constraint violation that
+// tells an administrator nothing about which account or why.
+//
+// A blank address matches nobody, as everywhere else here. A concurrent login
+// can still create the row between this check and the insert; the unique index
+// then refuses that insert, so the outcome is the same, only less well named.
+func (r *Repository) refuseIfEmailInUse(ctx context.Context, candidate *database.User) error {
+	if candidate.Email == "" {
+		return nil
+	}
+
+	var holder database.User
+	err := r.db.WithContext(ctx).Select("id").Where("email = ?", candidate.Email).First(&holder).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to look for an account with this email: %w", err)
+	}
+	return &users.EmailInUseError{UserID: holder.ID}
 }
 
 // GetBySubject retrieves a user by their subject (OAuth2 sub claim).
@@ -302,19 +394,117 @@ func (r *Repository) CreateSimpleAuthUser(ctx context.Context, user *domain.User
 	return nil
 }
 
-// Update updates an existing user.
+// Update writes the fields an admin can edit on an existing user.
+//
+// is_active and is_blocked are always written. Updates with a struct skips
+// zero values, so deactivating or unblocking a user used to be silently
+// ignored while the caller reported success. The identity fields keep their
+// existing rule, written only when non-empty, so an empty value still leaves
+// them unchanged. Nothing else is written back: the caller read this user a
+// moment ago, and rewriting columns such as login_count or last_login_at
+// would undo a login that landed in between.
+//
+// Any change to is_active or is_blocked, cutting the user off or restoring
+// them, revokes their live API tokens in the same transaction; see
+// revokeAPITokens.
 func (r *Repository) Update(ctx context.Context, user *domain.User) error {
-	dbUser := toDBUser(user)
-
-	result := r.db.WithContext(ctx).Model(&database.User{}).Where("id = ?", user.ID).Updates(dbUser)
-	if result.Error != nil {
-		return fmt.Errorf("failed to update user: %w", result.Error)
+	updates := map[string]any{
+		"is_active":  user.IsActive,
+		"is_blocked": user.IsBlocked,
+	}
+	for column, value := range map[string]string{
+		"email":              user.Email,
+		"name":               user.Name,
+		"username":           user.Username,
+		"preferred_username": user.PreferredUsername,
+		"subject":            user.Subject,
+		"password_hash":      user.PasswordHash,
+	} {
+		if value != "" {
+			updates[column] = value
+		}
 	}
 
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("user not found")
-	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		before, err := lockStatus(tx, "id = ?", user.ID)
+		if err != nil {
+			return err
+		}
 
+		result := tx.Model(&database.User{}).Where("id = ?", user.ID).Updates(updates)
+		if result.Error != nil {
+			return fmt.Errorf("failed to update user: %w", result.Error)
+		}
+
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("user not found")
+		}
+
+		if before.IsActive != user.IsActive || before.IsBlocked != user.IsBlocked {
+			return revokeAPITokens(tx, user.ID)
+		}
+		return nil
+	})
+}
+
+// errNoSuchUser is what lockStatus returns when no user matches.
+var errNoSuchUser = errors.New("user not found")
+
+// userStatus is the part of a user row that decides whether a change to it
+// revokes the user's API tokens.
+type userStatus struct {
+	ID        uint
+	IsActive  bool
+	IsBlocked bool
+}
+
+// lockStatus reads the matching user's status and locks the row until the
+// transaction ends, so a concurrent change cannot slip between the read and
+// the write that depends on it.
+func lockStatus(tx *gorm.DB, query string, arg any) (userStatus, error) {
+	var row userStatus
+	err := tx.Model(&database.User{}).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id", "is_active", "is_blocked").
+		Where(query, arg).
+		Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return userStatus{}, errNoSuchUser
+	}
+	if err != nil {
+		return userStatus{}, fmt.Errorf("failed to read user: %w", err)
+	}
+	return row, nil
+}
+
+// revokeAPITokens revokes every live API token of a user who is being
+// deactivated, blocked, reactivated or unblocked.
+//
+// Validation refuses a token while its user is inactive or blocked, but that
+// alone meant reactivating or unblocking the user brought every unexpired
+// token back. Deactivating and blocking are how an account is cut off, for
+// offboarding, misuse or a suspected compromise, so the tokens end with it:
+// reactivating or unblocking restores the account, not its tokens, and the
+// user issues new ones. Expired tokens are left as they are, so they still
+// read as expired rather than revoked.
+//
+// Both ends revoke, because either alone leaves a way back. Revoking at the
+// cut-off ends the tokens the user held then. Revoking at the restore ends
+// any that are still live: those of a user cut off by a release that did not
+// revoke, during a rollback or by an older replica in a rolling deploy, and
+// any issued to the user while cut off. A restored user always starts with no
+// live tokens.
+//
+// It runs in the transaction that changes the status: a change that committed
+// while its revocation failed would leave the tokens to come back later.
+func revokeAPITokens(tx *gorm.DB, userID uint) error {
+	now := time.Now().UTC()
+	err := tx.Model(&database.APIToken{}).
+		Where("user_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)", userID, now).
+		Update("revoked_at", now).Error
+	if err != nil {
+		return fmt.Errorf("failed to revoke the user's api tokens: %w", err)
+	}
 	return nil
 }
 
@@ -325,25 +515,38 @@ func (r *Repository) Update(ctx context.Context, user *domain.User) error {
 // but it writes is_active and nothing else: no row is removed, deleted_at is
 // never set, and the roles, policies and history all stay. Nothing anywhere in
 // the platform sets deleted_at on a user, so an account is only ever
-// deactivated, and reactivating it restores exactly what was there.
+// deactivated, and reactivating it restores everything but its API tokens.
+//
+// Deactivating an active account revokes its API tokens in the same
+// transaction; see revokeAPITokens.
 //
 // It does not end a session that already exists. The middleware re-reads the
 // account on every request but only to recover the ID that RBAC needs, and the
 // struct it fills in carries no status field, so is_active is never consulted
 // once somebody holds a session: access continues until that session expires,
-// up to session max_age, 24 hours by default. API tokens do re-check, and stop
+// up to session max_age, 24 hours by default. API tokens are revoked, and stop
 // working immediately.
 func (r *Repository) Delete(ctx context.Context, userID uint) error {
-	result := r.db.WithContext(ctx).Model(&database.User{}).Where("id = ?", userID).Update("is_active", false)
-	if result.Error != nil {
-		return fmt.Errorf("failed to delete user: %w", result.Error)
-	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		before, err := lockStatus(tx, "id = ?", userID)
+		if err != nil {
+			return err
+		}
 
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("user not found")
-	}
+		result := tx.Model(&database.User{}).Where("id = ?", userID).Update("is_active", false)
+		if result.Error != nil {
+			return fmt.Errorf("failed to delete user: %w", result.Error)
+		}
 
-	return nil
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("user not found")
+		}
+
+		if before.IsActive {
+			return revokeAPITokens(tx, userID)
+		}
+		return nil
+	})
 }
 
 // UpdateLastAccessed updates the last accessed timestamp for a user.
@@ -395,6 +598,13 @@ func (r *Repository) UpdatePasswordWithFlags(ctx context.Context, userID uint, p
 }
 
 // BlockUser blocks a user account.
+//
+// Blocking an unblocked account revokes its API tokens in the same
+// transaction, as blocking through Update does; see revokeAPITokens. Anyone
+// who can make this run can therefore end a user's tokens, so it must stay
+// behind an administrator's decision and never become something an outside
+// party can trigger, such as a lockout after failed sign-ins. Blocking a
+// subject that matches no user does nothing.
 func (r *Repository) BlockUser(ctx context.Context, subject string, reason string) error {
 	updates := map[string]interface{}{
 		"is_blocked":     true,
@@ -402,19 +612,31 @@ func (r *Repository) BlockUser(ctx context.Context, subject string, reason strin
 		"blocked_reason": reason,
 	}
 
-	result := r.db.WithContext(ctx).
-		Model(&database.User{}).
-		Where(sqlWhereSubject, subject).
-		Updates(updates)
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		before, err := lockStatus(tx, sqlWhereSubject, subject)
+		if errors.Is(err, errNoSuchUser) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 
-	if result.Error != nil {
-		return fmt.Errorf("failed to block user: %w", result.Error)
-	}
+		if err := tx.Model(&database.User{}).Where("id = ?", before.ID).Updates(updates).Error; err != nil {
+			return fmt.Errorf("failed to block user: %w", err)
+		}
 
-	return nil
+		if !before.IsBlocked {
+			return revokeAPITokens(tx, before.ID)
+		}
+		return nil
+	})
 }
 
 // UnblockUser unblocks a user account.
+//
+// Unblocking a blocked account revokes any API tokens it still holds, in the
+// same transaction, as unblocking through Update does; see revokeAPITokens.
+// Unblocking a subject that matches no user does nothing.
 func (r *Repository) UnblockUser(ctx context.Context, subject string) error {
 	updates := map[string]interface{}{
 		"is_blocked":     false,
@@ -422,16 +644,24 @@ func (r *Repository) UnblockUser(ctx context.Context, subject string) error {
 		"blocked_reason": "",
 	}
 
-	result := r.db.WithContext(ctx).
-		Model(&database.User{}).
-		Where(sqlWhereSubject, subject).
-		Updates(updates)
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		before, err := lockStatus(tx, sqlWhereSubject, subject)
+		if errors.Is(err, errNoSuchUser) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 
-	if result.Error != nil {
-		return fmt.Errorf("failed to unblock user: %w", result.Error)
-	}
+		if err := tx.Model(&database.User{}).Where("id = ?", before.ID).Updates(updates).Error; err != nil {
+			return fmt.Errorf("failed to unblock user: %w", err)
+		}
 
-	return nil
+		if before.IsBlocked {
+			return revokeAPITokens(tx, before.ID)
+		}
+		return nil
+	})
 }
 
 // toDomainUser converts a database User to a domain User.
@@ -465,6 +695,7 @@ func toDomainUser(user *database.User) *domain.User {
 		IsBlocked:          user.IsBlocked,
 		BlockedReason:      user.BlockedReason,
 		BlockedAt:          user.BlockedAt,
+		SessionEpoch:       user.SessionEpoch,
 		LastLoginAt:        user.LastLoginAt,
 		LastLoginIP:        user.LastLoginIP,
 		LastAccessedAt:     lastAccessedAt,
@@ -503,6 +734,7 @@ func toDBUser(user *domain.User) *database.User {
 		IsBlocked:         user.IsBlocked,
 		BlockedReason:     user.BlockedReason,
 		BlockedAt:         user.BlockedAt,
+		SessionEpoch:      user.SessionEpoch,
 		LastLoginAt:       user.LastLoginAt,
 		LastLoginIP:       user.LastLoginIP,
 		LastAccessedAt:    lastAccessedAt,
@@ -510,4 +742,32 @@ func toDBUser(user *domain.User) *database.User {
 		CreatedAt:         user.CreatedAt,
 		UpdatedAt:         user.UpdatedAt,
 	}
+}
+
+// CurrentSessionEpoch returns the user's session epoch, which a login stores
+// in the session cookie.
+func (r *Repository) CurrentSessionEpoch(ctx context.Context, subject string) (int64, error) {
+	var epoch int64
+	err := r.db.WithContext(ctx).Model(&database.User{}).
+		Where("subject = ?", subject).
+		Select("session_epoch").Scan(&epoch).Error
+	if err != nil {
+		return 0, fmt.Errorf("failed to read session epoch: %w", err)
+	}
+	return epoch, nil
+}
+
+// RevokeSessions records a logout for the user with subject: it increments
+// their session epoch, so every session carrying the old value is rejected.
+// It applies only when the session logging out carries the current value, so
+// an old cookie that is already rejected cannot be replayed at logout to end
+// the user's newer sessions. It reports whether the epoch moved.
+func (r *Repository) RevokeSessions(ctx context.Context, subject string, sessionEpoch int64) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&database.User{}).
+		Where("subject = ? AND session_epoch = ?", subject, sessionEpoch).
+		Update("session_epoch", gorm.Expr("session_epoch + 1"))
+	if result.Error != nil {
+		return false, fmt.Errorf("failed to revoke sessions: %w", result.Error)
+	}
+	return result.RowsAffected > 0, nil
 }

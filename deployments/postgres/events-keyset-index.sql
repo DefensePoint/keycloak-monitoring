@@ -3,14 +3,17 @@
 -- The MCP list_events tool pages events in (tenant_id, timestamp DESC,
 -- id DESC) order, and the Event model declares a composite index for it. On an
 -- environment whose events table already holds rows, letting AutoMigrate build
--- that index takes an ACCESS EXCLUSIVE lock for the whole build and blocks
--- every write to the table until it finishes.
+-- that index takes a SHARE lock for the whole build. SHARE blocks writes and
+-- still allows reads.
 --
 -- Creating the index here first makes AutoMigrate's own creation a no-op: it
 -- looks the index up by name, finds it, and skips it. Run this once per
 -- environment, before deploying the release that introduces the index:
 --
 --   psql -U "${POSTGRES_USER}" -d monitoring -f events-keyset-index.sql
+--
+-- On a Compose server, run it through the postgres container instead; see
+-- "Running the scripts" in README.md.
 --
 -- CREATE INDEX CONCURRENTLY cannot run inside a transaction block, so this
 -- script opens none. Do not add BEGIN/COMMIT and do not run it with psql

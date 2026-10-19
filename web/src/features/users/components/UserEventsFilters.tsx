@@ -105,6 +105,7 @@ export const UserEventsFilters: React.FC<UserEventsFiltersProps> = ({
               <MenuItem value="info">Info</MenuItem>
               <MenuItem value="warning">Warning</MenuItem>
               <MenuItem value="error">Error</MenuItem>
+              <MenuItem value="critical">Critical</MenuItem>
             </Select>
           </FormControl>
 

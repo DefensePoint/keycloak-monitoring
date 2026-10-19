@@ -18,7 +18,7 @@ export function TenantAccessGuard({ children }: TenantAccessGuardProps) {
     return (
       <AccessDeniedPage
         title="Tenant Access Denied"
-        message={`You don't have permission to access the tenant "${accessDeniedTenantId}". Please contact your administrator to request access.`}
+        message={`The tenant "${accessDeniedTenantId}" does not exist, or you don't have permission to access it. Please contact your administrator if you need access.`}
       />
     );
   }

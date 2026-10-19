@@ -50,19 +50,9 @@ func (g *ChromePDFGenerator) Generate(data *Data) ([]byte, error) {
 		return severityOrder[data.AlertList[i].Severity] < severityOrder[data.AlertList[j].Severity]
 	})
 
-	// Load and parse the HTML template with custom functions
-	funcMap := template.FuncMap{
-		"divf": func(a, b float64) float64 {
-			if b == 0 {
-				return 0
-			}
-			return a / b
-		},
-	}
-
-	tmpl, err := template.New("report.html").Funcs(funcMap).ParseFiles(g.templatePath)
+	tmpl, err := loadReportTemplate(g.templatePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load HTML template: %w", err)
+		return nil, err
 	}
 
 	// Execute template with data
@@ -200,6 +190,23 @@ func (g *ChromePDFGenerator) Generate(data *Data) ([]byte, error) {
 
 	g.logger.Info("PDF generation completed successfully", logger.Int("size_bytes", len(pdfBuf)))
 	return pdfBuf, nil
+}
+
+// loadReportTemplate parses the report template with its helper functions.
+func loadReportTemplate(path string) (*template.Template, error) {
+	funcMap := template.FuncMap{
+		"divf": func(a, b float64) float64 {
+			if b == 0 {
+				return 0
+			}
+			return a / b
+		},
+	}
+	tmpl, err := template.New("report.html").Funcs(funcMap).ParseFiles(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load HTML template: %w", err)
+	}
+	return tmpl, nil
 }
 
 func copyFile(src, dst string) error {

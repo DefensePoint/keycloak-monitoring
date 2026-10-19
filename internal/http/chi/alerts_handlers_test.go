@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -100,10 +101,15 @@ func (m *mockAlertsService) SaveAlert(ctx context.Context, alert *domain.Alert) 
 	return nil
 }
 
-// Mock RBAC checker - always allows access
+// Mock RBAC checker - allows every permission by default
 type mockRBACChecker struct {
-	hasPermissionFn    func(ctx context.Context, userID uint, permission string, tenantID *string) (bool, error)
-	hasAccessToRealmFn func(ctx context.Context, userID uint, tenantID, realmName string) (bool, error)
+	hasPermissionFn       func(ctx context.Context, userID uint, permission string, tenantID *string) (bool, error)
+	hasGlobalPermissionFn func(ctx context.Context, userID uint, permission string) (bool, error)
+	// isAdminFn, when set, overrides isAdmin per user.
+	isAdminFn func(userID uint) bool
+	// holdsRoleFn, when set, reports whether a user has any role assignment.
+	holdsRoleFn  func(userID uint) bool
+	holdsRoleErr error
 
 	isAdmin      bool
 	isAdminCalls int
@@ -118,28 +124,59 @@ func (m *mockRBACChecker) HasPermission(ctx context.Context, userID uint, permis
 	return true, nil // Default: allow all
 }
 
+func (m *mockRBACChecker) HasGlobalPermission(ctx context.Context, userID uint, permission string) (bool, error) {
+	if m.hasGlobalPermissionFn != nil {
+		return m.hasGlobalPermissionFn(ctx, userID, permission)
+	}
+	return true, nil // Default: allow all
+}
+
 func (m *mockRBACChecker) GetUserPermissions(ctx context.Context, userID uint, tenantID *string) ([]string, error) {
 	return []string{}, nil
 }
 
 func (m *mockRBACChecker) IsAdmin(ctx context.Context, userID uint) (bool, error) {
 	m.isAdminCalls++
+	if m.isAdminFn != nil {
+		return m.isAdminFn(userID), nil
+	}
 	return m.isAdmin, nil
 }
 
-func (m *mockRBACChecker) GetUserRoles(ctx context.Context, userID uint) ([]*UserRoleInfo, error) {
+func (m *mockRBACChecker) GetEffectiveUserRoles(ctx context.Context, userID uint) ([]*UserRoleInfo, error) {
 	return []*UserRoleInfo{}, nil
+}
+
+func (m *mockRBACChecker) HoldsAnyRole(ctx context.Context, userID uint) (bool, error) {
+	if m.holdsRoleErr != nil {
+		return false, m.holdsRoleErr
+	}
+	if m.holdsRoleFn != nil {
+		return m.holdsRoleFn(userID), nil
+	}
+	return false, nil
 }
 
 func (m *mockRBACChecker) HasAccessToTenant(ctx context.Context, userID uint, tenantID string) (bool, error) {
 	return true, nil
 }
 
-func (m *mockRBACChecker) HasAccessToRealm(ctx context.Context, userID uint, tenantID, realmName string) (bool, error) {
-	if m.hasAccessToRealmFn != nil {
-		return m.hasAccessToRealmFn(ctx, userID, tenantID, realmName)
+// HasAccessToRealm mirrors the legacy rbac.Service reader, not ResolveRealmScope:
+// a global admin passes, otherwise only the first row for the tenant counts and no
+// row denies. A handler that regresses onto it fails the no-row and multi-row cases.
+func (m *mockRBACChecker) HasAccessToRealm(_ context.Context, _ uint, tenantID, realmName string) (bool, error) {
+	if m.isAdmin {
+		return true, nil
 	}
-	return true, nil
+	if m.policiesErr != nil {
+		return false, m.policiesErr
+	}
+	for _, policy := range m.policies {
+		if policy.TenantID == tenantID {
+			return policy.RealmsUnrestricted || slices.Contains(policy.AllowedRealms, realmName), nil
+		}
+	}
+	return false, nil
 }
 
 func (m *mockRBACChecker) GetUserPolicies(ctx context.Context, userID uint) ([]*domain.TenantPolicy, error) {
@@ -727,6 +764,10 @@ func TestHandleUpdateAlertStatus(t *testing.T) {
 			svc := &mockAlertsService{
 				getAlertFn:     tt.mockGetFn,
 				updateStatusFn: tt.mockUpdateFn,
+				// A status of "resolved" takes the resolve path.
+				resolveAlertFn: func(_ context.Context, tenantID, alertID string) (*domain.Alert, error) {
+					return &domain.Alert{AlertID: alertID, TenantID: tenantID, Status: domain.AlertStatusResolved}, nil
+				},
 			}
 			h := newTestAlertsHandler(svc)
 			router := setupTestRouter(h)

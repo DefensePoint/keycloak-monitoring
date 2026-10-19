@@ -180,7 +180,13 @@ func (t *keycloakConnectionTester) TestConnection(
 				logger.Err(err))
 			return &clientCreationError{err: errors.New("connection failed")}
 		}
-		return &clientCreationError{err: err}
+		// Any other error can carry the target server's response, such as the
+		// body of a failed token request. The caller chose the URL, so echoing
+		// it would hand them whatever that server returns; keep it in the log.
+		t.log.Warn("Failed to create test Keycloak client",
+			logger.Str("server_url", serverURL),
+			logger.Err(err))
+		return &clientCreationError{err: errors.New("connection failed")}
 	}
 	defer func() {
 		if closeErr := client.Close(); closeErr != nil {

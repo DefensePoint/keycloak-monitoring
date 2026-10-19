@@ -16,6 +16,8 @@ import (
 type EventRepository interface {
 	SaveEvents(ctx context.Context, events []*domain.KeycloakEvent) error
 	CountEventsByType(ctx context.Context, tenantID, realmName, eventType string, from, to time.Time) (int64, error)
+	StoredEventIDs(ctx context.Context, tenantID string, ids []string, from, to time.Time) (map[string]bool, error)
+	IDlessEventTimes(ctx context.Context, tenantID string, since time.Time) (legacy, hashed time.Time, err error)
 }
 
 // MetricsRepository defines the interface for Keycloak metrics persistence.
@@ -35,6 +37,11 @@ type HealthRepository interface {
 type RealmRepository interface {
 	SaveRealm(ctx context.Context, realm *domain.KeycloakRealmInfo) error
 	GetRealms(ctx context.Context, tenantID string) ([]*domain.KeycloakRealmInfo, error)
+	RetireRealmsNotIn(ctx context.Context, tenantID string, realmIDs []string) (int64, error)
+	// MarkRealmsUnreadable records that the monitoring client cannot read the
+	// tenant's realms named in realmNames, from since on. A realm already
+	// marked keeps the time it was first found unreadable.
+	MarkRealmsUnreadable(ctx context.Context, tenantID string, realmNames []string, since time.Time) error
 }
 
 // GeneralEventRepository defines the interface for general event persistence.
@@ -60,6 +67,10 @@ type EventAlertConverter interface {
 // Used by MonitorPoolManager.
 type HealthAlertManager interface {
 	ProcessHealthStatus(ctx context.Context, tenantID, tenantName, status, errorMessage string, responseTime int) error
+	// TenantUnmonitored resolves the tenant's open health alerts when it stops
+	// being monitored (disabled or removed), saying why, since nothing would
+	// ever resolve them otherwise.
+	TenantUnmonitored(ctx context.Context, tenantID, tenantName, reason string) error
 }
 
 // ============================================================================
@@ -98,6 +109,11 @@ type MonitorConfig struct {
 // KeycloakMonitorFactory creates Keycloak monitors and clients.
 // This factory is implemented by the keycloak package and injected via DI.
 type KeycloakMonitorFactory interface {
+	// TenantInstanceConfig applies a tenant's configuration overrides (JSON)
+	// to the global instance config and returns the result for CreateClient
+	// and CreateMonitor. The factory does the merge because it owns the
+	// config type; a value of any other type makes it fall back to defaults.
+	TenantInstanceConfig(tenantID string, global any, configuration string) (any, error)
 	CreateClient(ctx context.Context, cfg *MonitorConfig, instanceCfg any) (KeycloakClient, error)
 	CreateMonitor(
 		tenantID string,

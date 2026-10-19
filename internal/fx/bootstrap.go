@@ -2,7 +2,9 @@ package fx
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/fx"
@@ -326,38 +328,107 @@ func syncTenant(ctx context.Context, p BootstrapParams, tenantID string, cfgTena
 	enabled := cfgTenant.Enabled
 	isDefault := cfgTenant.IsDefault
 	owner := cfgTenant.Owner
-	defaultRealm := cfgTenant.Config.DefaultRealm
+	defaultRealm, configuration, err := tenantOverridesForSync(cfgTenant.Config)
+	if err != nil {
+		return fmt.Errorf("config for tenant %s: %w", tenantID, err)
+	}
+	if ignored := globalOnlyOverrides(cfgTenant.Config); len(ignored) > 0 {
+		p.Logger.Warn("Tenant config sets settings that are only read from keycloak.global, ignoring them for this tenant",
+			logger.Str("tenant_id", tenantID),
+			logger.Strs("keys", ignored))
+	}
 
 	createReq := &tenant.CreateRequest{
-		TenantID:     tenantID,
-		Name:         cfgTenant.Name,
-		Description:  cfgTenant.Description,
-		ServerURL:    cfgTenant.ServerURL,
-		AdminRealm:   cfgTenant.AdminRealm,
-		ClientID:     cfgTenant.ClientID,
-		ClientSecret: cfgTenant.ClientSecret,
-		Enabled:      cfgTenant.Enabled,
-		IsDefault:    cfgTenant.IsDefault,
-		Tags:         cfgTenant.Tags,
-		Owner:        cfgTenant.Owner,
-		DefaultRealm: cfgTenant.Config.DefaultRealm,
+		TenantID:      tenantID,
+		Name:          cfgTenant.Name,
+		Description:   cfgTenant.Description,
+		ServerURL:     cfgTenant.ServerURL,
+		AdminRealm:    cfgTenant.AdminRealm,
+		ClientID:      cfgTenant.ClientID,
+		ClientSecret:  cfgTenant.ClientSecret,
+		Enabled:       cfgTenant.Enabled,
+		IsDefault:     cfgTenant.IsDefault,
+		Tags:          cfgTenant.Tags,
+		Owner:         cfgTenant.Owner,
+		DefaultRealm:  defaultRealm,
+		Configuration: configuration,
 	}
 
 	updateReq := &tenant.UpdateRequest{
-		Name:         &name,
-		Description:  &description,
-		ServerURL:    &serverURL,
-		AdminRealm:   &adminRealm,
-		ClientID:     &clientID,
-		ClientSecret: &clientSecret,
-		Enabled:      &enabled,
-		IsDefault:    &isDefault,
-		Tags:         cfgTenant.Tags,
-		Owner:        &owner,
-		DefaultRealm: &defaultRealm,
+		Name:          &name,
+		Description:   &description,
+		ServerURL:     &serverURL,
+		AdminRealm:    &adminRealm,
+		ClientID:      &clientID,
+		ClientSecret:  &clientSecret,
+		Enabled:       &enabled,
+		IsDefault:     &isDefault,
+		Tags:          cfgTenant.Tags,
+		Owner:         &owner,
+		DefaultRealm:  &defaultRealm,
+		Configuration: &configuration,
 	}
 
 	p.Logger.Debug("Syncing tenant from configuration", logger.Str("tenant_id", tenantID))
-	_, err := p.TenantService.SyncFromConfig(ctx, tenantID, createReq, updateReq)
+	_, err = p.TenantService.SyncFromConfig(ctx, tenantID, createReq, updateReq)
 	return err
+}
+
+// globalOnlyTenantKeys are tenant config: settings nothing reads per tenant:
+// the checkers and the AMFA mirror are built once from keycloak.global, the
+// SSRF policy must not be loosened by one tenant, and infinispan_enabled is
+// read from neither block.
+var globalOnlyTenantKeys = []string{
+	"amfa_checker",
+	"amfa_mirror",
+	"config_checker",
+	"connection.allow_private_ranges",
+	"event_checker",
+	"infinispan_enabled",
+	"version_checker",
+}
+
+// globalOnlyOverrides returns the globalOnlyTenantKeys present in block, in
+// that list's order.
+func globalOnlyOverrides(block map[string]any) []string {
+	var found []string
+	for _, key := range globalOnlyTenantKeys {
+		section, field, nested := strings.Cut(key, ".")
+		v, ok := block[section]
+		if ok && nested {
+			m, isMap := v.(map[string]any)
+			_, ok = m[field]
+			ok = ok && isMap
+		}
+		if ok {
+			found = append(found, key)
+		}
+	}
+	return found
+}
+
+// tenantOverridesForSync splits a tenant's config: block into its
+// default_realm, which the tenant stores in its own column, and the rest as
+// the JSON overrides the monitor pool applies to keycloak.global. An empty
+// block gives empty overrides, so syncing clears any an earlier run stored.
+func tenantOverridesForSync(block map[string]any) (defaultRealm, configuration string, err error) {
+	decoded, _, err := config.ApplyInstanceOverrides(config.KeycloakInstanceConfig{}, block)
+	if err != nil {
+		return "", "", err
+	}
+
+	rest := make(map[string]any, len(block))
+	for k, v := range block {
+		if k != "default_realm" {
+			rest[k] = v
+		}
+	}
+	if len(rest) == 0 {
+		return decoded.DefaultRealm, "", nil
+	}
+	b, err := json.Marshal(rest)
+	if err != nil {
+		return "", "", err
+	}
+	return decoded.DefaultRealm, string(b), nil
 }

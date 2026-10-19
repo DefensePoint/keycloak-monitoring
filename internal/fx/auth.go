@@ -2,6 +2,9 @@ package fx
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"go.uber.org/fx"
@@ -10,6 +13,7 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	chihttp "github.com/DefensePoint/keycloak-monitoring/internal/http/chi"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/metrics"
 	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
 	"github.com/DefensePoint/keycloak-monitoring/internal/users"
 )
@@ -18,7 +22,7 @@ import (
 var AuthModule = fx.Module("auth",
 	fx.Provide(
 		provideCookieSessionManager,
-		provideStateStore,
+		provideLoginCookie,
 		provideSessionBlacklist,
 		provideSimpleAuthService,
 		provideOAuth2AdminService,
@@ -27,10 +31,24 @@ var AuthModule = fx.Module("auth",
 		provideMemorySessionStore,
 		provideAuthService,
 	),
+	fx.Invoke(registerOIDCProviderRetry),
 )
 
 // provideCookieSessionManager creates the session manager for authentication.
-func provideCookieSessionManager(cfg *config.AppConfig) *auth.CookieSessionManager {
+// It refuses an empty or published session secret, which stops the server at
+// startup rather than serving forgeable sessions.
+func provideCookieSessionManager(cfg *config.AppConfig) (*auth.CookieSessionManager, error) {
+	if err := auth.ValidateSessionSecret(cfg.Auth.Session.Secret); err != nil {
+		// The variable binds only to a key config.yaml already carries, so a
+		// config without the key ignores it. Say so rather than calling a
+		// secret the operator did set "empty".
+		if strings.TrimSpace(cfg.Auth.Session.Secret) == "" && os.Getenv("MONITORING_AUTH_SESSION_SECRET") != "" {
+			return nil, fmt.Errorf("%w (MONITORING_AUTH_SESSION_SECRET is set but has no effect: "+
+				"config.yaml has no auth.session.secret key for it to fill; add `secret: \"\"` "+
+				"under auth.session)", err)
+		}
+		return nil, err
+	}
 	sessionMaxAge := int(cfg.Auth.Session.MaxAge / time.Second)
 	return auth.NewCookieSessionManager(
 		cfg.Auth.Session.Secret,
@@ -38,13 +56,26 @@ func provideCookieSessionManager(cfg *config.AppConfig) *auth.CookieSessionManag
 		sessionMaxAge,
 		cfg.Auth.Session.Secure,
 		cfg.Auth.Session.SameSite,
-	)
+	), nil
 }
 
-// provideStateStore creates the OAuth2 state store for CSRF protection.
-func provideStateStore() *auth.StateStore {
-	// State tokens are valid for 10 minutes
-	return auth.NewStateStore(10 * time.Minute)
+// defaultLoginMaxAge is how long an SSO login may take when
+// auth.session.state_max_age is not positive.
+const defaultLoginMaxAge = 10 * time.Minute
+
+// provideLoginCookie creates the cookie that carries an SSO login in progress
+// between its start and its callback, for auth.session.state_max_age.
+func provideLoginCookie(cfg *config.AppConfig) (*auth.LoginCookie, error) {
+	maxAge := cfg.Auth.Session.StateMaxAge
+	if maxAge <= 0 {
+		maxAge = defaultLoginMaxAge
+	}
+	return auth.NewLoginCookie(
+		cfg.Auth.Session.Secret,
+		cfg.Auth.Session.Name,
+		maxAge,
+		cfg.Auth.Session.Secure,
+	)
 }
 
 // provideSessionBlacklist creates the session blacklist for logout revocation.
@@ -169,8 +200,9 @@ func provideAuthConfig(cfg *config.AppConfig) *auth.Config {
 	}
 }
 
-// provideOIDCProvider creates the OIDC provider if OAuth2 is enabled.
-// It initializes synchronously during DI container setup.
+// provideOIDCProvider creates the OIDC provider if OAuth2 is enabled. It tries
+// discovery once during DI setup; registerOIDCProviderRetry and the next login
+// retry it after a failure.
 func provideOIDCProvider(cfg *config.AppConfig, authCfg *auth.Config, log *logger.Logger) auth.Provider {
 	if !cfg.Auth.OAuth2.Enabled || authCfg == nil {
 		log.Info("OAuth2/SSO authentication is disabled")
@@ -200,21 +232,71 @@ func provideOIDCProvider(cfg *config.AppConfig, authCfg *auth.Config, log *logge
 		logger.Str("client_id", authCfg.ClientID),
 		logger.Str("redirect_url", authCfg.RedirectURL))
 
-	// Use a background context with timeout for OIDC discovery
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	provider, err := auth.NewOIDCProvider(ctx, authCfg, log)
+	provider, err := auth.NewRetryingOIDCProvider(authCfg, log)
 	if err != nil {
-		log.Error("Failed to initialize OIDC provider - SSO will not work",
+		log.Error("Invalid OAuth2/OIDC configuration - SSO will not work",
 			logger.Err(err),
 			logger.Str("provider_url", authCfg.ProviderURL))
-		// Return nil to allow startup without SSO (if simple auth is enabled)
 		return nil
 	}
 
-	log.Info("OAuth2/OIDC provider initialized successfully")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := provider.Ready(ctx); err != nil {
+		log.Error("Failed to initialize OIDC provider - retrying in the background and on the next SSO login",
+			logger.Err(err),
+			logger.Str("provider_url", authCfg.ProviderURL))
+	}
 	return provider
+}
+
+// OIDCProviderRetryParams contains dependencies for the background retry.
+type OIDCProviderRetryParams struct {
+	fx.In
+
+	Lifecycle fx.Lifecycle
+	Config    *config.AppConfig
+	Provider  auth.Provider     `optional:"true"`
+	Metrics   *metrics.Registry `optional:"true"`
+}
+
+// registerOIDCProviderRetry publishes sso_provider_up and keeps retrying
+// discovery in the background while the identity provider is unreachable.
+// With SSO enabled but no provider built, the configuration is incomplete or
+// invalid, every login fails, and the gauge reads 0; it is absent only when
+// SSO is disabled.
+func registerOIDCProviderRetry(p OIDCProviderRetryParams) {
+	provider, ok := p.Provider.(*auth.RetryingOIDCProvider)
+	if !ok {
+		if p.Metrics != nil && p.Config != nil && p.Config.Auth.OAuth2.Enabled {
+			p.Metrics.SetSSOProviderUp(false)
+		}
+		return
+	}
+	if p.Metrics != nil {
+		provider.SetMetrics(p.Metrics)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	p.Lifecycle.Append(fx.Hook{
+		OnStart: func(context.Context) error {
+			go func() {
+				defer close(done)
+				provider.Run(ctx)
+			}()
+			return nil
+		},
+		OnStop: func(stopCtx context.Context) error {
+			cancel()
+			select {
+			case <-done:
+			case <-stopCtx.Done():
+			}
+			return nil
+		},
+	})
 }
 
 // provideMemorySessionStore creates an in-memory session store for OAuth2 sessions.

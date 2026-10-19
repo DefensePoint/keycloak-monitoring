@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -38,6 +39,12 @@ type MCPConfig struct {
 	// oversize result is replaced with ErrResultTooLarge. 0 or less falls
 	// back to the 1 MiB default; the cap cannot be disabled.
 	MaxResponseBytes int `mapstructure:"max_response_bytes"`
+
+	// SSOSignInMaxAge is how long an SSO user's MCP tokens keep working after
+	// their last SSO sign-in. A user disabled in the IdP cannot sign in, so
+	// their tokens stop within this time; signing in again restores them.
+	// Tokens of local users are not affected. 0 or less turns the check off.
+	SSOSignInMaxAge time.Duration `mapstructure:"sso_signin_max_age"`
 
 	// Database is the read-only role the MCP server connects with. It is
 	// required: there is no fallback to the main database block, which names
@@ -113,4 +120,5 @@ func setMCPDefaults(v *viper.Viper) {
 	v.SetDefault("mcp.rate.per_ip_per_minute", 300)
 	v.SetDefault("mcp.rate.burst", 30)
 	v.SetDefault("mcp.max_response_bytes", 1<<20)
+	v.SetDefault("mcp.sso_signin_max_age", "336h") // 14 days
 }

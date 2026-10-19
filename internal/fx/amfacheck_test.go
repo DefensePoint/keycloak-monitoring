@@ -19,11 +19,21 @@ func (acFakeAlertStore) GetAlertByID(_ context.Context, _, _ string) (*domain.Al
 	return nil, nil
 }
 func (acFakeAlertStore) SaveAlert(_ context.Context, _ *domain.Alert) error { return nil }
+func (acFakeAlertStore) ListOpenAlertsByCheck(context.Context, string, string) ([]*domain.Alert, error) {
+	return nil, nil
+}
+func (acFakeAlertStore) ResolveAlert(context.Context, string, string) error { return nil }
+func (acFakeAlertStore) AlertExists(context.Context, string, string) (bool, error) {
+	return false, nil
+}
 
 // acFakeNotifier satisfies amfacheck.NotificationService.
 type acFakeNotifier struct{}
 
 func (acFakeNotifier) NotifyAlert(_ context.Context, _ *domain.Alert) error { return nil }
+func (acFakeNotifier) NotifyAlertResolution(_ context.Context, _ *domain.Alert) error {
+	return nil
+}
 
 // acRealmRepoStub satisfies realmLister.
 type acRealmRepoStub struct{}
@@ -92,7 +102,7 @@ func TestBuildAmfaCheckServices_SkipsWhenGloballyDisabled(t *testing.T) {
 		"t1": {Amfa: &config.AmfaTenantConfig{Enabled: true}},
 	}
 
-	svcs := buildAmfaCheckServices(cfg, acRegistry("t1"), acRealmRepoStub{}, acFakeAlertStore{}, acFakeNotifier{}, nil)
+	svcs := buildAmfaCheckServices(cfg, acRegistry("t1"), acRealmRepoStub{}, acFakeAlertStore{}, acFakeNotifier{}, nil, nil)
 	if len(svcs) != 0 {
 		t.Errorf("expected 0 services when globally disabled, got %d", len(svcs))
 	}
@@ -108,7 +118,7 @@ func TestBuildAmfaCheckServices_OnePerEnabledTenant(t *testing.T) {
 		"t3": {Amfa: nil},
 	}
 
-	svcs := buildAmfaCheckServices(cfg, acRegistry("t1", "t2", "t3"), acRealmRepoStub{}, acFakeAlertStore{}, acFakeNotifier{}, nil)
+	svcs := buildAmfaCheckServices(cfg, acRegistry("t1", "t2", "t3"), acRealmRepoStub{}, acFakeAlertStore{}, acFakeNotifier{}, nil, nil)
 	if len(svcs) != 1 {
 		t.Errorf("expected 1 service (only t1), got %d", len(svcs))
 	}
@@ -122,7 +132,7 @@ func TestBuildAmfaChecks_EnablesNewRulesFromConfig(t *testing.T) {
 	amfaCfg.ApplyDefaults()
 
 	checks := buildAmfaChecks("tenant-1", amfacheck.RealmsFunc(func(context.Context) ([]string, error) { return nil, nil }),
-		acRepoStub{}, amfaCfg, noopAmfacheckLogger{})
+		acRepoStub{}, amfaCfg, nil, noopAmfacheckLogger{})
 
 	want := map[string]bool{
 		"amfa-login-error-by-client":  false,
@@ -146,7 +156,7 @@ func TestBuildAmfaChecks_NewRulesAbsentWhenDisabled(t *testing.T) {
 	amfaCfg.ApplyDefaults() // all three new checks default to Enabled: false
 
 	checks := buildAmfaChecks("tenant-1", amfacheck.RealmsFunc(func(context.Context) ([]string, error) { return nil, nil }),
-		acRepoStub{}, amfaCfg, noopAmfacheckLogger{})
+		acRepoStub{}, amfaCfg, nil, noopAmfacheckLogger{})
 
 	disallowed := map[string]bool{
 		"amfa-login-error-by-client":  true,
@@ -156,6 +166,24 @@ func TestBuildAmfaChecks_NewRulesAbsentWhenDisabled(t *testing.T) {
 	for _, c := range checks {
 		if disallowed[c.GetCheckType()] {
 			t.Errorf("check %q present despite being disabled by default", c.GetCheckType())
+		}
+	}
+}
+
+// Rule 2's notion of "still active" follows the quiet period alerts resolve
+// after, and never drops below two polls, or an attempt between polls would
+// never be seen as recent.
+func TestRepeatedRiskyActiveWithin(t *testing.T) {
+	for _, tc := range []struct {
+		resolveAfter, poll, want time.Duration
+	}{
+		{15 * time.Minute, time.Minute, 15 * time.Minute},
+		{15 * time.Minute, 10 * time.Minute, 20 * time.Minute},
+		{time.Hour, 5 * time.Minute, time.Hour},
+	} {
+		got := repeatedRiskyActiveWithin(config.AmfaCheckerConfig{ResolveAfter: tc.resolveAfter, PollInterval: tc.poll})
+		if got != tc.want {
+			t.Errorf("resolve_after %s, poll %s: %s, want %s", tc.resolveAfter, tc.poll, got, tc.want)
 		}
 	}
 }

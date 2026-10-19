@@ -111,6 +111,9 @@ func (r *Repository) Create(ctx context.Context, t *domain.KeycloakTenant) error
 		return err
 	}
 	if err := r.db.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := unsetOtherDefaults(tx, t); err != nil {
+			return err
+		}
 		if err := tx.Create(&dbTenant).Error; err != nil {
 			return fmt.Errorf("failed to create tenant: %w", err)
 		}
@@ -144,10 +147,39 @@ func (r *Repository) Update(ctx context.Context, t *domain.KeycloakTenant) error
 		return err
 	}
 	dbTenant.ID = t.ID
-	if err := r.db.DB().WithContext(ctx).Save(&dbTenant).Error; err != nil {
-		return fmt.Errorf("failed to update tenant: %w", err)
+	if err := r.db.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := unsetOtherDefaults(tx, t); err != nil {
+			return err
+		}
+		if err := tx.Omit(healthColumns...).Save(&dbTenant).Error; err != nil {
+			return fmt.Errorf("failed to update tenant: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	t.UpdatedAt = dbTenant.UpdatedAt
+	return nil
+}
+
+// healthColumns are written by UpdateHealth and UpdateError only. Update's
+// Save writes every other column, and leaves these alone: the tenant it saves
+// was copied before a health check may have written them, and saving the copy
+// would put the old health back.
+var healthColumns = []string{"last_health_check", "health_status", "health_message", "last_error", "last_error_at"}
+
+// unsetOtherDefaults clears is_default on every tenant but t. It runs in the
+// same transaction as the write that makes t the default, so a write that
+// fails afterwards leaves the previous default where it was.
+func unsetOtherDefaults(tx *gorm.DB, t *domain.KeycloakTenant) error {
+	if !t.IsDefault {
+		return nil
+	}
+	if err := tx.Model(&database.KeycloakTenant{}).
+		Where("is_default = ? AND tenant_id <> ?", true, t.TenantID).
+		Update("is_default", false).Error; err != nil {
+		return fmt.Errorf("failed to unset default tenants: %w", err)
+	}
 	return nil
 }
 
@@ -193,17 +225,6 @@ func (r *Repository) UpdateError(ctx context.Context, tenantID, errorMsg string)
 			"updated_at":    now,
 		}).Error; err != nil {
 		return fmt.Errorf("failed to update tenant error: %w", err)
-	}
-	return nil
-}
-
-// UnsetDefault unsets all tenants as default.
-func (r *Repository) UnsetDefault(ctx context.Context) error {
-	if err := r.db.DB().WithContext(ctx).
-		Model(&database.KeycloakTenant{}).
-		Where("is_default = ?", true).
-		Update("is_default", false).Error; err != nil {
-		return fmt.Errorf("failed to unset default tenants: %w", err)
 	}
 	return nil
 }

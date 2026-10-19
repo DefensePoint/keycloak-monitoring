@@ -2,6 +2,7 @@ package fx
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/fx"
 
@@ -42,6 +43,22 @@ func (a amfaCheckAlertStore) GetAlertByID(ctx context.Context, tenantID, alertID
 
 func (a amfaCheckAlertStore) SaveAlert(ctx context.Context, alert *domain.Alert) error {
 	return a.repo.Save(ctx, alert)
+}
+
+func (a amfaCheckAlertStore) ListOpenAlertsByCheck(ctx context.Context, tenantID, checkType string) ([]*domain.Alert, error) {
+	return a.repo.ListOpenByCheck(ctx, tenantID, checkType)
+}
+
+func (a amfaCheckAlertStore) AlertExists(ctx context.Context, tenantID, alertID string) (bool, error) {
+	return a.repo.ExistsIncludingDeleted(ctx, tenantID, alertID)
+}
+
+func (a amfaCheckAlertStore) LatestFirstDetected(ctx context.Context, tenantID, checkType, realm string) (time.Time, bool, error) {
+	return a.repo.LatestFirstDetected(ctx, tenantID, checkType, realm)
+}
+
+func (a amfaCheckAlertStore) ResolveAlert(ctx context.Context, tenantID, alertID string) error {
+	return a.repo.Resolve(ctx, tenantID, alertID)
 }
 
 // amfacheckLoggerAdapter adapts *logger.Logger to amfacheck.Logger, converting
@@ -93,6 +110,7 @@ type AmfaCheckParams struct {
 	Alerts   alerts.Repository
 	Notifier notifications.Service
 	Keycloak keycloak.Service
+	Silences alerts.SilenceManager
 	Logger   *logger.Logger
 }
 
@@ -101,7 +119,7 @@ type AmfaCheckParams struct {
 // the lifecycle starter (below) starts/stops the same Service instances.
 func provideAmfaCheckRunner(p AmfaCheckParams) *amfacheck.Runner {
 	services := buildAmfaCheckServices(p.Config, p.Registry, p.Keycloak,
-		amfaCheckAlertStore{repo: p.Alerts}, p.Notifier, p.Logger)
+		amfaCheckAlertStore{repo: p.Alerts}, p.Notifier, p.Silences, p.Logger)
 	return amfacheck.NewRunner(services)
 }
 
@@ -113,6 +131,7 @@ func buildAmfaCheckServices(
 	realms realmLister,
 	alertStore amfacheck.AlertStore,
 	notifier amfacheck.NotificationService,
+	silencer amfacheck.Silencer,
 	log *logger.Logger,
 ) map[string]amfacheck.Service {
 	amfaCfg := cfg.Keycloak.Global.AmfaChecker
@@ -153,8 +172,15 @@ func buildAmfaCheckServices(
 			return out, nil
 		}
 
-		checks := buildAmfaChecks(tenantID, amfacheck.RealmsFunc(realmsFn), repo, amfaCfg, adaptedLog)
-		services[tenantID] = amfacheck.NewService(tenantID, checks, alertStore, notifier, adaptedLog, amfaCfg.PollInterval)
+		var resume amfacheck.ResumeFunc
+		if latest, ok := alertStore.(latestAlertFinder); ok {
+			resume = func(ctx context.Context, checkType, realm string) (time.Time, bool, error) {
+				return latest.LatestFirstDetected(ctx, tenantID, checkType, realm)
+			}
+		}
+		checks := buildAmfaChecks(tenantID, amfacheck.RealmsFunc(realmsFn), repo, amfaCfg, resume, adaptedLog)
+		services[tenantID] = amfacheck.NewService(tenantID, checks, alertStore, notifier, adaptedLog, amfaCfg.PollInterval,
+			amfacheck.WithResolveAfter(amfaCfg.ResolveAfter), amfacheck.WithSilencer(silencer))
 		logInfo(log, "amfacheck service constructed",
 			logger.Str("tenant_id", tenantID),
 			logger.Int("checks", len(checks)),
@@ -164,25 +190,35 @@ func buildAmfaCheckServices(
 	return services
 }
 
+// latestAlertFinder lets a restarted per-event check resume from the newest
+// alert it raised.
+type latestAlertFinder interface {
+	LatestFirstDetected(ctx context.Context, tenantID, checkType, realm string) (time.Time, bool, error)
+}
+
 // buildAmfaChecks builds the enabled checks for one tenant.
 func buildAmfaChecks(
 	tenantID string,
 	realmsFn amfacheck.RealmsFunc,
 	repo amfa.Repository,
 	amfaCfg config.AmfaCheckerConfig,
+	resume amfacheck.ResumeFunc,
 	log amfacheck.Logger,
 ) []amfacheck.Check {
 	c := amfaCfg.Checks
 	var out []amfacheck.Check
 	if c.RiskRejected.Enabled {
-		out = append(out, amfacheck.NewRiskRejectedCheck(tenantID, realmsFn, repo, amfaCfg.PollInterval, log))
+		out = append(out, amfacheck.NewRiskRejectedCheck(tenantID, realmsFn, repo, amfaCfg.PollInterval, log,
+			amfacheck.WithResume(resume)))
 	}
 	if c.RepeatedRisky.Enabled {
 		out = append(out, amfacheck.NewRepeatedRiskyCheck(tenantID, realmsFn, repo,
-			c.RepeatedRisky.Threshold, c.RepeatedRisky.Window, c.RepeatedRisky.MinRiskLevel, log))
+			c.RepeatedRisky.Threshold, c.RepeatedRisky.Window, c.RepeatedRisky.MinRiskLevel,
+			repeatedRiskyActiveWithin(amfaCfg), log))
 	}
 	if c.VPNRisky.Enabled {
-		out = append(out, amfacheck.NewVPNRiskyCheck(tenantID, realmsFn, repo, amfaCfg.PollInterval, log))
+		out = append(out, amfacheck.NewVPNRiskyCheck(tenantID, realmsFn, repo, amfaCfg.PollInterval, log,
+			amfacheck.WithResume(resume)))
 	}
 	if c.LoginError.Enabled {
 		out = append(out, amfacheck.NewLoginErrorCheck(tenantID, realmsFn, repo,
@@ -231,4 +267,12 @@ func startAmfaCheckServices(lc fx.Lifecycle, runner *amfacheck.Runner, log *logg
 		})
 	}
 	logInfo(log, "amfacheck lifecycle hooks registered", logger.Int("service_count", len(runner.Services())))
+}
+
+// repeatedRiskyActiveWithin is how recent a user's last risky attempt must be
+// for rule 2 to count them as still active: the quiet period alerts resolve
+// after, and never less than two polls, so every attempt is seen as recent by
+// at least one poll.
+func repeatedRiskyActiveWithin(cfg config.AmfaCheckerConfig) time.Duration {
+	return max(cfg.ResolveAfter, 2*cfg.PollInterval)
 }

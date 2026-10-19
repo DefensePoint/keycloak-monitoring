@@ -2,13 +2,14 @@ import { useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Box } from "@mui/material";
 import { useTenant } from "@/shared/context";
+import { AlertBanner } from "@/shared/components";
 import {
   UserDetailsHeader,
   UserInfoCard,
   UserEventsFilters,
   UserEventsTable,
 } from "../components";
-import { useUserDetails, useUserEvents } from "../hooks";
+import { useUserDetails, useUserEvents, USER_EVENTS_LIMIT } from "../hooks";
 import type { UserEvent } from "../types";
 
 export function UserDetailsPage() {
@@ -21,7 +22,6 @@ export function UserDetailsPage() {
 
   // State for filters
   const [limit, setLimit] = useState(50);
-  const [offset, setOffset] = useState(0);
   const [severityFilter, setSeverityFilter] = useState<string>("");
   const [sourceFilter, setSourceFilter] = useState<string>("");
   const [searchTerm, setSearchTerm] = useState<string>("");
@@ -32,7 +32,6 @@ export function UserDetailsPage() {
     (start: Date | null, end: Date | null) => {
       setStartTime(start ? start.toISOString() : undefined);
       setEndTime(end ? end.toISOString() : undefined);
-      setOffset(0);
     },
     [],
   );
@@ -49,24 +48,44 @@ export function UserDetailsPage() {
   const userGroups = userDetailsResponse?.groups || [];
   const roleMappings = userDetailsResponse?.roleMappings;
 
-  // Fetch all events and filter by user_id on the client side
+  // Fetch this user's events in the realm named in the URL
   const { data: eventsResponse, isLoading: eventsLoading } = useUserEvents({
     tenantId: selectedTenant?.tenant_id,
+    realmName,
     userId,
     startTime,
     endTime,
+    severity: severityFilter || undefined,
   });
 
   const events = eventsResponse?.events || [];
+  // An API that predates the user_id filter ignores it and answers with the
+  // tenant's events; any other user's row gives that away. Its total is then
+  // the tenant's, so no count may be claimed for this user.
+  const serverScoped = events.every(
+    (event: UserEvent) => event.user_id === userId,
+  );
+  // The server caps a page at 1000 rows; say so rather than let a longer
+  // history look complete.
+  const totalForUser = eventsResponse?.total ?? 0;
+  const truncated = serverScoped && totalForUser > events.length;
+  // A total below the rows returned cannot be true: /events answers 0 when
+  // its count query fails. If the list also hit the cap it may be partial,
+  // so warn without claiming a number.
+  const maybeTruncated =
+    serverScoped &&
+    totalForUser < events.length &&
+    events.length >= USER_EVENTS_LIMIT;
 
-  // Filter events by user_id
+  // The server already scopes by user_id. This check stays so the page is
+  // no worse than before against an API that predates the user_id filter.
   const userEvents = events.filter(
     (event: UserEvent) => event.user_id === userId,
   );
 
-  // Apply additional client-side filtering
+  // Apply additional client-side filtering. Severity is already applied by
+  // the server.
   const filteredEvents = userEvents.filter((event: UserEvent) => {
-    if (severityFilter && event.severity !== severityFilter) return false;
     if (
       sourceFilter &&
       !event.source.toLowerCase().includes(sourceFilter.toLowerCase())
@@ -82,14 +101,10 @@ export function UserDetailsPage() {
     return true;
   });
 
-  // Paginate the filtered results
-  const paginatedEvents = filteredEvents.slice(offset, offset + limit);
-
   const handleResetFilters = useCallback(() => {
     setSeverityFilter("");
     setSourceFilter("");
     setSearchTerm("");
-    setOffset(0);
   }, []);
 
   const handleEventClick = useCallback(
@@ -130,11 +145,34 @@ export function UserDetailsPage() {
         onTimeRangeChange={handleTimeRangeChange}
       />
 
+      {truncated && (
+        <AlertBanner
+          severity="warning"
+          message={`Showing the newest ${events.length} of ${totalForUser} events for this user. Narrow the time range to see older ones.`}
+          sx={{ mb: 2 }}
+        />
+      )}
+      {maybeTruncated && (
+        <AlertBanner
+          severity="warning"
+          message={`Showing the newest ${events.length} events for this user; there may be more. Narrow the time range to see older ones.`}
+          sx={{ mb: 2 }}
+        />
+      )}
+      {!serverScoped && (
+        <AlertBanner
+          severity="warning"
+          message="The server could not filter by user, so this list only covers the tenant's most recent events and may be incomplete."
+          sx={{ mb: 2 }}
+        />
+      )}
+
       {/* Events Table */}
       <UserEventsTable
-        events={paginatedEvents}
+        events={filteredEvents}
         loading={isLoading}
         onEventClick={handleEventClick}
+        pageSize={limit}
       />
     </Box>
   );

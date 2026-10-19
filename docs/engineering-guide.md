@@ -26,7 +26,7 @@ Developer guide for working with the Keycloak Monitoring Tool codebase.
 - **Git**: For version control
 - **Make**: Build automation
 - **Docker**: (Optional) For containerized development
-- **Swag**: (Optional) For Swagger documentation generation (`go install github.com/swaggo/swag/cmd/swag@latest`)
+- **Swag**: nothing to install. `make swagger` runs swag v1.16.6, the version the Makefile pins (`SWAG_VERSION`)
 
 ### Quick Setup
 
@@ -44,7 +44,7 @@ docker run -d --name postgres -p 5432:5432 \
   -e POSTGRES_DB=monitoring \
   -e POSTGRES_USER=monitoring \
   -e POSTGRES_PASSWORD=monitoring_password \
-  timescale/timescaledb:latest-pg16
+  timescale/timescaledb:2.30.2-pg16
 
 # Copy configuration
 cp config.yaml.example config.yaml
@@ -105,14 +105,14 @@ Create a `.env.local` file for development:
 # Database
 export MONITORING_DATABASE_HOST=localhost
 export MONITORING_DATABASE_PASSWORD=monitoring_password
+export MONITORING_DATABASE_SSL_MODE=disable   # the local Postgres has no TLS
 
-# Keycloak (client_credentials grant — dedicated confidential client)
-export MONITORING_KEYCLOAK_SERVER_URL=http://localhost:8080
-export MONITORING_KEYCLOAK_CLIENT_ID=monitoring-service
-export MONITORING_KEYCLOAK_CLIENT_SECRET=your-client-secret
+# Keycloak tenants are configured under keycloak.tenants in config.yaml;
+# reference the client secret there as client_secret: "${LOCAL_KC_CLIENT_SECRET}"
+export LOCAL_KC_CLIENT_SECRET=your-client-secret
 
 # Auth
-export MONITORING_AUTH_SESSION_SECRET=dev-secret-key-minimum-32-characters
+export MONITORING_AUTH_SESSION_SECRET=$(openssl rand -base64 32)
 
 # Logging
 export MONITORING_LOGGING_LEVEL=debug
@@ -258,6 +258,20 @@ Create a pull request on GitHub/GitLab.
 
 > **No testify in this project.** All Go tests use stdlib `testing` (`if got != want { t.Errorf(...) }` style). Don't add `github.com/stretchr/testify` as a dependency.
 
+### Suites CI does not run
+
+The GitHub Actions workflow builds every binary and runs the Go unit tests (`go test -short -race ./...`) and the frontend tests. Every suite below needs a database, a Keycloak, an AMFA instance or a whole deployment, so CI does not run it. Run the suites that cover what a pull request touches before asking for review, and say in the pull request which ones you ran. The DB-backed and destructive DB tests need only a throwaway Postgres; see [Backend — DB-backed unit tests](#backend--db-backed-unit-tests) below.
+
+| Suite | Gate | Needs | Run by hand when a pull request touches |
+|---|---|---|---|
+| AMFA repository and check (`amfa/postgres/repository_integration_test.go`, `amfacheck/integration_test.go`) | `-tags=integration` and `AMFA_TEST_DSN` | An AMFA Postgres with AMFA's schema, such as a local AMFA stack, and at least one `auth_process` row: several tests borrow its foreign-key values and skip without one. The tests insert and delete their own rows. | `amfa/postgres/`, `amfacheck/` |
+| AMFA schema check (`amfa/postgres/schema_check_integration_test.go`) | `-tags=integration` and `AMFA_DESTRUCTIVE_TEST_DSN` | A throwaway Postgres it may `CREATE TABLE` in. It drops `alembic_version`, and `testdb.RequireDisposable` refuses a database name without a `test`, `tmp` or `scratch` component. | `amfa/postgres/` |
+| AMFA API transport parity (`amfa/parity_integration_test.go`) | `-tags=integration` and all of `AMFA_TEST_DSN`, `AMFA_TEST_API_URL`, `AMFA_TEST_REALM`, `AMFA_TEST_TOKEN` | A running AMFA API and the database behind it, a realm with data in the last 30 days, and a bearer token for that realm. It compares the Postgres and HTTP repositories on that window, and a test skips when the window holds none of the rows it compares, such as geolocated, VPN-flagged or risk-rejected events. | `amfa/` |
+| Auth OIDC e2e (`tests/auth_oidc_e2e_test.go`, `tests/auth_oidc_account_status_e2e_test.go`) | `-tags=integration`, no `-short`, and both `KMT_AUTH_E2E_KEYCLOAK_URL` and `KMT_AUTH_E2E_DATABASE_DSN` | A throwaway Keycloak (`start-dev` is enough) and a throwaway Postgres. It creates and deletes its own realm and drops the DSN's schema. | `auth/`, `users/` |
+| Alert pipeline e2e (`tests/alerts_integration_test.go`) | `-tags=integration`, no `-short`, and `KMT_E2E_TEST_DATABASE_DSN` (`KMT_E2E_TEST_TENANT_ID` optional) | A whole running deployment: the stack, the server with its checkers, and that deployment's database. The test tenant (`e2e-alerts-fixture-8f42c1`, or the one in `KMT_E2E_TEST_TENANT_ID`) must be configured and enabled there, with `keycloak.global.event_checker.enabled` on and a notifier for that tenant, because the test waits for alerts and for `notification_logs` rows. Run with `-timeout 15m`. | `alerts/`, `events/`, `eventscheck/`, `metricscheck/`, `notifications/` |
+
+The alert pipeline e2e stays out of CI for good: it needs a whole running deployment (the stack, plus the server with its checkers polling every 5 minutes), it writes fixture events and a health row into that deployment's database, and it waits up to 6 minutes for each alert. The AMFA repository and parity suites stay out because they need AMFA's schema and data, which live in another repository; a job could provide them only by building an AMFA database from AMFA's migrations.
+
 ### Backend — running with the Makefile
 
 ```bash
@@ -270,19 +284,19 @@ make test-all               # both
 
 ### Backend — running with Docker (no local Go required)
 
-The project builds with `golang:1.25.14-alpine` (see `build/Dockerfile`). Same image runs tests:
+The project builds with `golang:1.27.2-alpine` (see `build/Dockerfile`). Same image runs tests:
 
 ```bash
 # Warm cache once (downloads modules, ~1 min):
 docker run --rm \
   -v "$PWD:/app" -v go-mod-cache:/go/pkg/mod -w /app \
-  golang:1.25.14-alpine \
+  golang:1.27.2-alpine \
   sh -c "apk add --no-cache git build-base && go mod download"
 
 # Subsequent runs are fast (~30s):
 docker run --rm \
   -v "$PWD:/app" -v go-mod-cache:/go/pkg/mod -w /app \
-  golang:1.25.14-alpine \
+  golang:1.27.2-alpine \
   sh -c "apk add --no-cache git build-base >/dev/null 2>&1 && go build ./... && go test -short ./..."
 ```
 
@@ -312,15 +326,30 @@ The auth OIDC e2e is the one exception to that rule, and deliberately so: it nee
 
 | Variable | Read by | Point it at |
 |---|---|---|
-| `KMT_TEST_DATABASE_DSN` | The events repository tests in `events/postgres`, and the client-secret migration test in `pkg/database`. | Any dev database. These remove only the fixtures they create. |
-| `KMT_DESTRUCTIVE_TEST_DATABASE_DSN` | The RBAC permission migration in `pkg/database/client_test.go`, and the tenant purge tests in `pkg/database` and `tenant/postgres`. | A throwaway database only. These run `DROP SCHEMA public CASCADE` and delete the admin, operator and viewer rows globally. |
+| `KMT_TEST_DATABASE_DSN` | The repository tests in `events/postgres`, `alerts/postgres`, `keycloak/postgres` and `tenant/postgres` (the enabled-flag tests), the database-backed handler tests in `internal/http/chi`, the MCP security posture suite in `internal/mcp`, and the client-secret migration test in `pkg/database`. They do not skip under `-short`, so a `-short` run with the variable set includes them. | Any dev database. These remove only the fixtures they create. |
+| `KMT_DESTRUCTIVE_TEST_DATABASE_DSN` | The RBAC permission migration in `pkg/database/client_test.go`, the tenant purge tests in `pkg/database` and `tenant/postgres`, the `users` migration and index tests in `pkg/database` (`email_verified_migration_test.go`, `user_unique_indexes_test.go`, `username_index_guard_test.go`), and the deleted-account tests in `users/postgres`. All of them also skip under `-short`. | A throwaway database only. These run `DROP SCHEMA public CASCADE`, delete the admin, operator and viewer rows globally, drop and rebuild the unique indexes on `users`, rewrite `email_verified` across every matching `users` row, and reset the `users` id sequence. |
 
 Keep them separate. The destructive helpers also refuse to start unless the database name carries a `test`, `tmp` or `scratch` component, so a DSN aimed at `monitoring` fails loudly instead of wiping it, but that is a backstop and not a licence to reuse one variable for both.
 
-Omitting `-p 1` below does not fail with a message about parallelism: one
-package drops the schema while the other is mid-migration, and what you see is
-`relation "user_roles" does not exist`. If a destructive run fails that way,
-check `-p 1` before believing the schema is at fault.
+These suites share one database and clean up by deleting, dropping and
+migrating, so two packages must never run against it at once. They enforce that
+themselves: each takes a Postgres advisory lock (`testdb.Lock`) before touching
+the database and holds it until its test process exits, so packages sharing a
+database take turns whatever `-p` is, and so do two checkouts or two people
+pointed at the same one. The lock lives in the server's `postgres` database,
+keyed by the test database's name, so a waiting package never has a session in
+the database under test; if that role cannot connect to `postgres`, the lock
+falls back to the test database itself. A package that has to wait logs `waiting for the shared
+test database`. Any new test must read either variable with `testdb.DSN(t, name)`
+and then call `testdb.Lock(t, dsn)`; `internal/testdb` has a test that fails
+when one reads it directly or skips the lock.
+
+A test whose variable is unset skips, which keeps a plain `go test ./...`
+working without a database. A skip is invisible, though: without `-v`, a
+package whose every test skipped prints the same `ok` as one whose every test
+passed. So whenever a run is meant to exercise the database, list its variables
+in `KMT_REQUIRE_TEST_DSNS` (comma- or space-separated). A test whose listed
+variable is unset then fails and names it.
 
 Host port 55432 below is deliberate. The local stack publishes its `monitoring`
 database on 5433 and a server deployment publishes one on 5432, so binding the
@@ -331,21 +360,22 @@ reaches a real database.
 # Spin up a disposable Postgres (or use any existing dev DB):
 docker run -d --name kmt-test-db --rm \
   -e POSTGRES_DB=kmt_test -e POSTGRES_USER=kmt -e POSTGRES_PASSWORD=kmt \
-  -p 55432:5432 postgres:17-alpine
+  -p 55432:5432 timescale/timescaledb:2.30.2-pg16
 
-# Run with the DSN set:
+# Run with the DSN set, and required, so a typo in it fails rather than skips:
 KMT_DESTRUCTIVE_TEST_DATABASE_DSN="host=localhost port=55432 dbname=kmt_test user=kmt password=kmt sslmode=disable" \
+KMT_REQUIRE_TEST_DSNS=KMT_DESTRUCTIVE_TEST_DATABASE_DSN \
   go test -v ./pkg/database/...
 
 # Tear down:
 docker stop kmt-test-db
 ```
 
-`pkg/database` and `tenant/postgres` both run `DROP SCHEMA public CASCADE` against `KMT_DESTRUCTIVE_TEST_DATABASE_DSN`, so they cannot share a database with a concurrently running package. Pass `-p 1` whenever more than one of them is in the same invocation:
+`pkg/database` and `tenant/postgres` both run `DROP SCHEMA public CASCADE` against `KMT_DESTRUCTIVE_TEST_DATABASE_DSN`. The lock above keeps them from running at the same time, so they can go in one invocation:
 
 ```bash
 KMT_DESTRUCTIVE_TEST_DATABASE_DSN="host=localhost port=55432 dbname=kmt_test user=kmt password=kmt sslmode=disable" \
-  go test -p 1 ./pkg/database/... ./tenant/postgres/...
+  go test ./pkg/database/... ./tenant/postgres/...
 ```
 
 ### Frontend tests
@@ -494,7 +524,7 @@ docker images <image>:latest --format 'Latest Image ID: sha256:{{.ID}}'
 
 ### 2. `web/package-lock.json` must be regenerated inside the same Node image the Dockerfile uses
 
-The Dockerfile's frontend stage uses `node:20-alpine` (npm 10). If you regenerate the lockfile on a macOS host running npm 11+, `npm ci` in the Docker build will fail with messages like:
+The Dockerfile's frontend stage uses `node:26.11.1-alpine` (npm 11). If you regenerate the lockfile on a host whose npm differs from the image's, `npm ci` in the Docker build can fail with messages like:
 
 ```
 Missing: yaml@2.9.0 from lock file
@@ -506,7 +536,7 @@ or the build will succeed but rollup will crash at runtime with:
 Cannot find module '@rollup/rollup-linux-arm64-musl'
 ```
 
-(because the host-generated lockfile only recorded the host's native rollup binary, not the linux-arm64-musl one the container needs.)
+(because the host-generated lockfile only recorded the host's native bundler binary, not the linux-arm64-musl one the container needs. Vite 8 bundles with rolldown, which ships per-platform binaries the same way.)
 
 **Fix — always regenerate the lockfile in the same image:**
 
@@ -515,11 +545,11 @@ cd /path/to/kmt
 docker run --rm \
   -v "$PWD/web:/web" -w /web \
   --platform linux/arm64 \
-  node:20-alpine \
+  node:26.11.1-alpine \
   sh -c "rm -f package-lock.json && npm install --no-audit --no-fund"
 ```
 
-This produces a lockfile that lists every platform's optional deps (rollup ships per-platform binaries), so subsequent `npm ci` in the Docker build can install whatever the build container needs.
+This produces a lockfile that lists every platform's optional deps (rolldown ships per-platform binaries), so subsequent `npm ci` in the Docker build can install whatever the build container needs.
 
 ### 3. Docker Desktop VM disk fills up silently
 
@@ -868,14 +898,17 @@ func main() {
 ### Generating Swagger Documentation
 
 ```bash
-# Install swag
-go install github.com/swaggo/swag/cmd/swag@latest
+# Regenerate docs/swagger with swag v1.16.6 and commit the result
+make swagger
 
-# Generate docs
-swag init -g cmd/server/main.go -o docs/swagger
+# Check that docs/swagger is up to date
+make swagger-check
 
 # Access swagger UI at /swagger/index.html
 ```
+
+`make swagger` runs `go run github.com/swaggo/swag/cmd/swag@v1.16.6`, so no local install is needed and everyone generates with the same version. To move to a newer swag, change `SWAG_VERSION` in the Makefile and the `github.com/swaggo/swag` requirement in `go.mod` together, then run `make swagger`.
+
 
 ## Database Development
 

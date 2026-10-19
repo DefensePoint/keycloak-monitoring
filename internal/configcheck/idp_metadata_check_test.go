@@ -9,6 +9,7 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/saferequest"
 )
 
 func TestNewIdentityProviderMetadataCheck(t *testing.T) {
@@ -19,7 +20,7 @@ func TestNewIdentityProviderMetadataCheck(t *testing.T) {
 	certWarningDays := 30
 	certCheckTimeout := 30 * time.Second
 
-	check := NewIdentityProviderMetadataCheck(client, log, realms, tenantID, certWarningDays, certCheckTimeout)
+	check := NewIdentityProviderMetadataCheck(client, log, realms, tenantID, certWarningDays, certCheckTimeout, saferequest.Policy{})
 
 	if check == nil {
 		t.Fatal("NewIdentityProviderMetadataCheck returned nil")
@@ -81,7 +82,7 @@ func TestIdentityProviderMetadataCheck_Execute(t *testing.T) {
 		{
 			name: "SAML provider with metadata URL - no alert",
 			realms: []*keycloakadmin.RealmRepresentation{
-				{Realm: "master", Enabled: true},
+				{ID: "master-id", Realm: "master", Enabled: true},
 			},
 			identityProviders: map[string][]*keycloakadmin.IdentityProviderRepresentation{
 				"master": {
@@ -101,7 +102,7 @@ func TestIdentityProviderMetadataCheck_Execute(t *testing.T) {
 		{
 			name: "SAML provider without metadata URL - creates alert",
 			realms: []*keycloakadmin.RealmRepresentation{
-				{Realm: "master", Enabled: true},
+				{ID: "master-id", Realm: "master", Enabled: true},
 			},
 			identityProviders: map[string][]*keycloakadmin.IdentityProviderRepresentation{
 				"master": {
@@ -122,7 +123,7 @@ func TestIdentityProviderMetadataCheck_Execute(t *testing.T) {
 		{
 			name: "SAML provider with empty metadata URL - creates alert",
 			realms: []*keycloakadmin.RealmRepresentation{
-				{Realm: "master", Enabled: true},
+				{ID: "master-id", Realm: "master", Enabled: true},
 			},
 			identityProviders: map[string][]*keycloakadmin.IdentityProviderRepresentation{
 				"master": {
@@ -144,7 +145,7 @@ func TestIdentityProviderMetadataCheck_Execute(t *testing.T) {
 		{
 			name: "OIDC provider - no alert (not SAML)",
 			realms: []*keycloakadmin.RealmRepresentation{
-				{Realm: "master", Enabled: true},
+				{ID: "master-id", Realm: "master", Enabled: true},
 			},
 			identityProviders: map[string][]*keycloakadmin.IdentityProviderRepresentation{
 				"master": {
@@ -162,8 +163,8 @@ func TestIdentityProviderMetadataCheck_Execute(t *testing.T) {
 		{
 			name: "Multiple realms with mixed providers",
 			realms: []*keycloakadmin.RealmRepresentation{
-				{Realm: "master", Enabled: true},
-				{Realm: "test", Enabled: true},
+				{ID: "master-id", Realm: "master", Enabled: true},
+				{ID: "test-id", Realm: "test", Enabled: true},
 			},
 			identityProviders: map[string][]*keycloakadmin.IdentityProviderRepresentation{
 				"master": {
@@ -219,8 +220,8 @@ func TestIdentityProviderMetadataCheck_Execute(t *testing.T) {
 		{
 			name: "Specific realms configured",
 			realms: []*keycloakadmin.RealmRepresentation{
-				{Realm: "master", Enabled: true},
-				{Realm: "test", Enabled: true},
+				{ID: "master-id", Realm: "master", Enabled: true},
+				{ID: "test-id", Realm: "test", Enabled: true},
 			},
 			identityProviders: map[string][]*keycloakadmin.IdentityProviderRepresentation{
 				"master": {
@@ -248,7 +249,7 @@ func TestIdentityProviderMetadataCheck_Execute(t *testing.T) {
 		},
 		{
 			name:              "No identity providers - no alerts",
-			realms:            []*keycloakadmin.RealmRepresentation{{Realm: "master", Enabled: true}},
+			realms:            []*keycloakadmin.RealmRepresentation{{ID: "master-id", Realm: "master", Enabled: true}},
 			identityProviders: map[string][]*keycloakadmin.IdentityProviderRepresentation{},
 			configuredRealms:  []string{},
 			expectedAlerts:    0,
@@ -263,7 +264,7 @@ func TestIdentityProviderMetadataCheck_Execute(t *testing.T) {
 				identityProviders: tt.identityProviders,
 			}
 			log := logger.NewNoop()
-			check := NewIdentityProviderMetadataCheck(client, log, tt.configuredRealms, "test-tenant", 30, 30*time.Second)
+			check := NewIdentityProviderMetadataCheck(client, log, tt.configuredRealms, "test-tenant", 30, 30*time.Second, saferequest.Policy{})
 			// Disable certificate checking for existing tests to maintain backward compatibility
 			check.checkCertificates = false
 
@@ -336,7 +337,7 @@ func TestIdentityProviderMetadataCheck_Execute_ErrorHandling(t *testing.T) {
 			setupClient: func() *testKeycloakClient {
 				client := &testKeycloakClient{
 					realms: []*keycloakadmin.RealmRepresentation{
-						{Realm: "master", Enabled: true},
+						{ID: "master-id", Realm: "master", Enabled: true},
 					},
 				}
 				return client
@@ -349,7 +350,7 @@ func TestIdentityProviderMetadataCheck_Execute_ErrorHandling(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client := tt.setupClient()
 			log := logger.NewNoop()
-			check := NewIdentityProviderMetadataCheck(client, log, []string{}, "test-tenant", 30, 30*time.Second)
+			check := NewIdentityProviderMetadataCheck(client, log, []string{}, "test-tenant", 30, 30*time.Second, saferequest.Policy{})
 
 			ctx := context.Background()
 			_, err := check.Execute(ctx)

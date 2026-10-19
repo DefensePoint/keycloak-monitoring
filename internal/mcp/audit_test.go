@@ -151,6 +151,47 @@ func TestAuditListToolsReportRowCounts(t *testing.T) {
 	if line["rows"] != float64(2) {
 		t.Errorf("rows = %v, want 2", line["rows"])
 	}
+	if _, ok := line["tenant"]; ok {
+		t.Errorf("list_tenants audited tenant %v; the call returns every visible tenant", line["tenant"])
+	}
+}
+
+func TestAuditSingleTenantTokenRecordsInjectedTenant(t *testing.T) {
+	capture, log := captureLogger(t)
+	ts := newTestServerCustom(t, defaultTestCfg(), log, nil,
+		tokenFor([]string{"tenant-a"}), grantAll(), readerFor(enabledTenant("tenant-a")), &mockRealmReader{},
+		&mockAlertReader{}, &mockAmfaStatsReader{}, &mockEventReader{})
+
+	var out tenantHealthOutput
+	callToolOK(t, ts, "get_tenant_health", map[string]any{}, &out)
+
+	line := auditLineFor(t, capture, "get_tenant_health")
+	if line["outcome"] != "allowed" {
+		t.Errorf("outcome = %v, want allowed", line["outcome"])
+	}
+	if line["tenant"] != "tenant-a" {
+		t.Errorf("tenant = %v, want the injected tenant-a", line["tenant"])
+	}
+}
+
+func TestAuditSingleTenantTokenKeepsAttemptedTenantOnReject(t *testing.T) {
+	capture, log := captureLogger(t)
+	ts := newTestServerCustom(t, defaultTestCfg(), log, nil,
+		tokenFor([]string{"tenant-a"}), grantAll(), readerFor(enabledTenant("tenant-a")), &mockRealmReader{},
+		&mockAlertReader{}, &mockAmfaStatsReader{}, &mockEventReader{})
+
+	text := callToolErrText(t, ts, "get_tenant_health", map[string]any{"tenant": "tenant-other"})
+	if !strings.Contains(text, "must be omitted") {
+		t.Fatalf("error = %q, want the omitted-tenant rejection", text)
+	}
+
+	line := auditLineFor(t, capture, "get_tenant_health")
+	if line["outcome"] != "invalid" {
+		t.Errorf("outcome = %v, want invalid", line["outcome"])
+	}
+	if line["tenant"] != "tenant-other" {
+		t.Errorf("tenant = %v, want the attempted tenant-other", line["tenant"])
+	}
 }
 
 func TestAuditNeverLogsFreeTextArguments(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 type PermissionService interface {
 	HasPermission(ctx context.Context, userID uint, permission string, tenantID *string) (bool, error)
 	GetUserPolicies(ctx context.Context, userID uint) ([]*domain.TenantPolicy, error)
-	GetUserRoles(ctx context.Context, userID uint) ([]*domain.UserRole, error)
+	GetEffectiveUserRoles(ctx context.Context, userID uint) ([]*domain.UserRole, error)
 	IsAdmin(ctx context.Context, userID uint) (bool, error)
 }
 
@@ -50,10 +50,15 @@ func (a *Authorizer) Authorize(ctx context.Context, caller *Caller, tenantID, pe
 // must not name it, so the tenant is not a parameter the caller (or the model
 // driving it) can choose at all. A token allowlisted to several keeps naming
 // one of them, and AuthorizeTenant constrains the choice to the list.
-func TenantArg(caller *Caller, arg string) (string, error) {
+//
+// On success the resolved tenant is stored on ctx for the audit line. The
+// raw argument is not that tenant: a single-tenant token is required to omit
+// it. A ctx without the holder (tests, a rejected call) records nothing.
+func TenantArg(ctx context.Context, caller *Caller, arg string) (string, error) {
 	if caller == nil {
 		return "", ErrUnauthenticated
 	}
+	var tenant string
 	switch len(caller.TenantIDs) {
 	case 0:
 		return "", ErrForbidden
@@ -61,13 +66,15 @@ func TenantArg(caller *Caller, arg string) (string, error) {
 		if arg != "" {
 			return "", Invalidf("tenant must be omitted: this token is allowlisted to a single tenant, which the server supplies")
 		}
-		return caller.TenantIDs[0], nil
+		tenant = caller.TenantIDs[0]
 	default:
 		if arg == "" {
 			return "", Invalidf("tenant is required: this token is allowlisted to %d tenants, so the call must name one of them", len(caller.TenantIDs))
 		}
-		return arg, nil
+		tenant = arg
 	}
+	recordResolvedTenant(ctx, tenant)
+	return tenant, nil
 }
 
 // AuthorizeTenant denies unless the token's tenant allowlist admits the

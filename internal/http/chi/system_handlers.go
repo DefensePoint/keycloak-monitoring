@@ -2,8 +2,11 @@ package chi
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -21,6 +24,7 @@ import (
 type EventRepository interface {
 	List(ctx context.Context, opts *events.ListOptions) ([]*domain.Event, error)
 	CountWithFilter(ctx context.Context, opts *events.ListOptions) (int64, error)
+	GetByTenantAndEventID(ctx context.Context, tenantID, eventID string) (*domain.Event, error)
 }
 
 // RealmLister lists the realms configured for a tenant. It is used to scope
@@ -148,6 +152,7 @@ func (h *SystemHandlers) RegisterRoutes(r chi.Router) {
 // RegisterTenantRoutes registers tenant-scoped system routes.
 // Routes:
 //   - GET /events  - List events for tenant (requires keycloak:read permission)
+//   - GET /events/{eventID} - Get one of the tenant's events (requires keycloak:read permission)
 //   - GET /stats   - Get statistics for tenant (requires keycloak:read permission)
 //   - GET /version - Get version info (tenant-scoped, auth only)
 func (h *SystemHandlers) RegisterTenantRoutes(r chi.Router) {
@@ -160,6 +165,7 @@ func (h *SystemHandlers) RegisterTenantRoutes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(h.rbacMiddleware.RequirePermission("keycloak:read"))
 			r.Get("/events", h.handleEvents)
+			r.Get("/events/{eventID}", h.handleEvent)
 			r.Get("/stats", h.handleStats)
 		})
 
@@ -210,6 +216,53 @@ func (h *SystemHandlers) validateTenantMiddleware(next http.Handler) http.Handle
 	})
 }
 
+// maxEventTypeFilterLen bounds the type filter. Event types are short
+// identifiers such as LOGIN_ERROR; anything longer cannot match a row.
+const maxEventTypeFilterLen = 256
+
+// maxEventUserIDFilterLen bounds the user_id filter. Keycloak user ids are
+// UUIDs; the cap only keeps an oversized value out of the query.
+const maxEventUserIDFilterLen = 255
+
+// eventSeverities is the closed set of severities events are written with.
+var eventSeverities = []string{"info", "warning", "error", "critical"}
+
+// parseEventFilters reads the optional type, severity, min_risk and user_id query
+// parameters into opts. It returns a client-facing message when a value is
+// invalid, and leaves every omitted filter unset. Type and severity are exact
+// matches, the same semantics the MCP list_events tool applies.
+func parseEventFilters(r *http.Request, opts *events.ListOptions) string {
+	q := r.URL.Query()
+
+	eventType := strings.TrimSpace(q.Get("type"))
+	if len(eventType) > maxEventTypeFilterLen {
+		return "type must be at most " + strconv.Itoa(maxEventTypeFilterLen) + " characters"
+	}
+	opts.Type = eventType
+
+	if severity := q.Get("severity"); severity != "" {
+		if !slices.Contains(eventSeverities, severity) {
+			return "severity must be one of " + strings.Join(eventSeverities, ", ")
+		}
+		opts.Severity = severity
+	}
+
+	if raw := q.Get("min_risk"); raw != "" {
+		minRisk, err := strconv.Atoi(raw)
+		if err != nil || minRisk < 0 {
+			return "min_risk must be a non-negative integer"
+		}
+		opts.MinRisk = &minRisk
+	}
+
+	userID := strings.TrimSpace(q.Get("user_id"))
+	if len(userID) > maxEventUserIDFilterLen {
+		return "user_id must be at most " + strconv.Itoa(maxEventUserIDFilterLen) + " characters"
+	}
+	opts.UserID = userID
+	return ""
+}
+
 // handleEvents handles GET /api/tenants/{tenant_id}/events
 //
 //	@Summary		List events
@@ -223,7 +276,12 @@ func (h *SystemHandlers) validateTenantMiddleware(next http.Handler) http.Handle
 //	@Param			realm		query		string	false	"Filter to one realm, matching every source system it produces"
 //	@Param			start_time	query		string	false	"Start time filter"
 //	@Param			end_time	query		string	false	"End time filter"
+//	@Param			type		query		string	false	"Filter by exact event type, e.g. \"LOGIN_ERROR\""
+//	@Param			severity	query		string	false	"Filter by exact severity"	Enums(info, warning, error, critical)
+//	@Param			min_risk	query		int		false	"Minimum AMFA risk level; events without a risk level never match"	minimum(0)
+//	@Param			user_id		query		string	false	"Filter by exact Keycloak user id"
 //	@Success		200			{object}	map[string]interface{}
+//	@Failure		400			{object}	dto.ErrorResponse
 //	@Failure		401			{object}	dto.ErrorResponse
 //	@Failure		403			{object}	dto.ErrorResponse
 //	@Failure		500			{object}	dto.ErrorResponse
@@ -252,6 +310,12 @@ func (h *SystemHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var filters events.ListOptions
+	if msg := parseEventFilters(r, &filters); msg != "" {
+		httputil.RespondBadRequest(w, h.log, msg)
+		return
+	}
+
 	sources, err := h.tenantEventSources(ctx, user.ID, tenantID, source, realm)
 	if err != nil {
 		h.log.Error("Failed to resolve tenant event sources",
@@ -276,6 +340,10 @@ func (h *SystemHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 		Offset:   offset,
 		TenantID: tenantID,
 		Sources:  sources,
+		Type:     filters.Type,
+		Severity: filters.Severity,
+		MinRisk:  filters.MinRisk,
+		UserID:   filters.UserID,
 	}
 
 	if startTime != "" {
@@ -314,6 +382,97 @@ func (h *SystemHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleEvent handles GET /api/tenants/{tenant_id}/events/{event_id}
+//
+// It answers exactly what the list would show the same caller: the tenant's
+// row for that id, and only when its source is inside the caller's allowed
+// realms. An event outside that scope gets the same 404 as a missing one, so
+// the endpoint does not reveal that it exists.
+//
+//	@Summary		Get an event
+//	@Description	Returns one of the tenant's events by its event ID, within the caller's allowed realms
+//	@Tags			system
+//	@Produce		json
+//	@Param			tenantID	path		string	true	"Tenant ID"
+//	@Param			eventID		path		string	true	"Event ID"
+//	@Success		200			{object}	domain.Event
+//	@Failure		400			{object}	dto.ErrorResponse	"Invalid event ID"
+//	@Failure		401			{object}	dto.ErrorResponse
+//	@Failure		403			{object}	dto.ErrorResponse
+//	@Failure		404			{object}	dto.ErrorResponse	"Event not found"
+//	@Failure		500			{object}	dto.ErrorResponse
+//	@Security		BearerAuth
+//	@Router			/api/tenants/{tenantID}/events/{eventID} [get]
+func (h *SystemHandlers) handleEvent(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tenantID := chi.URLParam(r, "tenantID")
+	eventID, ok := eventIDParam(r)
+	if !ok {
+		httputil.RespondBadRequest(w, h.log, "Invalid event ID")
+		return
+	}
+
+	user, ok := h.requireCaller(ctx, w)
+	if !ok {
+		return
+	}
+
+	sources, err := h.tenantEventSources(ctx, user.ID, tenantID, "", "")
+	if err != nil {
+		h.log.Error("Failed to resolve tenant event sources",
+			logger.Str("tenant_id", tenantID),
+			logger.Err(err))
+		httputil.RespondInternalError(w, h.log, "Failed to get event")
+		return
+	}
+	if len(sources) == 0 {
+		httputil.RespondNotFound(w, h.log, "Event not found")
+		return
+	}
+
+	event, err := h.eventRepo.GetByTenantAndEventID(ctx, tenantID, eventID)
+	if errors.Is(err, events.ErrNotFound) {
+		httputil.RespondNotFound(w, h.log, "Event not found")
+		return
+	}
+	if err != nil {
+		h.log.Error("Failed to get event",
+			logger.Str("tenant_id", tenantID),
+			logger.Err(err))
+		httputil.RespondInternalError(w, h.log, "Failed to get event")
+		return
+	}
+	if !slices.Contains(sources, event.Source) {
+		httputil.RespondNotFound(w, h.log, "Event not found")
+		return
+	}
+
+	httputil.RespondJSON(w, h.log, http.StatusOK, event)
+}
+
+// eventIDParam returns the decoded {eventID}.
+func eventIDParam(r *http.Request) (string, bool) {
+	return pathParam(r, "eventID")
+}
+
+// pathParam returns the decoded path parameter name. chi routes on
+// r.URL.RawPath whenever Go kept one, which it does when the client encoded a
+// character Go would have left alone (":", "+", "&", "=", "/" among them), and
+// the parameter is then still escaped. Only in that case is it unescaped:
+// without a RawPath chi routed on the decoded path, and unescaping again would
+// turn a literal "%41" in an id into "A".
+func pathParam(r *http.Request, name string) (string, bool) {
+	value := chi.URLParam(r, name)
+	if r.URL.RawPath == "" {
+		return value, true
+	}
+	decoded, err := url.PathUnescape(value)
+	if err != nil {
+		return "", false
+	}
+	return decoded, true
+}
+
 // handleStats handles GET /api/tenants/{tenant_id}/stats
 //
 //	@Summary		Get statistics
@@ -325,7 +484,12 @@ func (h *SystemHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 //	@Param			realm		query		string	false	"Filter to one realm, matching every source system it produces"
 //	@Param			start_time	query		string	false	"Start time filter"
 //	@Param			end_time	query		string	false	"End time filter"
+//	@Param			type		query		string	false	"Filter by exact event type, e.g. \"LOGIN_ERROR\""
+//	@Param			severity	query		string	false	"Filter by exact severity"	Enums(info, warning, error, critical)
+//	@Param			min_risk	query		int		false	"Minimum AMFA risk level; events without a risk level never match"	minimum(0)
+//	@Param			user_id		query		string	false	"Filter by exact Keycloak user id"
 //	@Success		200			{object}	map[string]interface{}
+//	@Failure		400			{object}	dto.ErrorResponse
 //	@Failure		401			{object}	dto.ErrorResponse
 //	@Failure		403			{object}	dto.ErrorResponse
 //	@Failure		500			{object}	dto.ErrorResponse
@@ -343,6 +507,12 @@ func (h *SystemHandlers) handleStats(w http.ResponseWriter, r *http.Request) {
 
 	user, ok := h.requireCaller(ctx, w)
 	if !ok {
+		return
+	}
+
+	var filters events.ListOptions
+	if msg := parseEventFilters(r, &filters); msg != "" {
+		httputil.RespondBadRequest(w, h.log, msg)
 		return
 	}
 
@@ -364,6 +534,10 @@ func (h *SystemHandlers) handleStats(w http.ResponseWriter, r *http.Request) {
 	opts := &events.ListOptions{
 		TenantID: tenantID,
 		Sources:  sources,
+		Type:     filters.Type,
+		Severity: filters.Severity,
+		MinRisk:  filters.MinRisk,
+		UserID:   filters.UserID,
 	}
 
 	if startTime != "" {

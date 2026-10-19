@@ -123,6 +123,13 @@ type User struct {
 	// Audit fields
 	BlockedAt     *time.Time
 	BlockedReason string
+
+	// SessionEpoch counts the user's logouts. A login stores the current value
+	// in the session cookie, a logout increments it, and a cookie carrying an
+	// older value is rejected on every server instance and after a restart; an
+	// in-memory blacklist alone forgot the logout on both. A counter, unlike a
+	// logout time, does not depend on the servers' clocks agreeing.
+	SessionEpoch int64 `gorm:"not null;default:0"`
 }
 
 // TableName specifies the table name for the User model.
@@ -401,6 +408,10 @@ type KeycloakRealmInfo struct {
 	LastChecked   time.Time `gorm:"index"`
 	IsHealthy     bool      `gorm:"default:true;index"`
 	HealthMessage string    `gorm:"type:text"`
+	// UnreadableSince is when the monitoring client stopped being able to
+	// read the realm's settings, and null while it can. The row then keeps
+	// the settings it last read, as of LastChecked.
+	UnreadableSince *time.Time
 }
 
 // TableName specifies the table name for KeycloakRealmInfo.
@@ -417,7 +428,7 @@ func (KeycloakRealmInfo) TableName() string {
 // Alert represents a unified alert from multiple sources (config, events, logs, metrics).
 // Formerly known as ConfigurationAlert.
 type Alert struct {
-	ID        uint      `gorm:"primaryKey"`
+	ID        uint      `gorm:"primaryKey;index:idx_alerts_tenant_first_detected_id,priority:3,sort:desc;index:idx_alerts_tenant_status_first_detected_id,priority:4,sort:desc"`
 	CreatedAt time.Time `gorm:"index"`
 	UpdatedAt time.Time
 	DeletedAt gorm.DeletedAt `gorm:"index"`
@@ -429,7 +440,12 @@ type Alert struct {
 	// per-tenant, wrongly merging two different tenants' alerts for the same
 	// finding whenever they share a realm name (same class of bug as
 	// KeycloakRealmInfo.TenantID above).
-	TenantID string `gorm:"not null;index:idx_alerts_tenant;uniqueIndex:idx_alert_tenant"` // Tenant identifier
+	//
+	// idx_alerts_tenant_first_detected_id matches an unfiltered List: tenant_id
+	// plus ORDER BY first_detected DESC, id DESC. The single-column indexes do
+	// not. idx_alerts_tenant_status_first_detected_id matches the Alerts page,
+	// which also filters status and defaults that filter to active.
+	TenantID string `gorm:"not null;index:idx_alerts_tenant;uniqueIndex:idx_alert_tenant;index:idx_alerts_tenant_first_detected_id,priority:1;index:idx_alerts_tenant_status_first_detected_id,priority:1"` // Tenant identifier
 
 	// Alert identification (unique to prevent duplicates per tenant)
 	AlertID string `gorm:"uniqueIndex:idx_alert_tenant;not null;size:255"` // Unique ID for deduplication per tenant
@@ -438,7 +454,7 @@ type Alert struct {
 	Source   string `gorm:"not null;default:'configuration';index:idx_alerts_source"` // configuration, event, log, metric
 	Type     string `gorm:"not null;index:idx_alerts_type"`                           // configuration, security, compliance, event, etc.
 	Severity string `gorm:"not null;index:idx_alerts_severity"`                       // info, warning, error, critical
-	Status   string `gorm:"not null;default:'active';index:idx_alerts_status"`
+	Status   string `gorm:"not null;default:'active';index:idx_alerts_status;index:idx_alerts_tenant_status_first_detected_id,priority:2"`
 
 	// Alert content
 	Title          string `gorm:"not null;size:255"`
@@ -460,11 +476,19 @@ type Alert struct {
 	Metadata []byte `gorm:"type:jsonb"` // Additional context as JSON
 
 	// Tracking
-	FirstDetected  time.Time  `gorm:"not null;index:idx_alerts_first_detected"`
-	LastSeen       time.Time  `gorm:"not null;index:idx_alerts_last_seen"`
-	ResolvedAt     *time.Time `gorm:"index:idx_alerts_resolved"`
-	AcknowledgedAt *time.Time `gorm:"index:idx_alerts_acknowledged"`
-	AcknowledgedBy string     `gorm:"size:255"`
+	FirstDetected time.Time  `gorm:"not null;index:idx_alerts_first_detected;index:idx_alerts_tenant_first_detected_id,priority:2,sort:desc;index:idx_alerts_tenant_status_first_detected_id,priority:3,sort:desc"`
+	LastSeen      time.Time  `gorm:"not null;index:idx_alerts_last_seen"`
+	ResolvedAt    *time.Time `gorm:"index:idx_alerts_resolved"`
+
+	// OccurrenceStartedAt is when the current occurrence of this alert began:
+	// set when the alert is first saved and again when a resolved alert becomes
+	// active, never while it stays open. Alert IDs are stable per problem, so
+	// this is what tells one outage from the next; notifications dedupe within
+	// an occurrence, not across the alert's whole life. NULL on rows saved
+	// before it existed, which readers treat as FirstDetected.
+	OccurrenceStartedAt *time.Time
+	AcknowledgedAt      *time.Time `gorm:"index:idx_alerts_acknowledged"`
+	AcknowledgedBy      string     `gorm:"size:255"`
 }
 
 // TableName specifies the table name for Alert.
@@ -597,6 +621,12 @@ type OperatorAction struct {
 	ResponseTimeSeconds   int // Deprecated: use TimeFromDetectionSeconds
 	ResolutionTimeSeconds int // Deprecated: calculated from final resolved action
 
+	// OccurrenceStartedAt is when the occurrence of the alert this action
+	// belongs to began. The operator metrics are measured per occurrence; a
+	// row without it was recorded before it was stored and keeps the figures
+	// it always produced.
+	OccurrenceStartedAt *time.Time
+
 	// Additional metadata
 	Comment  string `gorm:"type:text"`  // Optional comment provided by operator
 	Metadata []byte `gorm:"type:jsonb"` // Additional context as JSON
@@ -625,9 +655,9 @@ type OperatorMetricsSummary struct {
 
 	// By severity
 	CriticalAlertsHandled int `json:"critical_alerts_handled"`
-	HighAlertsHandled     int `json:"high_alerts_handled"`
-	MediumAlertsHandled   int `json:"medium_alerts_handled"`
-	LowAlertsHandled      int `json:"low_alerts_handled"`
+	ErrorAlertsHandled    int `json:"error_alerts_handled"`
+	WarningAlertsHandled  int `json:"warning_alerts_handled"`
+	InfoAlertsHandled     int `json:"info_alerts_handled"`
 
 	// By type
 	AlertsByType map[string]int `json:"alerts_by_type"` // "configuration": 10, "security": 5, etc.

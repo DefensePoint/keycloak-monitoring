@@ -2,38 +2,14 @@ package database
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
-	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
-
-// testDBConfig restates a DSN as the config NewClient takes, so the raw
-// connection and the client address the same database.
-func testDBConfig(t *testing.T, dsn string) *config.DatabaseConfig {
-	t.Helper()
-	parsed, err := pgconn.ParseConfig(dsn)
-	if err != nil {
-		t.Fatalf("parse KMT_DESTRUCTIVE_TEST_DATABASE_DSN: %v", err)
-	}
-	// pgconn resolves sslmode into a *tls.Config, so the original keyword is
-	// gone by here; a nil TLSConfig means the DSN asked for no TLS.
-	sslMode := "require"
-	if parsed.TLSConfig == nil {
-		sslMode = "disable"
-	}
-	return &config.DatabaseConfig{
-		Host: parsed.Host, Port: int(parsed.Port), Database: parsed.Database,
-		User: parsed.User, Password: parsed.Password, SSLMode: sslMode,
-		MaxConns: 5, MinConns: 1, Timeout: 30 * time.Second,
-	}
-}
 
 // newPurgeTestClient wipes the schema and runs the real AutoMigrate, giving
 // each test a database shaped exactly like a fresh install.
@@ -52,22 +28,22 @@ func newPurgeTestClient(t *testing.T) *Client {
 	if testing.Short() {
 		t.Skip("skipping database test in short mode")
 	}
-	dsn := os.Getenv("KMT_DESTRUCTIVE_TEST_DATABASE_DSN")
-	if dsn == "" {
-		t.Skip("KMT_DESTRUCTIVE_TEST_DATABASE_DSN not set; skipping destructive integration test")
-	}
+	dsn := testdb.DSN(t, "KMT_DESTRUCTIVE_TEST_DATABASE_DSN")
 	testdb.RequireDisposable(t, dsn)
+	testdb.Lock(t, dsn)
 	raw, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
+	closeOnCleanup(t, raw)
 	if err := raw.Exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public").Error; err != nil {
 		t.Fatalf("reset schema: %v", err)
 	}
-	c, err := NewClient(testDBConfig(t, dsn), logger.NewNoop())
+	c, err := NewClient(testdb.DatabaseConfig(t, dsn), logger.NewNoop())
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
+	t.Cleanup(func() { _ = c.Close() })
 	return c
 }
 
@@ -131,6 +107,15 @@ func seedUserAndRole(t *testing.T, c *Client) {
 		VALUES (1, 'seed-role', 'Seed Role', now(), now())
 		ON CONFLICT (id) DO NOTHING`).Error; err != nil {
 		t.Fatalf("seed role: %v", err)
+	}
+	// An explicit id leaves the sequence behind the row, so the next insert that
+	// takes an id from it gets 1 and collides on the primary key. These rows
+	// outlive the test, so that insert is usually another package's: it surfaced
+	// as roles_pkey in whichever suite ran next.
+	for _, table := range []string{"users", "roles"} {
+		if err := c.DB().Exec(`SELECT setval(pg_get_serial_sequence(?, 'id'), (SELECT MAX(id) FROM `+table+`))`, table).Error; err != nil {
+			t.Fatalf("advance %s id sequence: %v", table, err)
+		}
 	}
 }
 

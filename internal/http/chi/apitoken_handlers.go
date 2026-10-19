@@ -90,7 +90,13 @@ func (h *APITokenHandlers) createToken(w http.ResponseWriter, r *http.Request) {
 		expiresAt = &t
 	}
 
-	created, err := h.service.Create(ctx, req.UserID, req.Name, req.TenantIDs, expiresAt)
+	actor := GetUserFromContext(ctx)
+	if actor == nil {
+		httputil.RespondUnauthorized(w, h.log, "Authentication required")
+		return
+	}
+
+	created, err := h.service.Create(ctx, actor.ID, req.UserID, req.Name, req.TenantIDs, expiresAt)
 	if err != nil {
 		switch {
 		case errors.Is(err, apitoken.ErrUserNotFound):
@@ -161,7 +167,13 @@ func (h *APITokenHandlers) revokeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.service.Revoke(ctx, uint(tokenID)); err != nil {
+	actor := GetUserFromContext(ctx)
+	if actor == nil {
+		httputil.RespondUnauthorized(w, h.log, "Authentication required")
+		return
+	}
+
+	if err := h.service.Revoke(ctx, actor.ID, uint(tokenID)); err != nil {
 		if errors.Is(err, apitoken.ErrTokenNotFound) {
 			httputil.RespondNotFound(w, h.log, "Token not found")
 			return

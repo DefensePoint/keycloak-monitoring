@@ -43,6 +43,8 @@ export interface UserEventsTableProps {
   events: UserEvent[];
   loading: boolean;
   onEventClick: (event: UserEvent) => void;
+  // Rows per page; defaults to 10.
+  pageSize?: number;
 }
 
 // Re-export EventsResponse from shared types

@@ -15,6 +15,7 @@ import (
 var TenantModule = fx.Module("tenant",
 	fx.Provide(
 		provideTenantRepository,
+		provideTenantAlertCloser,
 		provideTenantService,
 	),
 )
@@ -76,7 +77,8 @@ func warnIfEncryptedTenantsExist(db *database.Client, log *logger.Logger) {
 		logger.Int64("affected_tenant_count", count))
 }
 
-// provideTenantService creates a tenant service.
-func provideTenantService(repo tenant.Repository) tenant.Service {
-	return tenant.NewService(repo)
+// provideTenantService creates a tenant service. Deleting a tenant closes its
+// alerts on their notification channels; see tenantAlertCloser.
+func provideTenantService(repo tenant.Repository, alertCloser *tenantAlertCloser) tenant.Service {
+	return tenant.NewService(repo, tenant.WithDeletionHook(alertCloser))
 }

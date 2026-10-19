@@ -16,11 +16,11 @@ export default defineConfig({
     proxy: {
       "/api": {
         target: "http://localhost:7888",
-        changeOrigin: true,
+        changeOrigin: false,
       },
       "/auth": {
         target: "http://localhost:7888",
-        changeOrigin: true,
+        changeOrigin: false,
       },
     },
   },

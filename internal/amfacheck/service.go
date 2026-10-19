@@ -5,14 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
+	alertspkg "github.com/DefensePoint/keycloak-monitoring/internal/alerts"
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts/clearing"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/lifecycle"
 )
 
 // reNotifyInterval is how long an unacknowledged, still-active alert waits
-// before a repeat notification is sent. Mirrors eventscheck.
+// before its notification is requested again. Channels that already received
+// it skip the request; for a channel whose delivery failed it is the retry.
+// Mirrors eventscheck.
 const reNotifyInterval = time.Hour
 
 // Service runs AMFA risk checks for a single tenant.
@@ -34,6 +39,18 @@ type service struct {
 	notifier     NotificationService
 	logger       Logger
 	pollInterval time.Duration
+	// resolveAfter is how long a condition must go undetected before its
+	// alert resolves; see clearing.
+	resolveAfter time.Duration
+
+	// silencer, when set, keeps alerts a silence rule covers from being
+	// stored or notified. See WithSilencer.
+	silencer Silencer
+
+	// runMu makes runs take turns. A manual run can overlap the poll loop, and
+	// two runs that each see an alert as new, or each see it cleared, would
+	// each announce it.
+	runMu sync.Mutex
 	// workers tracks every goroutine Start launches, including the
 	// immediate first run, so Stop drains all of them.
 	workers lifecycle.Workers
@@ -47,14 +64,43 @@ func NewService(
 	notifier NotificationService,
 	log Logger,
 	pollInterval time.Duration,
+	opts ...Option,
 ) Service {
-	return &service{
+	s := &service{
 		tenantID:     tenantID,
 		checks:       checks,
 		alertStore:   alertStore,
 		notifier:     notifier,
 		logger:       log.WithComponent("amfa_checker"),
 		pollInterval: pollInterval,
+		resolveAfter: clearing.DefaultResolveAfter,
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// Option configures a Service.
+type Option func(*service)
+
+// WithSilencer applies the configured alert silences: an alert a rule covers
+// is neither stored nor notified, as for alerts raised from single events.
+//
+// A silenced alert still counts as detected, so its condition is not mistaken
+// for one that cleared: an alert already open when the silence began stays
+// open, unannounced, and resolves only once the condition really clears.
+func WithSilencer(silencer Silencer) Option {
+	return func(s *service) { s.silencer = silencer }
+}
+
+// WithResolveAfter sets how long a condition must go undetected before its
+// alert resolves. Zero or less keeps clearing.DefaultResolveAfter.
+func WithResolveAfter(d time.Duration) Option {
+	return func(s *service) {
+		if d > 0 {
+			s.resolveAfter = d
+		}
 	}
 }
 
@@ -114,6 +160,8 @@ func (s *service) pollChecks(ctx context.Context) {
 // (e.g. the "Reload AMFA alerts" button gets a 503 when AMFA is unreachable
 // instead of a silent success).
 func (s *service) runChecks(ctx context.Context) error {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
 	s.logger.Debug("amfacheck: running checks", "tenant_id", s.tenantID, "num_checks", len(s.checks))
 	var errs []error
 	for _, check := range s.checks {
@@ -130,19 +178,93 @@ func (s *service) runChecks(ctx context.Context) error {
 
 func (s *service) executeCheck(ctx context.Context, check Check) error {
 	startTime := time.Now()
-	alerts, err := check.Execute(ctx)
-	if err != nil {
-		return fmt.Errorf("check execution failed: %w", err)
+	// An Evaluator also says which conditions it evaluated, which is what
+	// lets a cleared condition's alert resolve.
+	var alerts []*domain.Alert
+	var eval *clearing.Evaluation
+	if ev, ok := check.(Evaluator); ok {
+		e, err := ev.Evaluate(ctx)
+		if err != nil {
+			return fmt.Errorf("check execution failed: %w", err)
+		}
+		alerts, eval = e.Alerts, &e
 	}
 
-	newAlerts, updatedAlerts := 0, 0
+	// A per-event check returns the realms it could read even when another
+	// failed, and is told which alerts are stored so it rereads the rest.
+	eventCheck, perEvent := check.(EventCheck)
+	var partialErr error
+	if eval == nil {
+		var err error
+		alerts, err = check.Execute(ctx)
+		if err != nil && !perEvent {
+			return fmt.Errorf("check execution failed: %w", err)
+		}
+		if err != nil {
+			partialErr = fmt.Errorf("check execution failed: %w", err)
+		}
+	}
+	stored := map[string]bool{}
+
+	newAlerts, updatedAlerts, silencedAlerts, lookupFailed := 0, 0, 0, 0
 	now := time.Now()
 	for _, alert := range alerts {
+		if s.silencer != nil {
+			if silenced, silenceID := s.silencer.ShouldSilence(alert); silenced {
+				silencedAlerts++
+				s.logger.Debug("Alert silenced by rule",
+					"alert_id", alert.AlertID,
+					"check_type", check.GetCheckType(),
+					"silence_id", silenceID)
+				// A silenced event is handled: its cursor moves past it, so
+				// it is not alerted when the silence ends, and the events
+				// after it are not reread on every tick.
+				if perEvent {
+					stored[alert.AlertID] = true
+				}
+				continue
+			}
+		}
+
+		if perEvent {
+			exists, xerr := s.alertStore.AlertExists(ctx, alert.TenantID, alert.AlertID)
+			if xerr != nil {
+				s.logger.Error("amfacheck: failed to look up alert; event will be reread",
+					"tenant_id", s.tenantID, "alert_id", alert.AlertID, "error", xerr.Error())
+				lookupFailed++
+				continue
+			}
+			if exists {
+				stored[alert.AlertID] = true
+				continue
+			}
+		}
 		existing, gerr := s.alertStore.GetAlertByID(ctx, alert.TenantID, alert.AlertID)
-		isNewAlert := gerr != nil || existing == nil
+		if gerr != nil && !errors.Is(gerr, alertspkg.ErrNotFound) {
+			// A failed read says nothing about whether the alert exists.
+			// Treating it as new would save it as a fresh active alert, which
+			// reactivates an acknowledged or ignored one and clears its
+			// acknowledgment, so leave it alone this cycle; the next run looks
+			// it up again.
+			// The error goes in as text: the logger adapter renders an error
+			// value as {}.
+			s.logger.Error("amfacheck: failed to look up existing alert; skipping it this cycle",
+				"tenant_id", s.tenantID, "alert_id", alert.AlertID, "error", gerr.Error())
+			lookupFailed++
+			continue
+		}
+		isNewAlert := existing == nil
+		// A resolved alert whose condition went away and came back is a new
+		// occurrence, not a continuation of the resolved one.
+		reopened := !isNewAlert && eval != nil && clearing.Reopens(existing, now, s.resolveAfter)
 
 		if isNewAlert {
 			alert.FirstDetected = now
+			alert.LastSeen = now
+			alert.Status = domain.AlertStatusActive
+			newAlerts++
+		} else if reopened {
+			alert.FirstDetected = existing.FirstDetected
 			alert.LastSeen = now
 			alert.Status = domain.AlertStatusActive
 			newAlerts++
@@ -158,7 +280,16 @@ func (s *service) executeCheck(ctx context.Context, check Check) error {
 		if isNewAlert {
 			shouldNotify = true
 			notificationReason = "new alert"
+		} else if reopened {
+			shouldNotify = true
+			notificationReason = "recurred after resolving"
 		} else if existing.Status == domain.AlertStatusActive && existing.AcknowledgedAt == nil {
+			// While the alert stays active and unacknowledged, ask for a
+			// notification again each hour. The notification service sends
+			// each channel one notification per occurrence and counts only
+			// successful sends, so a channel that already received this one
+			// skips the request, and a channel whose delivery failed gets it
+			// now: this is the only retry a failed delivery has.
 			lastNotifiedAt := existing.UpdatedAt
 			if existing.Metadata != "" {
 				var meta map[string]interface{}
@@ -176,9 +307,15 @@ func (s *service) executeCheck(ctx context.Context, check Check) error {
 			}
 		}
 
-		if shouldNotify && alert.Metadata != "" {
-			var meta map[string]interface{}
-			if jerr := json.Unmarshal([]byte(alert.Metadata), &meta); jerr == nil {
+		// Record the notification even on an alert with no metadata yet: the
+		// re-notification check reads last_notified_at, and without it falls
+		// back to updated_at, which every save of a re-detection moves.
+		if shouldNotify {
+			meta := map[string]interface{}{}
+			if alert.Metadata == "" || json.Unmarshal([]byte(alert.Metadata), &meta) == nil {
+				if meta == nil {
+					meta = map[string]interface{}{}
+				}
 				meta["last_notified_at"] = now.Format(time.RFC3339)
 				if b, merr := json.Marshal(meta); merr == nil {
 					alert.Metadata = string(b)
@@ -191,6 +328,7 @@ func (s *service) executeCheck(ctx context.Context, check Check) error {
 				"tenant_id", s.tenantID, "alert_id", alert.AlertID, "error", serr)
 			continue
 		}
+		stored[alert.AlertID] = true
 
 		if isNewAlert {
 			s.logger.Info("amfacheck: new alert",
@@ -211,13 +349,26 @@ func (s *service) executeCheck(ctx context.Context, check Check) error {
 		}
 	}
 
+	if perEvent {
+		eventCheck.Commit(stored)
+	}
+
+	resolved := 0
+	if eval != nil {
+		resolved = clearing.ResolveCleared(ctx, s.alertStore, s.notifier, s.logger,
+			check.GetCheckType(), *eval, now, s.resolveAfter)
+	}
+
 	s.logger.Debug("amfacheck: check completed",
 		"tenant_id", s.tenantID,
 		"check", check.GetCheckType(),
 		"new_alerts", newAlerts,
 		"updated_alerts", updatedAlerts,
+		"silenced_alerts", silencedAlerts,
+		"lookup_failed_alerts", lookupFailed,
+		"resolved_alerts", resolved,
 		"duration_ms", time.Since(startTime).Milliseconds())
-	return nil
+	return partialErr
 }
 
 func (s *service) RunCheckNow(ctx context.Context) error {

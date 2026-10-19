@@ -113,11 +113,19 @@ func TestRiskRejectedCheck_AdvancesCheckpoint(t *testing.T) {
 	}}
 	c := NewRiskRejectedCheck("tenant-1", singleRealm("master"), repo, time.Minute, testLogger{})
 
-	if _, err := c.Execute(context.Background()); err != nil {
+	alerts, err := c.Execute(context.Background())
+	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	got := c.getLastSeen("master")
-	if !got.Equal(newest) {
+	if got := c.events.cursor["master"]; got.Equal(newest) {
+		t.Fatal("checkpoint moved before the alerts were stored")
+	}
+	stored := map[string]bool{}
+	for _, a := range alerts {
+		stored[a.AlertID] = true
+	}
+	c.Commit(stored)
+	if got := c.events.cursor["master"]; !got.Equal(newest) {
 		t.Errorf("checkpoint = %v, want %v (newest event time)", got, newest)
 	}
 }

@@ -43,6 +43,21 @@ func parseTimeWindow(r *http.Request, defaultHours int) (time.Time, time.Time) {
 	return parseHoursParam(r, defaultHours)
 }
 
+// maxHistoryWindow is the widest window the history endpoints serve. They
+// return every row in it, unpaginated, and health is recorded once a minute,
+// so it is what bounds their response. It matches the hours cap, so hours
+// alone can never exceed it.
+const maxHistoryWindow = 7 * 24 * time.Hour
+
+// parseHistoryWindow is parseTimeWindow for the unpaginated history endpoints.
+// ok is false when an explicit range is wider than maxHistoryWindow: that is
+// refused rather than trimmed, because a trimmed window silently answers a
+// different question than the one asked.
+func parseHistoryWindow(r *http.Request, defaultHours int) (from, to time.Time, ok bool) {
+	from, to = parseTimeWindow(r, defaultHours)
+	return from, to, to.Sub(from) <= maxHistoryWindow
+}
+
 // parseHoursParam parses hours query parameter and returns from/to time range.
 // If hours is not specified, defaults to the provided defaultHours.
 // Validates bounds: minimum 1 hour, maximum 168 hours (7 days).

@@ -11,10 +11,11 @@ const mockUseRealmUsers = vi.fn();
 const mockUseRealmClients = vi.fn();
 const mockUseAlerts = vi.fn();
 const mockUseNavigate = vi.fn();
+const mockUseParams = vi.fn();
 
 vi.mock("react-router-dom", () => ({
   useLocation: () => ({ pathname: "/tenant-1/realms/master" }),
-  useParams: () => ({ realmName: "master", tenantId: "tenant-1" }),
+  useParams: () => mockUseParams(),
   useNavigate: () => mockUseNavigate,
   Link: ({ children, to }: { children: React.ReactNode; to: string }) => (
     <a href={to}>{children}</a>
@@ -30,18 +31,20 @@ vi.mock("../hooks", () => ({
   useRealmNavigation: () => ({ navigateToRealm: vi.fn() }),
 }));
 
-vi.mock("@/shared/hooks", () => ({
-  useAlerts: () => mockUseAlerts(),
-  useRealmSelector: () => ({
-    selectedRealm: "master",
-    handleRealmChange: vi.fn(),
-  }),
-  useRealmDashboard: () => mockUseRealmDashboard(),
-  useKeycloakDashboard: () => mockUseKeycloakDashboard(),
-  useRealmEvents: () => mockUseRealmEvents(),
-  useRealmUsers: () => mockUseRealmUsers(),
-  useRealmClients: () => mockUseRealmClients(),
-}));
+vi.mock("@/shared/hooks", async () => {
+  const { useRealmSelector } = await vi.importActual<
+    typeof import("@/shared/hooks/useRealmSelector")
+  >("@/shared/hooks/useRealmSelector");
+  return {
+    useAlerts: () => mockUseAlerts(),
+    useRealmSelector,
+    useRealmDashboard: () => mockUseRealmDashboard(),
+    useKeycloakDashboard: () => mockUseKeycloakDashboard(),
+    useRealmEvents: () => mockUseRealmEvents(),
+    useRealmUsers: () => mockUseRealmUsers(),
+    useRealmClients: () => mockUseRealmClients(),
+  };
+});
 
 vi.mock("@/shared/components", () => ({
   PageHeader: ({
@@ -186,6 +189,11 @@ describe("RealmPage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
+    mockUseParams.mockReturnValue({
+      realmName: "master",
+      tenantId: "tenant-1",
+    });
     vi.mocked(useAuth).mockReturnValue({
       user: mockUser,
       authConfig: null,
@@ -453,6 +461,38 @@ describe("RealmPage", () => {
     expect(searchInput).toHaveValue("test");
   });
 
+  it.each([null, "master"])(
+    "keeps a deep link to a non-default realm after realms load with saved choice %s",
+    (saved) => {
+      if (saved !== null)
+        sessionStorage.setItem("selectedRealm_tenant-1", saved);
+      mockUseParams.mockReturnValue({
+        realmName: "customers",
+        tenantId: "tenant-1",
+      });
+      mockUseKeycloakDashboard.mockReturnValue({
+        data: undefined,
+        isLoading: true,
+        isError: false,
+      });
+      const { rerender } = render(<RealmPage />);
+
+      mockUseKeycloakDashboard.mockReturnValue({
+        data: {
+          realms: [{ realm_name: "master" }, { realm_name: "customers" }],
+        },
+        isLoading: false,
+        isError: false,
+      });
+      rerender(<RealmPage />);
+
+      expect(mockUseNavigate).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole("heading", { name: "customers" }),
+      ).toBeInTheDocument();
+    },
+  );
+
   it("should show no data message when realm data not available", () => {
     mockUseRealmDashboard.mockReturnValue({
       data: null,
@@ -463,5 +503,38 @@ describe("RealmPage", () => {
     render(<RealmPage />);
 
     expect(screen.getByText("No realm data available")).toBeInTheDocument();
+  });
+  it("warns that a realm it cannot read shows what was last read", () => {
+    mockUseRealmDashboard.mockReturnValue({
+      data: {
+        ...mockRealmDashboard,
+        realm_info: {
+          ...mockRealmDashboard.realm_info,
+          last_checked: "2026-10-14T10:00:00Z",
+          unreadable_since: "2026-10-14T10:05:00Z",
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+    render(<RealmPage />);
+
+    expect(
+      screen.getByText(/KMT cannot read this realm's settings since/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        new RegExp(
+          `last read at ${new Date("2026-10-14T10:00:00Z").toLocaleString().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+        ),
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows no such warning for a realm it can read", () => {
+    render(<RealmPage />);
+    expect(
+      screen.queryByText(/cannot read this realm's settings/),
+    ).not.toBeInTheDocument();
   });
 });

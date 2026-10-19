@@ -308,13 +308,13 @@ The API is implemented in `internal/http/chi/` with handlers for each domain. Fu
 
 **Auth**
 - `POST /api/auth/login` - Login
-- `POST /api/auth/logout` - Logout
+- `POST /auth/logout` - Logout (GET answers 405)
 - `GET /api/auth/me` - Get current user
 - `POST /api/auth/refresh` - Refresh token
 
 **System**
-- `GET /health` - Health check
-- `GET /ready` - Readiness check
+- `GET /health` - Liveness check: 200 while the process serves requests
+- `GET /ready` - Readiness check: 503 while the database does not answer
 - `GET /swagger/*` - Swagger documentation
 
 ### 8. Authentication Package (`auth/`)
@@ -701,8 +701,8 @@ This ensures:
 **Responsibilities**:
 
 - Track all alert actions by operators (acknowledge, resolve, ignore, comment)
-- Calculate response time metrics (time from detection to action)
-- Calculate resolution time metrics (time from detection to resolution)
+- Calculate response time metrics (time from the start of the alert's current occurrence to the operator's first acknowledge, resolve or ignore of it)
+- Calculate resolution time metrics (time from the start of the occurrence to its resolution)
 - Track transition times between alert states
 - Generate operator performance summaries
 - Support multiple time periods (daily, weekly, monthly, custom ranges)
@@ -760,8 +760,9 @@ CREATE INDEX idx_operator_actions_type ON operator_alert_actions(action_type);
   - Average time from active → ignored (direct)
 
 - **Work Time Metrics**:
-  - Total work time in seconds/hours
-  - Time spent per alert on average
+  - Total work time in seconds/hours: for each occurrence an operator resolved or ignored, the time from their first action on it to that resolve or ignore, counted once. It leaves out the time the alert waited before anyone acted, and it measures how long the operator had the alert in hand, not effort.
+
+All times are measured per occurrence: an alert that resolved and came back starts a new occurrence, and actions on an earlier occurrence do not count towards it. Actions recorded before occurrences were stored keep the figures they were reported with.
 
 **API Endpoints**:
 
@@ -1165,7 +1166,7 @@ Browser → Web Server (Port 7880) → Reverse Proxy
 |-----------|-----------|---------|
 | Containerization | Docker | Application packaging |
 | Orchestration | Docker Compose | Multi-container management |
-| CI/CD | GitLab CI | Automated testing and deployment |
+| CI/CD | GitHub Actions | Automated testing and release images |
 | Build System | Make | Build automation |
 
 ## Design Patterns
@@ -1470,7 +1471,7 @@ CREATE INDEX idx_operator_actions_alert ON operator_alert_actions(alert_id);
 - `internal/http/chi/amfa_handlers.go` — HTTP layer under `/api/tenants/{id}/amfa/{events,stats,geo}`, gated by `auth` → `RequireTenantAccess` → `RequirePermission("amfa:read")`. Input validation rejects malformed RFC3339 timestamps, inverted time ranges, and oversized offsets (`> 50_000`) with 400; `ErrAmfaUnavailable` from the data layer produces 503.
 - `internal/fx/amfa.go` — fx module wiring the above; if no tenants enable AMFA, the registry is empty and all `/amfa/*` endpoints return 404 cleanly. The monitor-pool type-assertion logs a per-tenant WARN if a future Keycloak-client wrapper breaks the cast (regression guard).
 
-**Permissions:** A new `amfa:read` permission is added by an idempotent data migration on KMT startup, granted to the default `admin`, `operator`, and `viewer` roles.
+**Permissions:** A new `amfa:read` permission is added by a one-time data migration, recorded in `data_migrations`, granted to the default `admin`, `operator`, and `viewer` roles.
 
 **Existing AMFA codebase is not modified.** All integration is purely additive on the KMT monitoring side; the only AMFA-side change is the operator-run `CREATE USER ... GRANT SELECT` block documented in `docs/amfa-integration.md`.
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@/test-utils";
+import userEvent from "@testing-library/user-event";
 import { HealthPage } from "./HealthPage";
 import { useTenant } from "@/shared/context";
 
@@ -42,6 +43,27 @@ vi.mock("@/shared/components", () => ({
   ),
   EmptyState: ({ message }: { message: string }) => (
     <div data-testid="empty-state">{message}</div>
+  ),
+  ErrorState: ({
+    title,
+    error,
+    onRetry,
+  }: {
+    title?: string;
+    error: Error | string | null;
+    onRetry?: () => void;
+  }) => (
+    <div data-testid="error-state">
+      <div>{title}</div>
+      <div>{error instanceof Error ? error.message : error}</div>
+      <button onClick={onRetry}>Try Again</button>
+    </div>
+  ),
+  AlertBanner: ({ title, message }: { title?: string; message: string }) => (
+    <div data-testid="alert-banner">
+      <div>{title}</div>
+      <div>{message}</div>
+    </div>
   ),
   SectionCard: ({
     title,
@@ -299,5 +321,135 @@ describe("HealthPage", () => {
     await waitFor(() => {
       expect(screen.getByText(/Update Available/)).toBeInTheDocument();
     });
+  });
+
+  // A failed first load used to render the same "No health data available" as
+  // a tenant that simply had nothing to report.
+  it("shows a failed first load as an error, not as no data", async () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: null,
+      isLoading: false,
+      isError: true,
+      error: new Error("HTTP 500"),
+      dataUpdatedAt: 0,
+      refetch: vi.fn(),
+    });
+
+    render(<HealthPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("error-state")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Failed to load health data")).toBeInTheDocument();
+    expect(
+      screen.queryByText("No health data available"),
+    ).not.toBeInTheDocument();
+  });
+
+  // TanStack Query clears isError on every refetch of a query that never
+  // loaded, so each retry of a failed first load swapped the error for the
+  // loading skeleton. errorUpdatedAt still says the last request failed.
+  it("keeps a failed first load as an error while it is retried", async () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: undefined,
+      error: null,
+      isError: false,
+      isLoading: true,
+      isFetching: true,
+      status: "pending",
+      dataUpdatedAt: 0,
+      errorUpdatedAt: 1_000,
+      refetch: vi.fn(),
+    });
+
+    render(<HealthPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("error-state")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Failed to load health data")).toBeInTheDocument();
+  });
+
+  // Server error text is for the logs: it can be unclear and can reveal
+  // internal detail.
+  it("shows a fixed message, not the server's error text, when the first load fails", async () => {
+    const refetch = vi.fn();
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: null,
+      isLoading: false,
+      isError: true,
+      error: new Error("injected failure"),
+      dataUpdatedAt: 0,
+      refetch,
+    });
+
+    const { rerender } = render(<HealthPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("error-state")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("The health data could not be loaded. Try again."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/injected failure/)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Try Again" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
+
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: mockKeycloakDashboard,
+      isLoading: false,
+      isError: false,
+      error: null,
+      dataUpdatedAt: Date.now(),
+      refetch,
+    });
+    rerender(<HealthPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("UP")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("error-state")).not.toBeInTheDocument();
+  });
+
+  // The page refreshes every five seconds and keeps the last answer. A failed
+  // refresh used to leave a green "UP" behind with no sign of its age.
+  it("marks the health data as out of date when a refresh fails", async () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: mockKeycloakDashboard,
+      isLoading: false,
+      isError: true,
+      error: new Error("HTTP 500"),
+      dataUpdatedAt: new Date("2026-10-12T08:30:00Z").getTime(),
+      refetch: vi.fn(),
+    });
+
+    render(<HealthPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("alert-banner")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Health data is out of date")).toBeInTheDocument();
+    expect(
+      screen.getByText(/The last refresh failed\. Showing the answer from /),
+    ).toBeInTheDocument();
+
+    const chip = screen.getByText("UP").closest(".MuiChip-root");
+    expect(chip?.className).toContain("colorWarning");
+    expect(chip?.className).not.toContain("colorSuccess");
+  });
+
+  it("keeps a healthy status green while the request answers", async () => {
+    render(<HealthPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("UP")).toBeInTheDocument();
+    });
+
+    const chip = screen.getByText("UP").closest(".MuiChip-root");
+    expect(chip?.className).toContain("colorSuccess");
+    expect(screen.queryByTestId("alert-banner")).not.toBeInTheDocument();
   });
 });

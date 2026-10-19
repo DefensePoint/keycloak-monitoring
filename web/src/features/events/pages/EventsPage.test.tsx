@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@/test-utils";
+import { render, screen, waitFor, within } from "@/test-utils";
 import userEvent from "@testing-library/user-event";
-import { EventsPage } from "./EventsPage";
+import { EventsPage, getSeverityColor } from "./EventsPage";
 import { useTenant } from "@/shared/context";
 
 const mockSetSearchParams = vi.fn();
 const mockUseKeycloakDashboard = vi.fn();
 const mockUseEvents = vi.fn();
+const mockUseEvent = vi.fn();
 const mockUseAmfaRealms = vi.fn<() => { data: string[] }>(() => ({ data: [] }));
 const mockUseAmfaStats = vi.fn<() => { data: unknown; error: unknown }>(() => ({
   data: undefined,
@@ -32,8 +33,11 @@ vi.mock("react-router-dom", () => ({
   ),
 }));
 
+const mockUseAuth = vi.fn();
+
 vi.mock("@/shared/context", () => ({
   useTenant: vi.fn(),
+  useAuth: () => mockUseAuth(),
 }));
 
 vi.mock("@/shared/hooks", () => ({
@@ -42,7 +46,10 @@ vi.mock("@/shared/hooks", () => ({
     selectedRealm: "all",
     handleRealmChange: vi.fn(),
   }),
-  useEvents: () => mockUseEvents(),
+  useEvents: (args: unknown) => mockUseEvents(args),
+  useEvent: (...args: unknown[]) => mockUseEvent(...args),
+  isEventNotFoundError: (error: unknown) =>
+    error instanceof Error && error.message === "Event not found",
   useAmfaStats: () => mockUseAmfaStats(),
   useAmfaGeo: () => ({ data: undefined }),
   useAmfaRealms: () => mockUseAmfaRealms(),
@@ -243,6 +250,7 @@ describe("EventsPage", () => {
       isLoading: false,
       isError: false,
     });
+    mockUseAuth.mockReturnValue({ isAdmin: () => true, user: null });
 
     mockUseEvents.mockReturnValue({
       data: mockEventsResponse,
@@ -251,6 +259,7 @@ describe("EventsPage", () => {
     });
 
     mockUseAmfaRealms.mockReturnValue({ data: [] });
+    mockUseEvent.mockReturnValue({ data: undefined, isError: false });
     mockUseAmfaStats.mockReturnValue({ data: undefined, error: undefined });
     mockIsAllRealmsUnsupportedError.mockReturnValue(false);
     mockIsRealmScopeRequiresRealmError.mockReturnValue(false);
@@ -302,7 +311,9 @@ describe("EventsPage", () => {
       expect(screen.getByTestId("page-size-selector")).toBeInTheDocument();
     });
 
-    const select = screen.getByRole("combobox");
+    const select = within(screen.getByTestId("page-size-selector")).getByRole(
+      "combobox",
+    );
     await user.selectOptions(select, "100");
 
     expect(select).toHaveValue("100");
@@ -434,6 +445,314 @@ describe("EventsPage", () => {
       expect(screen.getByTestId("amfa-kpi-row")).toBeInTheDocument();
     });
     expect(screen.queryByTestId("alert-banner")).not.toBeInTheDocument();
+  });
+
+  describe("server-side event filters", () => {
+    const lastEventsQuery = () =>
+      mockUseEvents.mock.calls[mockUseEvents.mock.calls.length - 1][0];
+
+    it("queries with the chosen severity from the first page", async () => {
+      const user = userEvent.setup();
+      render(<EventsPage />);
+
+      await user.click(screen.getByRole("combobox", { name: /severity/i }));
+      await user.click(screen.getByRole("option", { name: "Error" }));
+
+      await waitFor(() => {
+        expect(lastEventsQuery()).toMatchObject({
+          severity: "error",
+          offset: 0,
+        });
+      });
+    });
+
+    it("queries with a minimum risk for AMFA realms, and drops it once AMFA is off", async () => {
+      const user = userEvent.setup();
+      mockUseAmfaRealms.mockReturnValue({ data: ["AdaptiveAuth"] });
+      const { rerender } = render(<EventsPage />);
+
+      await user.click(screen.getByRole("combobox", { name: /min risk/i }));
+      await user.click(screen.getByRole("option", { name: "3+" }));
+      await waitFor(() => {
+        expect(lastEventsQuery()).toMatchObject({ minRisk: 3 });
+      });
+
+      // The control disappears with the Risk column; a filter the user can
+      // no longer see must not keep narrowing the table.
+      mockUseAmfaRealms.mockReturnValue({ data: [] });
+      rerender(<EventsPage />);
+
+      await waitFor(() => {
+        expect(
+          screen.queryByRole("combobox", { name: /min risk/i }),
+        ).not.toBeInTheDocument();
+      });
+      expect(lastEventsQuery().minRisk).toBeUndefined();
+    });
+  });
+
+  describe("opening an event from a link", () => {
+    const lastEventLookup = () => mockUseEvent.mock.calls.at(-1);
+
+    it("opens an event on the loaded page without fetching it", async () => {
+      mockSearchParams = new URLSearchParams("event=event-2");
+      render(<EventsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("dialog")).toHaveTextContent(
+          "Failed login attempt",
+        );
+      });
+      expect(lastEventLookup()).toEqual(["tenant-1", "event-2", false]);
+    });
+
+    it("fetches and opens an event the loaded page does not hold", async () => {
+      mockSearchParams = new URLSearchParams("event=old-1");
+      mockUseEvent.mockReturnValue({
+        data: {
+          event_id: "old-1",
+          timestamp: "2023-06-01T00:00:00Z",
+          type: "LOGIN",
+          severity: "info",
+          description: "An older login",
+          source: "keycloak:master",
+          client_id: "admin-cli",
+        },
+        isError: false,
+      });
+      render(<EventsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("dialog")).toHaveTextContent("An older login");
+      });
+      expect(lastEventLookup()).toEqual(["tenant-1", "old-1", true]);
+    });
+
+    it("says so when the linked event cannot be shown", async () => {
+      mockSearchParams = new URLSearchParams("event=gone-1");
+      mockUseEvent.mockReturnValue({
+        data: undefined,
+        isError: true,
+        error: new Error("Event not found"),
+      });
+      render(<EventsPage />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/linked event was not found/i),
+        ).toBeInTheDocument();
+      });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("a linked event whose lookup failed", () => {
+    it("says the lookup failed, not that the event is missing, on a non-404", async () => {
+      mockSearchParams = new URLSearchParams("event=gone-1");
+      mockUseEvent.mockReturnValue({
+        data: undefined,
+        isError: true,
+        error: new Error("HTTP 500"),
+      });
+      render(<EventsPage />);
+
+      expect(
+        await screen.findByText(/linked event could not be loaded/i),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/linked event was not found/i),
+      ).not.toBeInTheDocument();
+    });
+
+    // react-query keeps a failed query's error after it is disabled, so once
+    // the list brings the event in, the stale error must not keep the banner.
+    it("drops the banner once the event is on screen after all", async () => {
+      mockSearchParams = new URLSearchParams("event=event-2");
+      mockUseEvent.mockReturnValue({
+        data: undefined,
+        isError: true,
+        error: new Error("Event not found"),
+      });
+      render(<EventsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("dialog")).toHaveTextContent(
+          "Failed login attempt",
+        );
+      });
+      expect(
+        screen.queryByText(/linked event was not found/i),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("explaining an empty page when the tenant has no realms", () => {
+    const noRealmsLoaded = () =>
+      mockUseKeycloakDashboard.mockReturnValue({
+        data: { realms: [] },
+        isLoading: false,
+        isError: false,
+        isSuccess: true,
+      });
+    const limitedTo = (tenantId: string) =>
+      mockUseAuth.mockReturnValue({
+        isAdmin: () => false,
+        user: {
+          tenant_policies: [{ tenant_id: tenantId, allowed_realms: ["x"] }],
+        },
+      });
+
+    it("says nothing has synced yet to an unrestricted caller", async () => {
+      noRealmsLoaded();
+      render(<EventsPage />);
+
+      expect(
+        await screen.findByText(
+          /no realms have been synced for this tenant yet/i,
+        ),
+      ).toBeInTheDocument();
+    });
+
+    // The server sends realms: null, not [], when nothing has synced.
+    it("treats the null realm list the server sends as no realms", async () => {
+      mockUseKeycloakDashboard.mockReturnValue({
+        data: { realms: null },
+        isLoading: false,
+        isError: false,
+        isSuccess: true,
+      });
+      render(<EventsPage />);
+
+      expect(
+        await screen.findByText(
+          /no realms have been synced for this tenant yet/i,
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("points a realm-limited caller at their own access instead", async () => {
+      noRealmsLoaded();
+      limitedTo("tenant-1");
+      render(<EventsPage />);
+
+      expect(
+        await screen.findByText(
+          /none of this tenant's realms are available to you/i,
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/have been synced/i)).not.toBeInTheDocument();
+    });
+
+    // A policy row with no realm list is unrestricted, the same as no row.
+    // Found in review: every row used to read as a limit, so such a caller
+    // was told to ask an administrator when nothing had synced.
+    it("says nothing has synced to a caller whose policy here is unrestricted", async () => {
+      noRealmsLoaded();
+      mockUseAuth.mockReturnValue({
+        isAdmin: () => false,
+        user: {
+          tenant_policies: [
+            { tenant_id: "tenant-1", realms_unrestricted: true },
+          ],
+        },
+      });
+      render(<EventsPage />);
+
+      expect(
+        await screen.findByText(
+          /no realms have been synced for this tenant yet/i,
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/none of this tenant's realms are available/i),
+      ).not.toBeInTheDocument();
+    });
+
+    it("lets an unrestricted row win over a restricted one, as the server does", async () => {
+      noRealmsLoaded();
+      mockUseAuth.mockReturnValue({
+        isAdmin: () => false,
+        user: {
+          tenant_policies: [
+            { tenant_id: "tenant-1", allowed_realms: ["x"] },
+            { tenant_id: "tenant-1", realms_unrestricted: true },
+          ],
+        },
+      });
+      render(<EventsPage />);
+
+      expect(
+        await screen.findByText(
+          /no realms have been synced for this tenant yet/i,
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("keeps a deny-all row as a limit", async () => {
+      noRealmsLoaded();
+      mockUseAuth.mockReturnValue({
+        isAdmin: () => false,
+        user: {
+          tenant_policies: [
+            { tenant_id: "tenant-1", realms_unrestricted: false },
+          ],
+        },
+      });
+      render(<EventsPage />);
+
+      expect(
+        await screen.findByText(
+          /none of this tenant's realms are available to you/i,
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("ignores a policy that limits the caller on another tenant", async () => {
+      noRealmsLoaded();
+      limitedTo("tenant-2");
+      render(<EventsPage />);
+
+      expect(
+        await screen.findByText(
+          /no realms have been synced for this tenant yet/i,
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("stays quiet when the tenant has realms", async () => {
+      mockUseKeycloakDashboard.mockReturnValue({
+        data: mockKeycloakDashboard,
+        isLoading: false,
+        isError: false,
+        isSuccess: true,
+      });
+      render(<EventsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("events-table")).toBeInTheDocument();
+      });
+      expect(
+        screen.queryByText(/realms have been synced/i),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/available to you/i)).not.toBeInTheDocument();
+    });
+
+    it("stays quiet until the realm list has loaded", async () => {
+      mockUseKeycloakDashboard.mockReturnValue({
+        data: undefined,
+        isLoading: true,
+        isError: false,
+        isSuccess: false,
+      });
+      render(<EventsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("events-table")).toBeInTheDocument();
+      });
+      expect(
+        screen.queryByText(/realms have been synced/i),
+      ).not.toBeInTheDocument();
+    });
   });
 
   describe("AMFA Details section in the event dialog", () => {
@@ -671,5 +990,20 @@ describe("EventsPage", () => {
       // there rather than a substitute for the name.
       expect(screen.getAllByText("user-123")).toHaveLength(1);
     });
+  });
+});
+
+describe("getSeverityColor", () => {
+  it("renders critical in the error red, not the info blue", () => {
+    expect(getSeverityColor("critical")).toBe("error");
+  });
+
+  it.each([
+    ["error", "error"],
+    ["warning", "warning"],
+    ["info", "info"],
+    ["unknown", "info"],
+  ])("maps %s to %s", (severity, color) => {
+    expect(getSeverityColor(severity)).toBe(color);
   });
 });

@@ -20,7 +20,7 @@ func (m *mockVisibilityChecker) IsAdmin(ctx context.Context, userID uint) (bool,
 	return false, nil
 }
 
-func (m *mockVisibilityChecker) GetUserRoles(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
+func (m *mockVisibilityChecker) GetEffectiveUserRoles(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
 	if m.getUserRolesFn != nil {
 		return m.getUserRolesFn(ctx, userID)
 	}

@@ -27,9 +27,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -134,45 +132,6 @@ func guardReadOnly(t *testing.T, db *gorm.DB) *writeRecorder {
 	return rec
 }
 
-// parseTestDSN turns the libpq key/value DSN the suites are configured with
-// into the DatabaseConfig database.NewClient takes. The DSN carries a
-// password, so no failure here echoes it back.
-func parseTestDSN(t *testing.T, dsn string) *config.DatabaseConfig {
-	t.Helper()
-	cfg := &config.DatabaseConfig{SSLMode: "disable", MaxConns: 10, MinConns: 2, Timeout: 30 * time.Second}
-	for _, field := range strings.Fields(dsn) {
-		key, value, ok := strings.Cut(field, "=")
-		if !ok {
-			continue
-		}
-		switch key {
-		case "host":
-			cfg.Host = value
-		case "port":
-			port, err := strconv.Atoi(value)
-			if err != nil {
-				t.Fatal("KMT_TEST_DATABASE_DSN: port is not a number")
-			}
-			cfg.Port = port
-		case "dbname":
-			cfg.Database = value
-		case "user":
-			cfg.User = value
-		case "password":
-			cfg.Password = value
-		case "sslmode":
-			cfg.SSLMode = value
-		}
-	}
-	if cfg.Host == "" || cfg.Database == "" {
-		t.Fatal("KMT_TEST_DATABASE_DSN must set at least host and dbname")
-	}
-	if cfg.Port == 0 {
-		cfg.Port = 5432
-	}
-	return cfg
-}
-
 type toolCall struct {
 	name string
 	args map[string]any
@@ -180,6 +139,11 @@ type toolCall struct {
 
 // postureEnv is the stood-up stack plus the identifiers of everything seeded
 // into it.
+// postureSetupActorID stands in for the administrator who mints and revokes
+// the fixture tokens. The token service records it on the audit line and
+// does not resolve it, so it need not name a real user.
+const postureSetupActorID uint = 1
+
 type postureEnv struct {
 	ts     *httptest.Server
 	writes *writeRecorder
@@ -304,13 +268,11 @@ func eventIDsOf(out listEventsOutput) []string {
 func newPostureEnv(t *testing.T) *postureEnv {
 	t.Helper()
 
-	dsn := os.Getenv("KMT_TEST_DATABASE_DSN")
-	if dsn == "" {
-		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
-	}
-
-	testdb.ShareDatabase(t, dsn)
-	dbCfg := parseTestDSN(t, dsn)
+	dsn := testdb.DSN(t, "KMT_TEST_DATABASE_DSN")
+	testdb.Lock(t, dsn)
+	dbCfg := testdb.DatabaseConfig(t, dsn)
+	dbCfg.MaxConns = 10
+	dbCfg.MinConns = 2
 	log := logger.NewNoop()
 	ctx := context.Background()
 
@@ -550,7 +512,7 @@ func newPostureEnv(t *testing.T) *postureEnv {
 	)
 	mint := func(userID uint, name string, tenantIDs []string) *apitoken.CreatedToken {
 		t.Helper()
-		created, err := writeTokens.Create(ctx, userID, name, tenantIDs, nil)
+		created, err := writeTokens.Create(ctx, postureSetupActorID, userID, name, tenantIDs, nil)
 		if err != nil {
 			t.Fatalf("mint the %s token: %v", name, err)
 		}
@@ -992,7 +954,7 @@ func TestMCPSecurityPosture(t *testing.T) {
 		if _, err := session.CallTool(ctx, &mcpsdk.CallToolParams{Name: "whoami"}); err != nil {
 			t.Fatalf("whoami before revocation: %v", err)
 		}
-		if err := env.writeTokens.Revoke(ctx, env.revokedTokenID); err != nil {
+		if err := env.writeTokens.Revoke(ctx, postureSetupActorID, env.revokedTokenID); err != nil {
 			t.Fatalf("revoke the token: %v", err)
 		}
 		if _, err := session.CallTool(ctx, &mcpsdk.CallToolParams{Name: "whoami"}); err == nil {

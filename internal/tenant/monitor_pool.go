@@ -2,7 +2,6 @@ package tenant
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -59,6 +58,15 @@ type MonitorPoolManager struct {
 	healthAlertManager  HealthAlertManager
 	metrics             MetricsRecorder
 	mu                  sync.RWMutex
+
+	// Failed starts awaiting a retry (monitor_pool_retry.go).
+	retryMu      sync.Mutex
+	pending      map[string]*pendingStart
+	retryWake    chan struct{}
+	retryCancel  context.CancelFunc
+	retryDone    chan struct{}
+	retryInitial time.Duration
+	retryMax     time.Duration
 }
 
 // SetMetrics attaches a metrics recorder for monitor up/down gauges.
@@ -101,6 +109,10 @@ func NewMonitorPoolManager(
 		realmRepo:           realmRepo,
 		eventAlertConverter: eventAlertConverter,
 		healthAlertManager:  healthAlertManager,
+		pending:             map[string]*pendingStart{},
+		retryWake:           make(chan struct{}, 1),
+		retryInitial:        defaultRetryInitial,
+		retryMax:            defaultRetryMax,
 	}
 }
 
@@ -114,28 +126,50 @@ func (m *MonitorPoolManager) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to list enabled tenants: %w", err)
 	}
 
-	// Start monitor for each enabled tenant
+	// Start monitor for each enabled tenant, counting the ones that came up.
+	// len(tenants) is what was attempted, not what is running, so reporting it
+	// as active_monitors told an operator every monitor was live even when none
+	// were: the per-tenant errors above were the only sign, and this is the line
+	// people read to confirm startup.
+	// A tenant that fails here is retried in the background rather than left
+	// unmonitored until the next restart.
+	m.startRetryLoop()
+	started := 0
 	for _, tenant := range tenants {
 		if err := m.startMonitorForTenant(ctx, tenant); err != nil {
 			m.logger.Error("Failed to start monitor for tenant",
 				"tenant_id", tenant.TenantID,
 				"error", err)
-			// Continue with other tenants even if one fails
+			m.startFailed(ctx, tenant, err)
 			continue
 		}
+		started++
 	}
 
 	// Register callback for tenant changes
 	m.service.RegisterCallback(m.handleTenantChange)
 
-	m.logger.Info("Monitor Pool Manager started successfully",
-		"active_monitors", len(tenants))
+	switch {
+	case started == len(tenants):
+		m.logger.Info("Monitor Pool Manager started",
+			"active_monitors", started)
+	case started == 0 && len(tenants) > 0:
+		m.logger.Error("Monitor Pool Manager started with no working monitors",
+			"active_monitors", started,
+			"requested_monitors", len(tenants))
+	default:
+		m.logger.Warn("Monitor Pool Manager started with some monitors unavailable",
+			"active_monitors", started,
+			"requested_monitors", len(tenants))
+	}
 	return nil
 }
 
 // Stop gracefully stops all monitors
 func (m *MonitorPoolManager) Stop() error {
 	m.logger.Info("Stopping Monitor Pool Manager")
+
+	m.stopRetryLoop()
 
 	var wg sync.WaitGroup
 	m.monitors.Range(func(key, value interface{}) bool {
@@ -180,50 +214,62 @@ func (m *MonitorPoolManager) handleTenantChange(event Event, tenant *domain.Keyc
 		m.logger.Info("Tenant added, starting monitor",
 			"tenant_id", tenant.TenantID)
 		if tenant.Enabled {
+			m.cancelRetry(tenant.TenantID)
 			if err := m.startMonitorForTenant(ctx, tenant); err != nil {
 				m.logger.Error("Failed to start monitor for new tenant",
 					"tenant_id", tenant.TenantID,
 					"error", err)
+				m.startFailed(ctx, tenant, err)
 			}
 		}
 
 	case EventEnabled:
 		m.logger.Info("Tenant enabled, starting monitor",
 			"tenant_id", tenant.TenantID)
+		m.cancelRetry(tenant.TenantID)
 		if err := m.startMonitorForTenant(ctx, tenant); err != nil {
 			m.logger.Error("Failed to start monitor for enabled tenant",
 				"tenant_id", tenant.TenantID,
 				"error", err)
+			m.startFailed(ctx, tenant, err)
 		}
 
 	case EventDisabled:
 		m.logger.Info("Tenant disabled, stopping monitor",
 			"tenant_id", tenant.TenantID)
+		m.cancelRetry(tenant.TenantID)
 		if err := m.stopMonitorForTenant(tenant.TenantID); err != nil {
 			m.logger.Error("Failed to stop monitor for disabled tenant",
 				"tenant_id", tenant.TenantID,
 				"error", err)
 		}
+		m.closeHealthAlerts(ctx, tenant, "disabled")
 
 	case EventUpdated:
 		m.logger.Info("Tenant updated, restarting monitor",
 			"tenant_id", tenant.TenantID)
 		if tenant.Enabled {
+			// A changed tenant (a corrected secret, say) gets an immediate
+			// attempt and a fresh backoff.
+			m.cancelRetry(tenant.TenantID)
 			if err := m.restartMonitorForTenant(ctx, tenant); err != nil {
 				m.logger.Error("Failed to restart monitor for updated tenant",
 					"tenant_id", tenant.TenantID,
 					"error", err)
+				m.startFailed(ctx, tenant, err)
 			}
 		}
 
 	case EventRemoved:
 		m.logger.Info("Tenant removed, stopping monitor",
 			"tenant_id", tenant.TenantID)
+		m.cancelRetry(tenant.TenantID)
 		if err := m.stopMonitorForTenant(tenant.TenantID); err != nil {
 			m.logger.Error("Failed to stop monitor for removed tenant",
 				"tenant_id", tenant.TenantID,
 				"error", err)
 		}
+		m.closeHealthAlerts(ctx, tenant, "removed")
 	}
 }
 
@@ -422,70 +468,28 @@ func (m *MonitorPoolManager) GetKeycloakClient(tenantID string) KeycloakClient {
 	return instance.client
 }
 
-// createTenantConfig creates an instance config for a specific tenant
-// Merges global defaults with tenant-specific configuration overrides
+// createTenantConfig returns the instance config for a tenant: the global
+// config with the tenant's configuration overrides applied. The factory does
+// the merge because it owns the config type. An override it cannot use is
+// reported and the tenant keeps the global config, never the factory's
+// built-in defaults.
 func (m *MonitorPoolManager) createTenantConfig(tenant *domain.KeycloakTenant) any {
-	// If global config is nil, return nil
 	if m.globalConfig == nil {
 		return nil
 	}
-
-	// Try to deep copy and merge configuration
-	// The actual implementation depends on the config type
-	// For now, we'll use JSON marshal/unmarshal for a generic deep copy
-	globalBytes, err := json.Marshal(m.globalConfig)
-	if err != nil {
-		m.logger.Warn("Failed to marshal global config, using as-is",
-			"tenant_id", tenant.TenantID,
-			"error", err)
-		return m.globalConfig
-	}
-
-	// If tenant has no configuration overrides, return global config
 	if tenant.Configuration == "" {
 		return m.globalConfig
 	}
 
-	// Create a map to hold merged config
-	var configMap map[string]any
-	if err := json.Unmarshal(globalBytes, &configMap); err != nil {
-		m.logger.Warn("Failed to unmarshal global config to map",
+	merged, err := m.monitorFactory.TenantInstanceConfig(tenant.TenantID, m.globalConfig, tenant.Configuration)
+	if err != nil {
+		m.logger.Warn("Tenant configuration overrides not applied, using the global configuration",
 			"tenant_id", tenant.TenantID,
 			"error", err)
 		return m.globalConfig
 	}
-
-	// Parse tenant overrides
-	var tenantOverrides map[string]any
-	if err := json.Unmarshal([]byte(tenant.Configuration), &tenantOverrides); err != nil {
-		m.logger.Warn("Failed to parse tenant configuration JSON, using global config",
-			"tenant_id", tenant.TenantID,
-			"error", err)
-		return m.globalConfig
-	}
-
-	// Merge tenant overrides into config map
-	mergeConfig(configMap, tenantOverrides)
 
 	m.logger.Debug("Applied tenant-specific configuration overrides",
 		"tenant_id", tenant.TenantID)
-
-	return configMap
-}
-
-// mergeConfig recursively merges src into dst
-func mergeConfig(dst, src map[string]any) {
-	for key, srcVal := range src {
-		if dstVal, exists := dst[key]; exists {
-			// If both are maps, merge recursively
-			srcMap, srcIsMap := srcVal.(map[string]any)
-			dstMap, dstIsMap := dstVal.(map[string]any)
-			if srcIsMap && dstIsMap {
-				mergeConfig(dstMap, srcMap)
-				continue
-			}
-		}
-		// Otherwise, override with src value
-		dst[key] = srcVal
-	}
+	return merged
 }

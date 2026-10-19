@@ -11,6 +11,7 @@ import (
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/events"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
 // The case realm-name scoping could never handle: two tenants each monitoring
@@ -112,13 +113,14 @@ func TestList_UnattributedRowsAreHiddenFromTenants(t *testing.T) {
 	tenant := fmt.Sprintf("tenant-%d", stamp)
 	t.Cleanup(func() { db.Exec(`DELETE FROM events WHERE event_id = ?`, legacyID) })
 
-	// Written with no tenant, as the pre-migration writers did.
-	if err := repo.Save(ctx, &domain.Event{
+	// Written with no tenant, as the pre-migration writers did. Save refuses
+	// such an event, so it goes straight to the table.
+	if err := db.Create(&database.Event{
 		EventID: legacyID, Type: "LOGIN", Source: events.SourceForKeycloakRealm("master"),
 		SourceSystem: "keycloak", Status: "processed",
 		Timestamp: time.Now().UTC().Truncate(time.Second),
-	}); err != nil {
-		t.Fatalf("save legacy row: %v", err)
+	}).Error; err != nil {
+		t.Fatalf("seed legacy row: %v", err)
 	}
 
 	rows, err := repo.List(ctx, &events.ListOptions{

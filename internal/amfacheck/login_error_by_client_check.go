@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts/clearing"
 	"github.com/DefensePoint/keycloak-monitoring/internal/amfa"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
@@ -13,8 +14,9 @@ import (
 // LoginErrorByClientCheck implements the per-client login-error rule: like
 // rule 4a (LoginErrorCheck), but counted per OAuth client instead of per
 // realm, so a burst concentrated on one app isn't diluted by the realm's
-// overall traffic. Deduped per (realm, client), the same persists-and-updates
-// style as rule 4a/4b (no day component).
+// overall traffic. One alert per (realm, client) that resolves once the
+// client's failures age out of the window and reopens on the next burst, like
+// rule 4a/4b.
 type LoginErrorByClientCheck struct {
 	tenantID  string
 	realmsFn  RealmsFunc
@@ -42,24 +44,32 @@ func (c *LoginErrorByClientCheck) GetDescription() string {
 }
 
 func (c *LoginErrorByClientCheck) Execute(ctx context.Context) ([]*domain.Alert, error) {
+	ev, err := c.Evaluate(ctx)
+	return ev.Alerts, err
+}
+
+// Evaluate runs the check and reports every realm it counted; see
+// RepeatedRiskyCheck.Evaluate.
+func (c *LoginErrorByClientCheck) Evaluate(ctx context.Context) (clearing.Evaluation, error) {
 	realms, err := c.realmsFn(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("amfa-login-error-by-client: load realms: %w", err)
+		return clearing.Evaluation{}, fmt.Errorf("amfa-login-error-by-client: load realms: %w", err)
 	}
 	now := time.Now().UTC()
 	start := now.Add(-c.window)
 
-	var alerts []*domain.Alert
+	ev := clearing.Evaluation{TenantID: c.tenantID}
 	for _, realm := range realms {
 		counts, err := c.repo.CountByEventTypeAndClientInWindow(ctx, realm, "LOGIN_ERROR", start, now, c.threshold)
 		if err != nil {
-			return nil, fmt.Errorf("amfa-login-error-by-client: realm=%s: %w", realm, err)
+			return clearing.Evaluation{}, fmt.Errorf("amfa-login-error-by-client: realm=%s: %w", realm, err)
 		}
+		ev.MarkRealmEvaluated(realm)
 		for _, cc := range counts {
-			alerts = append(alerts, c.toAlert(realm, cc))
+			ev.Alerts = append(ev.Alerts, c.toAlert(realm, cc))
 		}
 	}
-	return alerts, nil
+	return ev, nil
 }
 
 func (c *LoginErrorByClientCheck) toAlert(realm string, cc amfa.ClientEventCount) *domain.Alert {

@@ -15,6 +15,7 @@ vi.mock("react-router-dom", () => ({
 
 vi.mock("@/shared/context", () => ({
   useTenant: vi.fn(),
+  useAuth: () => ({ hasPermission: () => true }),
 }));
 
 vi.mock("@/shared/hooks", () => ({

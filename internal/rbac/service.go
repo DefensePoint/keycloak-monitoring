@@ -16,16 +16,26 @@ import (
 // grant would otherwise be treated as a platform administrator.
 var ErrAdminRoleTenantScoped = errors.New("admin role cannot be assigned with a tenant scope; the administrator role is global-only")
 
+// ErrUnknownPermission is returned when a role is given a permission name that
+// does not exist. Nothing is written when it is returned.
+var ErrUnknownPermission = errors.New("unknown permission")
+
+// ErrRoleNameTaken is returned when another role that has not been deleted
+// already has the name.
+var ErrRoleNameTaken = errors.New("a role with this name already exists")
+
 // Service defines the interface for RBAC operations.
 type Service interface {
 	// Permission checking
 	HasPermission(ctx context.Context, userID uint, permission string, tenantID *string) (bool, error)
+	HasGlobalPermission(ctx context.Context, userID uint, permission string) (bool, error)
 	GetUserPermissions(ctx context.Context, userID uint, tenantID *string) ([]string, error)
 	HasAccessToTenant(ctx context.Context, userID uint, tenantID string) (bool, error)
 	HasAccessToRealm(ctx context.Context, userID uint, tenantID, realmName string) (bool, error)
 
 	// Role management
 	GetUserRoles(ctx context.Context, userID uint) ([]*domain.UserRole, error)
+	GetEffectiveUserRoles(ctx context.Context, userID uint) ([]*domain.UserRole, error)
 	GetUserRolesForTenant(ctx context.Context, userID uint, tenantID string) ([]*domain.UserRole, error)
 	AssignRoleToUser(ctx context.Context, userID, roleID uint, tenantID *string, assignedBy string, expiresAt *time.Time) error
 	RemoveRoleFromUser(ctx context.Context, userID, roleID uint, tenantID *string) error
@@ -44,12 +54,14 @@ type Service interface {
 	UpdateRole(ctx context.Context, role *domain.Role) error
 	DeleteRole(ctx context.Context, roleID uint) error
 	AssignPermissionsToRole(ctx context.Context, roleID uint, permissionNames []string) error
+	CreateRoleWithPermissions(ctx context.Context, name, displayName, description string, permissionNames []string, active bool) (*domain.Role, error)
+	SetRolePermissions(ctx context.Context, roleID uint, permissionNames []string) error
 	CreatePermission(ctx context.Context, name, displayName, description, resource, action string, isSystem bool) (*domain.Permission, error)
 	ListPermissions(ctx context.Context, resource string) ([]*domain.Permission, error)
 
 	// Utility
 	IsAdmin(ctx context.Context, userID uint) (bool, error)
-	IsOperator(ctx context.Context, userID uint) (bool, error)
+	IsOperator(ctx context.Context, userID uint, tenantID string) (bool, error)
 	CheckRoleExpiration(ctx context.Context) error
 	GetUserWithRolesAndPermissions(ctx context.Context, userID uint, tenantID *string) (*domain.UserWithRoles, error)
 }
@@ -85,6 +97,12 @@ func (s *service) HasPermission(ctx context.Context, userID uint, permission str
 	return s.userRoleRepo.HasPermission(ctx, userID, permission, tenantID)
 }
 
+// HasGlobalPermission checks a permission on a platform-wide resource, where
+// only a grant that applies to every tenant counts.
+func (s *service) HasGlobalPermission(ctx context.Context, userID uint, permission string) (bool, error) {
+	return s.userRoleRepo.HasGlobalPermission(ctx, userID, permission)
+}
+
 // GetUserPermissions retrieves all permissions for a user.
 func (s *service) GetUserPermissions(ctx context.Context, userID uint, tenantID *string) ([]string, error) {
 	return s.userRoleRepo.GetUserPermissions(ctx, userID, tenantID)
@@ -97,8 +115,9 @@ func (s *service) HasAccessToTenant(ctx context.Context, userID uint, tenantID s
 		return false, fmt.Errorf("failed to get user roles: %w", err)
 	}
 
+	now := time.Now()
 	for _, userRole := range roles {
-		if userRole.Role != nil && userRole.Role.Name == RoleAdmin && userRole.TenantID == nil {
+		if userRole.Grants(now) && userRole.Role.Name == RoleAdmin && userRole.TenantID == nil {
 			return true, nil
 		}
 	}
@@ -113,8 +132,9 @@ func (s *service) HasAccessToRealm(ctx context.Context, userID uint, tenantID, r
 		return false, fmt.Errorf("failed to get user roles: %w", err)
 	}
 
+	now := time.Now()
 	for _, userRole := range roles {
-		if userRole.Role != nil && userRole.Role.Name == RoleAdmin && userRole.TenantID == nil {
+		if userRole.Grants(now) && userRole.Role.Name == RoleAdmin && userRole.TenantID == nil {
 			return true, nil
 		}
 	}
@@ -130,6 +150,23 @@ func (s *service) HasAccessToRealm(ctx context.Context, userID uint, tenantID, r
 // GetUserRoles retrieves all roles for a user.
 func (s *service) GetUserRoles(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
 	return s.userRoleRepo.GetUserRoles(ctx, userID)
+}
+
+// GetEffectiveUserRoles returns the user's assignments that currently grant
+// their role; see domain.UserRole.Grants.
+func (s *service) GetEffectiveUserRoles(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
+	roles, err := s.userRoleRepo.GetUserRoles(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	effective := make([]*domain.UserRole, 0, len(roles))
+	for _, userRole := range roles {
+		if userRole.Grants(now) {
+			effective = append(effective, userRole)
+		}
+	}
+	return effective, nil
 }
 
 // GetUserRolesForTenant retrieves roles for a user in a tenant.
@@ -282,14 +319,21 @@ func (s *service) GetUserPolicies(ctx context.Context, userID uint) ([]*domain.T
 
 // CreateRole creates a new role.
 func (s *service) CreateRole(ctx context.Context, name, displayName, description string, isSystem bool) (*domain.Role, error) {
+	return s.createRole(ctx, name, displayName, description, isSystem, true)
+}
+
+func (s *service) createRole(ctx context.Context, name, displayName, description string, isSystem, active bool) (*domain.Role, error) {
 	role := &domain.Role{
 		Name:        name,
 		DisplayName: displayName,
 		Description: description,
 		IsSystem:    isSystem,
-		IsActive:    true,
+		IsActive:    active,
 	}
 	if err := s.roleRepo.CreateRole(ctx, role); err != nil {
+		if errors.Is(err, ErrRoleNameTaken) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("failed to create role: %w", err)
 	}
 
@@ -335,18 +379,32 @@ func (s *service) DeleteRole(ctx context.Context, roleID uint) error {
 	return nil
 }
 
-// AssignPermissionsToRole assigns permissions to a role.
-func (s *service) AssignPermissionsToRole(ctx context.Context, roleID uint, permissionNames []string) error {
-	var permissionIDs []uint
+// permissionIDs resolves permission names to IDs, dropping duplicates. Any
+// name that does not exist fails the whole list with ErrUnknownPermission.
+func (s *service) permissionIDs(ctx context.Context, permissionNames []string) ([]uint, error) {
+	ids := make([]uint, 0, len(permissionNames))
+	seen := make(map[uint]bool, len(permissionNames))
 	for _, name := range permissionNames {
 		perm, err := s.permissionRepo.GetPermissionByName(ctx, name)
 		if err != nil {
-			return fmt.Errorf("failed to get permission %s: %w", name, err)
+			return nil, fmt.Errorf("failed to get permission %s: %w", name, err)
 		}
 		if perm == nil {
-			return fmt.Errorf("permission not found: %s", name)
+			return nil, fmt.Errorf("%w: %q", ErrUnknownPermission, name)
 		}
-		permissionIDs = append(permissionIDs, perm.ID)
+		if !seen[perm.ID] {
+			seen[perm.ID] = true
+			ids = append(ids, perm.ID)
+		}
+	}
+	return ids, nil
+}
+
+// AssignPermissionsToRole adds permissions to a role, keeping those it has.
+func (s *service) AssignPermissionsToRole(ctx context.Context, roleID uint, permissionNames []string) error {
+	permissionIDs, err := s.permissionIDs(ctx, permissionNames)
+	if err != nil {
+		return err
 	}
 
 	if err := s.roleRepo.AssignPermissionsToRole(ctx, roleID, permissionIDs); err != nil {
@@ -358,6 +416,44 @@ func (s *service) AssignPermissionsToRole(ctx context.Context, roleID uint, perm
 		logger.Int("permission_count", len(permissionNames)))
 
 	return nil
+}
+
+// SetRolePermissions makes the role's permissions exactly permissionNames.
+// An empty list removes all of them.
+func (s *service) SetRolePermissions(ctx context.Context, roleID uint, permissionNames []string) error {
+	permissionIDs, err := s.permissionIDs(ctx, permissionNames)
+	if err != nil {
+		return err
+	}
+	if err := s.roleRepo.SetRolePermissions(ctx, roleID, permissionIDs); err != nil {
+		return fmt.Errorf("failed to set role permissions: %w", err)
+	}
+	s.logger.Info("Role permissions set",
+		logger.Uint("role_id", roleID),
+		logger.Int("permission_count", len(permissionIDs)))
+	return nil
+}
+
+// CreateRoleWithPermissions creates a custom role holding permissionNames. The
+// names are checked before the role is created, and the role is removed again
+// if its permissions cannot be saved, so a failure never leaves an empty role.
+func (s *service) CreateRoleWithPermissions(ctx context.Context, name, displayName, description string, permissionNames []string, active bool) (*domain.Role, error) {
+	permissionIDs, err := s.permissionIDs(ctx, permissionNames)
+	if err != nil {
+		return nil, err
+	}
+	role, err := s.createRole(ctx, name, displayName, description, false, active)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.roleRepo.SetRolePermissions(ctx, role.ID, permissionIDs); err != nil {
+		if delErr := s.roleRepo.DeleteRole(ctx, role.ID); delErr != nil {
+			s.logger.Error("Failed to remove role after its permissions could not be saved",
+				logger.Uint("role_id", role.ID), logger.Err(delErr))
+		}
+		return nil, fmt.Errorf("failed to set role permissions: %w", err)
+	}
+	return s.roleRepo.GetRoleWithPermissions(ctx, role.ID)
 }
 
 // CreatePermission creates a new permission.
@@ -384,8 +480,8 @@ func (s *service) ListPermissions(ctx context.Context, resource string) ([]*doma
 }
 
 // IsAdmin reports whether a user is a platform administrator. Only a global
-// (non-tenant-scoped) admin grant that has not expired confers platform admin;
-// a tenant-scoped admin assignment must never be treated as global.
+// (non-tenant-scoped) admin assignment that grants (domain.UserRole.Grants)
+// confers platform admin; a tenant-scoped one must never be treated as global.
 func (s *service) IsAdmin(ctx context.Context, userID uint) (bool, error) {
 	roles, err := s.userRoleRepo.GetUserRoles(ctx, userID)
 	if err != nil {
@@ -393,30 +489,30 @@ func (s *service) IsAdmin(ctx context.Context, userID uint) (bool, error) {
 	}
 	now := time.Now()
 	for _, userRole := range roles {
-		if userRole.Role == nil || userRole.Role.Name != RoleAdmin {
-			continue
+		if userRole.Grants(now) && userRole.Role.Name == RoleAdmin && userRole.TenantID == nil {
+			return true, nil
 		}
-		if userRole.TenantID != nil {
-			continue
-		}
-		if userRole.ExpiresAt != nil && !userRole.ExpiresAt.After(now) {
-			continue
-		}
-		return true, nil
 	}
 	return false, nil
 }
 
-// IsOperator checks if a user is operator.
-func (s *service) IsOperator(ctx context.Context, userID uint) (bool, error) {
-	roles, err := s.userRoleRepo.GetUserRoles(ctx, userID)
+// IsOperator reports whether a user holds an operator assignment that grants
+// (domain.UserRole.Grants) and applies to tenantID. A global (nil-tenant)
+// assignment counts for every tenant; one scoped to another tenant does not.
+func (s *service) IsOperator(ctx context.Context, userID uint, tenantID string) (bool, error) {
+	roles, err := s.userRoleRepo.GetUserRolesForTenant(ctx, userID, tenantID)
 	if err != nil {
 		return false, err
 	}
+	now := time.Now()
 	for _, userRole := range roles {
-		if userRole.Role != nil && userRole.Role.Name == RoleOperator {
-			return true, nil
+		if !userRole.Grants(now) || userRole.Role.Name != RoleOperator {
+			continue
 		}
+		if userRole.TenantID != nil && *userRole.TenantID != tenantID {
+			continue
+		}
+		return true, nil
 	}
 	return false, nil
 }
@@ -429,18 +525,26 @@ func (s *service) CheckRoleExpiration(ctx context.Context) error {
 	return nil
 }
 
-// GetUserWithRolesAndPermissions retrieves user with roles and permissions.
+// GetUserWithRolesAndPermissions retrieves the user's roles and permissions.
+// Only roles that grant (domain.UserRole.Grants) are listed, matching the
+// permissions: the UI decides what to show from this list.
 func (s *service) GetUserWithRolesAndPermissions(ctx context.Context, userID uint, tenantID *string) (*domain.UserWithRoles, error) {
-	// Get roles
-	var roles []*domain.UserRole
+	var all []*domain.UserRole
 	var err error
 	if tenantID != nil {
-		roles, err = s.userRoleRepo.GetUserRolesForTenant(ctx, userID, *tenantID)
+		all, err = s.userRoleRepo.GetUserRolesForTenant(ctx, userID, *tenantID)
 	} else {
-		roles, err = s.userRoleRepo.GetUserRoles(ctx, userID)
+		all, err = s.userRoleRepo.GetUserRoles(ctx, userID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user roles: %w", err)
+	}
+	now := time.Now()
+	roles := make([]*domain.UserRole, 0, len(all))
+	for _, userRole := range all {
+		if userRole.Grants(now) {
+			roles = append(roles, userRole)
+		}
 	}
 
 	// Get permissions

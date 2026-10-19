@@ -1,5 +1,5 @@
 // Coverage for the query extensions on the events repository: the
-// Type/Severity/MinRisk filters, keyset pagination (ListKeyset), the
+// Type/Severity/MinRisk/UserID filters, keyset pagination (ListKeyset), the
 // tenant-scoped single lookup (GetByTenantAndEventID), and the Stats
 // aggregates. Shares the KMT_TEST_DATABASE_DSN-gated helper in
 // rawdata_integration_test.go; skipped when that variable is unset.
@@ -50,13 +50,13 @@ func TestList_FiltersByTypeSeverityAndMinRisk(t *testing.T) {
 	saveAll(t, repo, []*domain.Event{
 		{TenantID: tenant, EventID: loginLow, Type: "LOGIN", Severity: "info",
 			RiskLevel: intPtr(1), Source: source, SourceSystem: "keycloak",
-			Status: "processed", Timestamp: now},
+			UserID: "user-alice", Status: "processed", Timestamp: now},
 		{TenantID: tenant, EventID: loginHigh, Type: "LOGIN", Severity: "warning",
 			RiskLevel: intPtr(3), Source: source, SourceSystem: "keycloak",
-			Status: "processed", Timestamp: now},
+			UserID: "user-bob", Status: "processed", Timestamp: now},
 		{TenantID: tenant, EventID: logoutNoRisk, Type: "LOGOUT", Severity: "info",
 			Source: source, SourceSystem: "keycloak",
-			Status: "processed", Timestamp: now},
+			UserID: "user-alice", Status: "processed", Timestamp: now},
 	})
 
 	cases := []struct {
@@ -76,6 +76,13 @@ func TestList_FiltersByTypeSeverityAndMinRisk(t *testing.T) {
 			[]string{loginHigh}},
 		{"combined", func(o *events.ListOptions) { o.Type = "LOGIN"; o.MinRisk = intPtr(1) },
 			[]string{loginLow, loginHigh}},
+		// Exact match: "user-a" is a prefix of "user-alice" and must not match.
+		{"user", func(o *events.ListOptions) { o.UserID = "user-alice" },
+			[]string{loginLow, logoutNoRisk}},
+		{"user prefix does not match", func(o *events.ListOptions) { o.UserID = "user-a" },
+			nil},
+		{"user combined", func(o *events.ListOptions) { o.UserID = "user-alice"; o.Type = "LOGIN" },
+			[]string{loginLow}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

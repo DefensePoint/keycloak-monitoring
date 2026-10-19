@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/subtle"
 	"sync"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -103,14 +104,16 @@ func NewOIDCProvider(ctx context.Context, cfg *Config, log *logger.Logger) (*OID
 	}, nil
 }
 
-// GetAuthCodeURL returns the URL for initiating the OAuth2 authorization code flow.
-func (p *OIDCProvider) GetAuthCodeURL(state string) string {
-	return p.oauth2Config.AuthCodeURL(state)
+// GetAuthCodeURL returns the URL for initiating the OAuth2 authorization code
+// flow. The login flow passes the PKCE challenge and the nonce as options.
+func (p *OIDCProvider) GetAuthCodeURL(state string, opts ...oauth2.AuthCodeOption) string {
+	return p.oauth2Config.AuthCodeURL(state, opts...)
 }
 
-// Exchange exchanges an authorization code for OAuth2 tokens.
-func (p *OIDCProvider) Exchange(ctx context.Context, code string) (*oauth2.Token, error) {
-	token, err := p.oauth2Config.Exchange(ctx, code)
+// Exchange exchanges an authorization code for OAuth2 tokens. The login flow
+// passes the PKCE verifier as an option.
+func (p *OIDCProvider) Exchange(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
+	token, err := p.oauth2Config.Exchange(ctx, code, opts...)
 	if err != nil {
 		return nil, &AuthError{
 			Code:    ErrCodeExchangeFailed,
@@ -131,7 +134,38 @@ func (p *OIDCProvider) VerifyIDToken(ctx context.Context, rawIDToken string) (*U
 			Err:     err,
 		}
 	}
+	return p.userInfoFromIDToken(idToken)
+}
 
+// VerifyLoginIDToken verifies the ID token a login's code exchange returned,
+// and that it carries the nonce that login sent. An ID token issued for another
+// login, such as a replayed one, is refused.
+func (p *OIDCProvider) VerifyLoginIDToken(ctx context.Context, rawIDToken, nonce string) (*UserInfo, error) {
+	idToken, err := p.verifier.Verify(ctx, rawIDToken)
+	if err != nil {
+		return nil, &AuthError{
+			Code:    ErrCodeInvalidToken,
+			Message: "failed to verify ID token",
+			Err:     err,
+		}
+	}
+	if !nonceMatches(idToken.Nonce, nonce) {
+		return nil, &AuthError{
+			Code:    ErrCodeInvalidToken,
+			Message: "ID token nonce does not match this login",
+		}
+	}
+	return p.userInfoFromIDToken(idToken)
+}
+
+// nonceMatches compares in constant time, and never accepts an empty nonce:
+// a login always sends one, so an empty value on either side is a mismatch.
+func nonceMatches(got, want string) bool {
+	return got != "" && want != "" && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
+// userInfoFromIDToken extracts user information from a verified ID token.
+func (p *OIDCProvider) userInfoFromIDToken(idToken *oidc.IDToken) (*UserInfo, error) {
 	var claims struct {
 		Subject           string `json:"sub"`
 		Email             string `json:"email"`

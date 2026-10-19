@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
@@ -53,6 +54,22 @@ func (m *mockRepository) List(ctx context.Context, tenantID string, opts *ListOp
 	if m.listFn != nil {
 		return m.listFn(ctx, tenantID, opts)
 	}
+	return nil, nil
+}
+
+func (m *mockRepository) ListOpenByCheck(context.Context, string, string) ([]*domain.Alert, error) {
+	return nil, nil
+}
+
+func (m *mockRepository) ExistsIncludingDeleted(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
+func (m *mockRepository) LatestFirstDetected(context.Context, string, string, string) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+
+func (m *mockRepository) ListUnresolved(context.Context, string) ([]*domain.Alert, error) {
 	return nil, nil
 }
 

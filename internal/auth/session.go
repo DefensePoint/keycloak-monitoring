@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -124,6 +125,48 @@ func (s *MemorySessionStore) cleanupExpiredSessions() {
 	}
 }
 
+// publishedSessionSecrets are the session secrets this repository has printed
+// in its example config and docs. The session cookie is signed with the
+// secret, so anyone who has read one of these can sign a cookie for any user,
+// an administrator included, on an install that kept it.
+var publishedSessionSecrets = []string{
+	"change-this-to-a-random-secret-key-at-least-32-chars",
+	"your-32-chars-key",
+	"dev-secret-key-minimum-32-characters",
+	"dev-secret-key-min-32-characters-long",
+	"docker-secret-key-minimum-32-characters",
+	"must-be-at-least-32-characters-long",
+	"same-secret-every-time-32-chars-minimum",
+}
+
+// ValidateSessionSecret refuses a session secret that is empty, one of the
+// values this repository has published, or a ${NAME} placeholder the config
+// loader left unexpanded. The server must not start with any of them: an empty
+// secret fails every login, and the others are text anyone can read, so they
+// let anyone forge a session.
+func ValidateSessionSecret(secret string) error {
+	const howTo = "Set MONITORING_AUTH_SESSION_SECRET (or auth.session.secret) to a random value, " +
+		"for example the output of: openssl rand -base64 32"
+	s := strings.TrimSpace(secret)
+	if s == "" {
+		return fmt.Errorf("SECURITY ERROR: auth.session.secret is empty. %s", howTo)
+	}
+	// The loader keeps ${NAME} as literal text when NAME is unset, which would
+	// make the placeholder itself the key.
+	if strings.Contains(s, "${") {
+		return fmt.Errorf("SECURITY ERROR: auth.session.secret is %q, a placeholder whose environment "+
+			"variable is not set, so the placeholder text itself would sign sessions. Set that variable. %s", s, howTo)
+	}
+	for _, published := range publishedSessionSecrets {
+		if strings.EqualFold(s, published) {
+			return fmt.Errorf("SECURITY ERROR: auth.session.secret is an example value published in this "+
+				"project's config and docs, so anyone could forge a session cookie, an administrator's "+
+				"included. %s", howTo)
+		}
+	}
+	return nil
+}
+
 // CookieSessionManager manages HTTP sessions using cookies.
 // This wraps gorilla/sessions for a cleaner interface.
 type CookieSessionManager struct {
@@ -155,6 +198,13 @@ func NewCookieSessionManager(secret string, sessionName string, maxAge int, secu
 	}
 }
 
+// Save writes the session cookie. It is Secure when auth.session.secure is
+// set, and also whenever the request came over HTTPS.
+func (m *CookieSessionManager) Save(r *http.Request, w http.ResponseWriter, s *sessions.Session) error {
+	secureOverHTTPS(r, s)
+	return s.Save(r, w)
+}
+
 // GetStore returns the underlying cookie store.
 func (m *CookieSessionManager) GetStore() *sessions.CookieStore {
 	return m.store
@@ -181,79 +231,6 @@ func parseSameSite(sameSite string) http.SameSite {
 		return http.SameSiteNoneMode
 	default:
 		return http.SameSiteDefaultMode
-	}
-}
-
-// StateStore manages OAuth2 state tokens for CSRF protection.
-type StateStore struct {
-	mu     sync.RWMutex
-	states map[string]time.Time
-	maxAge time.Duration
-}
-
-// NewStateStore creates a new state store for CSRF protection.
-func NewStateStore(maxAge time.Duration) *StateStore {
-	store := &StateStore{
-		states: make(map[string]time.Time),
-		maxAge: maxAge,
-	}
-
-	// Start cleanup goroutine
-	go store.cleanup()
-
-	return store
-}
-
-// Save stores a state token with its creation time.
-func (s *StateStore) Save(state string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.states[state] = time.Now()
-	return nil
-}
-
-// Validate checks if a state token is valid and removes it (one-time use).
-func (s *StateStore) Validate(state string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	createdAt, exists := s.states[state]
-	if !exists {
-		return &AuthError{
-			Code:    ErrCodeInvalidState,
-			Message: "invalid state parameter",
-		}
-	}
-
-	// Check expiration
-	if time.Since(createdAt) > s.maxAge {
-		delete(s.states, state)
-		return &AuthError{
-			Code:    ErrCodeInvalidState,
-			Message: "state parameter has expired",
-		}
-	}
-
-	// Remove state after validation (one-time use)
-	delete(s.states, state)
-	return nil
-}
-
-// cleanup periodically removes expired state tokens.
-func (s *StateStore) cleanup() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		s.mu.Lock()
-		now := time.Now()
-		for state, createdAt := range s.states {
-			if now.Sub(createdAt) > s.maxAge {
-				delete(s.states, state)
-			}
-		}
-		s.mu.Unlock()
 	}
 }
 

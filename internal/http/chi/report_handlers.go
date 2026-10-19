@@ -10,6 +10,7 @@ import (
 	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
 	_ "github.com/DefensePoint/keycloak-monitoring/internal/http/dto" // swagger
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
 	"github.com/DefensePoint/keycloak-monitoring/internal/reports"
 )
 
@@ -69,7 +70,7 @@ func (h *ReportHandlers) RegisterTenantRoutes(r chi.Router) {
 // GET /api/tenants/{tenant_id}/reports/generate?start_date=2024-01-01&end_date=2024-01-31
 //
 //	@Summary		Generate PDF report
-//	@Description	Generates a PDF report for a tenant within a date range
+//	@Description	Generates a PDF report for a tenant within a date range. Each section appears only for a caller holding the permission that guards its data elsewhere (alerts:read, metrics:read); the PDF lists any section left out.
 //	@Tags			reports
 //	@Produce		application/pdf
 //	@Param			tenantID	path		string				true	"Tenant ID"
@@ -78,6 +79,7 @@ func (h *ReportHandlers) RegisterTenantRoutes(r chi.Router) {
 //	@Success		200			{file}		binary				"PDF file"
 //	@Failure		400			{object}	dto.ErrorResponse	"Missing or invalid dates"
 //	@Failure		401			{object}	dto.ErrorResponse
+//	@Failure		403			{object}	dto.ErrorResponse	"Neither alerts:read nor metrics:read"
 //	@Failure		404			{object}	dto.ErrorResponse	"Tenant not found"
 //	@Failure		500			{object}	dto.ErrorResponse
 //	@Security		BearerAuth
@@ -153,6 +155,23 @@ func (h *ReportHandlers) handleGenerateReport(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// The report carries data the alerts, events and operator metrics
+	// endpoints each guard with a permission; include only what this caller
+	// may see there.
+	access, err := h.sectionAccess(ctx, user.ID, tenantID)
+	if err != nil {
+		h.log.Error("Failed to check report permissions",
+			logger.Err(err),
+			logger.Uint("user_id", user.ID),
+			logger.Str("tenant_id", tenantID))
+		httputil.RespondInternalError(w, h.log, "Failed to check permissions")
+		return
+	}
+	if !access.Alerts && !access.Operators {
+		httputil.RespondForbidden(w, h.log, "Permission denied: the report needs alerts:read or metrics:read")
+		return
+	}
+
 	// Create report request
 	req := &reports.GenerateRequest{
 		TenantID:   tenantID,
@@ -160,6 +179,7 @@ func (h *ReportHandlers) handleGenerateReport(w http.ResponseWriter, r *http.Req
 		StartDate:  startDate,
 		EndDate:    endDate,
 		Scope:      reports.RealmScope{Realms: scope, All: all},
+		Access:     access,
 	}
 
 	// Aggregate data
@@ -209,3 +229,26 @@ func (h *ReportHandlers) CanHandle(resourcePath string) bool {
 
 // Ensure ReportHandlers implements TenantSubRouter
 var _ TenantSubRouter = (*ReportHandlers)(nil)
+
+// sectionAccess reports which report sections the user may see in the
+// tenant, using the permissions that guard the same data elsewhere:
+// alerts:read for alerts, keycloak:read for events, metrics:read for the
+// operator metrics.
+func (h *ReportHandlers) sectionAccess(ctx context.Context, userID uint, tenantID string) (reports.SectionAccess, error) {
+	var access reports.SectionAccess
+	for _, check := range []struct {
+		permission string
+		grant      *bool
+	}{
+		{rbac.PermissionAlertsRead, &access.Alerts},
+		{rbac.PermissionKeycloakRead, &access.Events},
+		{rbac.PermissionMetricsRead, &access.Operators},
+	} {
+		ok, err := h.rbacService.HasPermission(ctx, userID, check.permission, &tenantID)
+		if err != nil {
+			return reports.SectionAccess{}, err
+		}
+		*check.grant = ok
+	}
+	return access, nil
+}

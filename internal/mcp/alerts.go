@@ -84,7 +84,7 @@ func registerListAlerts(srv *mcpsdk.Server, authz *Authorizer, reader AlertReade
 			return nil, listAlertsOutput{}, Invalidf("offset must be between 0 and %d", maxAlertOffset)
 		}
 		caller := CallerFromRequest(req)
-		tenantID, err := TenantArg(caller, in.Tenant)
+		tenantID, err := TenantArg(ctx, caller, in.Tenant)
 		if err != nil {
 			return nil, listAlertsOutput{}, err
 		}
@@ -154,7 +154,7 @@ func registerGetAlert(srv *mcpsdk.Server, authz *Authorizer, reader AlertReader,
 			return nil, alertSummary{}, Invalidf("alert_id is required")
 		}
 		caller := CallerFromRequest(req)
-		tenantID, err := TenantArg(caller, in.Tenant)
+		tenantID, err := TenantArg(ctx, caller, in.Tenant)
 		if err != nil {
 			return nil, alertSummary{}, err
 		}
@@ -192,7 +192,7 @@ func registerGetAlert(srv *mcpsdk.Server, authz *Authorizer, reader AlertReader,
 func registerGetAlertStats(srv *mcpsdk.Server, authz *Authorizer, reader AlertReader, g *toolGuard) {
 	handler := func(ctx context.Context, req *mcpsdk.CallToolRequest, in alertStatsInput) (*mcpsdk.CallToolResult, alertStatsOutput, error) {
 		caller := CallerFromRequest(req)
-		tenantID, err := TenantArg(caller, in.Tenant)
+		tenantID, err := TenantArg(ctx, caller, in.Tenant)
 		if err != nil {
 			return nil, alertStatsOutput{}, err
 		}

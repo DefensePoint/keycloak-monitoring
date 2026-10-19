@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/DefensePoint/keycloak-monitoring/pkg/pgdsn"
 )
 
 // AppConfig represents the complete application configuration
@@ -19,6 +21,11 @@ type AppConfig struct {
 	AlertSilences AlertSilencesConfig `mapstructure:"alert_silences"`
 	Security      SecurityConfig      `mapstructure:"security"`
 	MCP           MCPConfig           `mapstructure:"mcp"`
+
+	// PlaceholderWarnings names the ${NAME} placeholders in the config file
+	// that were kept as literal text. Not a setting: LoadConfig fills it in,
+	// and each binary logs it once its logger exists.
+	PlaceholderWarnings []string `mapstructure:"-"`
 }
 
 // SecurityConfig holds settings for protecting stored secrets.
@@ -56,6 +63,14 @@ type HTTPConfig struct {
 	Server          HTTPServerConfig      `mapstructure:"server"`
 	SecurityHeaders SecurityHeadersConfig `mapstructure:"security_headers"`
 	Metrics         MetricsConfig         `mapstructure:"metrics"`
+	TrustedProxies  []string              `mapstructure:"trusted_proxies"`
+	CORS            CORSConfig            `mapstructure:"cors"`
+}
+
+// CORSConfig lists the browser origins, besides the API's own, allowed to
+// make credentialed and state-changing requests.
+type CORSConfig struct {
+	AllowedOrigins []string `mapstructure:"allowed_origins"`
 }
 
 // MetricsConfig controls the Prometheus /metrics endpoint. The endpoint
@@ -76,8 +91,8 @@ type HTTPServerConfig struct {
 
 // SecurityHeadersConfig controls the response security headers added to every
 // HTTP response. Empty values for individual headers disable that header.
-// HSTS should only be enabled once the deployment is exclusively served over
-// HTTPS (with HTTP -> HTTPS redirects in place).
+// HSTS is sent by the API and the web server; browsers ignore it over plain
+// HTTP, so it binds a deployment only once reached over HTTPS.
 type SecurityHeadersConfig struct {
 	Enabled               bool   `mapstructure:"enabled"`
 	HSTS                  string `mapstructure:"hsts"`
@@ -143,6 +158,12 @@ type OAuth2Config struct {
 	// Advanced settings
 	SkipIssuerCheck bool `mapstructure:"skip_issuer_check"`
 	SkipExpiryCheck bool `mapstructure:"skip_expiry_check"`
+
+	// LinkByVerifiedEmail lets a login whose subject is unknown take over the
+	// SSO account holding the same verified email address. Off by default:
+	// switch it on for a planned realm rebuild or migration, and off again
+	// once people have signed in.
+	LinkByVerifiedEmail bool `mapstructure:"link_by_verified_email"`
 }
 
 // SessionConfig represents session configuration
@@ -169,18 +190,18 @@ type KeycloakConfig struct {
 // TenantConfig represents configuration for a single Keycloak tenant
 // The tenant_id is the map key, not included in the struct
 type TenantConfig struct {
-	Name         string                 `mapstructure:"name"`           // Display name
-	Description  string                 `mapstructure:"description"`    // Optional description
-	ServerURL    string                 `mapstructure:"server_url"`     // Keycloak server URL
-	AdminRealm   string                 `mapstructure:"admin_realm"`    // Admin realm name (typically "master")
-	ClientID     string                 `mapstructure:"client_id"`      // Client ID for client_credentials grant
-	ClientSecret string                 `mapstructure:"client_secret"`  // Client secret (if using confidential client)
-	Enabled      bool                   `mapstructure:"enabled"`        // Enable monitoring for this tenant
-	IsDefault    bool                   `mapstructure:"is_default"`     // Mark as default tenant (auto-selected on load)
-	Tags         []string               `mapstructure:"tags"`           // Optional tags for organization
-	Owner        string                 `mapstructure:"owner"`          // Optional owner/team identifier
-	Config       KeycloakInstanceConfig `mapstructure:"config"`         // Override global settings for this instance
-	Amfa         *AmfaTenantConfig      `mapstructure:"amfa,omitempty"` // Optional AMFA integration for this tenant
+	Name         string            `mapstructure:"name"`           // Display name
+	Description  string            `mapstructure:"description"`    // Optional description
+	ServerURL    string            `mapstructure:"server_url"`     // Keycloak server URL
+	AdminRealm   string            `mapstructure:"admin_realm"`    // Admin realm name (typically "master")
+	ClientID     string            `mapstructure:"client_id"`      // Client ID for client_credentials grant
+	ClientSecret string            `mapstructure:"client_secret"`  // Client secret (if using confidential client)
+	Enabled      bool              `mapstructure:"enabled"`        // Enable monitoring for this tenant
+	IsDefault    bool              `mapstructure:"is_default"`     // Mark as default tenant (auto-selected on load)
+	Tags         []string          `mapstructure:"tags"`           // Optional tags for organization
+	Owner        string            `mapstructure:"owner"`          // Optional owner/team identifier
+	Config       map[string]any    `mapstructure:"config"`         // Overrides of keycloak.global for this tenant, as written; the loader checks them against KeycloakInstanceConfig
+	Amfa         *AmfaTenantConfig `mapstructure:"amfa,omitempty"` // Optional AMFA integration for this tenant
 }
 
 // AmfaTenantConfig represents AMFA integration configuration for a tenant.
@@ -239,12 +260,19 @@ func (a *AmfaAPIConfig) Validate() error {
 
 // AmfaDatabaseConfig represents PostgreSQL connection settings for an AMFA tenant.
 type AmfaDatabaseConfig struct {
-	Host            string        `mapstructure:"host"`
-	Port            int           `mapstructure:"port"`
-	Database        string        `mapstructure:"database"`
-	User            string        `mapstructure:"user"`
-	Password        string        `mapstructure:"password"`
-	SSLMode         string        `mapstructure:"sslmode"`
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Database string `mapstructure:"database"`
+	User     string `mapstructure:"user"`
+	Password string `mapstructure:"password"`
+	SSLMode  string `mapstructure:"ssl_mode"`
+	// LegacySSLMode carries the original "sslmode" spelling of the field above.
+	// The main database block spells it "ssl_mode", so an operator writing an
+	// AMFA block by analogy wrote a key that never bound: the field stayed
+	// empty and the connection silently used "require". Both spellings are
+	// accepted and Validate folds this one into SSLMode. Deliberately left out
+	// of the documentation -- "ssl_mode" is the canonical spelling.
+	LegacySSLMode   string        `mapstructure:"sslmode"`
 	MaxConns        int           `mapstructure:"max_conns"`
 	MinConns        int           `mapstructure:"min_conns"`
 	Timeout         time.Duration `mapstructure:"timeout"`
@@ -288,9 +316,25 @@ func (a *AmfaTenantConfig) Validate() error {
 	if a.Database.User == "" {
 		return fmt.Errorf("amfa.database.user is required when amfa.enabled=true")
 	}
-	if a.Database.SSLMode == "" {
-		a.Database.SSLMode = "require"
+	// Fold the legacy "sslmode" spelling into the canonical "ssl_mode" field.
+	// Both spellings set is only an error when they disagree: there is no safe
+	// way to pick a TLS posture the operator did not ask for, and guessing
+	// wrong either weakens the connection or breaks it. Writing SSLMode back
+	// into LegacySSLMode keeps a second Validate pass from reading its own
+	// output as a conflict.
+	switch {
+	case a.Database.SSLMode != "" && a.Database.LegacySSLMode != "" &&
+		a.Database.SSLMode != a.Database.LegacySSLMode:
+		return fmt.Errorf(
+			"amfa.database has conflicting TLS settings: ssl_mode=%q and sslmode=%q; "+
+				"remove the deprecated sslmode key (ssl_mode is canonical)",
+			a.Database.SSLMode, a.Database.LegacySSLMode)
+	case a.Database.SSLMode == "" && a.Database.LegacySSLMode != "":
+		a.Database.SSLMode = a.Database.LegacySSLMode
+	case a.Database.SSLMode == "":
+		a.Database.SSLMode = pgdsn.DefaultSSLMode
 	}
+	a.Database.LegacySSLMode = a.Database.SSLMode
 	if a.Database.MaxConns == 0 {
 		a.Database.MaxConns = 5
 	}
@@ -313,7 +357,7 @@ func (a *AmfaTenantConfig) Validate() error {
 // Individual tenants can override these settings if needed
 type KeycloakInstanceConfig struct {
 	Realms            []string                 `mapstructure:"realms"`             // Default realms to monitor
-	DefaultRealm      string                   `mapstructure:"default_realm"`      // Default realm to display in UI
+	DefaultRealm      string                   `mapstructure:"default_realm"`      // Initial UI realm; only a tenant's value is read, never the global one
 	InfinispanEnabled bool                     `mapstructure:"infinispan_enabled"` // Whether InfiniSpan clustering is enabled
 	InfinispanPort    int                      `mapstructure:"infinispan_port"`    // Port for InfiniSpan metrics (optional, defaults to same as server_url)
 	Polling           KeycloakPollingConfig    `mapstructure:"polling"`            // Polling intervals
@@ -339,6 +383,10 @@ type KeycloakEventsConfig struct {
 	Types            []string      `mapstructure:"types"`
 	MaxEventsPerPoll int           `mapstructure:"max_events_per_poll"`
 	LookbackDuration time.Duration `mapstructure:"lookback_duration"`
+	// LateCommitWindow is the Keycloak transaction timeout
+	// (transaction-default-timeout): how long after its time a successful
+	// event may become visible. Sweeps reach back this far.
+	LateCommitWindow time.Duration `mapstructure:"late_commit_window"`
 }
 
 // KeycloakConnectionConfig represents connection settings for Keycloak API
@@ -358,6 +406,7 @@ type KeycloakConnectionConfig struct {
 
 // ConfigCheckerConfig represents configuration checker settings
 type ConfigCheckerConfig struct {
+	Enabled      bool                `mapstructure:"enabled"` // Master switch, off by default
 	PollInterval time.Duration       `mapstructure:"poll_interval"`
 	Checks       ConfigCheckerChecks `mapstructure:"checks"`
 }
@@ -435,10 +484,26 @@ type VersionCheckerConfig struct {
 	KeycloakRepo     string        `mapstructure:"keycloak_repo"`
 }
 
-// EventCheckerConfig represents event-based alert checker settings
+// EventCheckerConfig represents event-based alert checker settings.
+// Enabled is the master switch. It defaults to false so a deployment that
+// copies the example does not start alerting on upgrade.
 type EventCheckerConfig struct {
-	PollInterval time.Duration      `mapstructure:"poll_interval"`
+	Enabled      bool          `mapstructure:"enabled"`
+	PollInterval time.Duration `mapstructure:"poll_interval"`
+	// ResolveAfter is how long a condition must go undetected before its
+	// alert resolves on its own. Default 15m.
+	ResolveAfter time.Duration      `mapstructure:"resolve_after"`
 	Checks       EventCheckerChecks `mapstructure:"checks"`
+}
+
+// ApplyDefaults fills zero values with production defaults for the event checker.
+func (c *EventCheckerConfig) ApplyDefaults() {
+	if c.PollInterval <= 0 {
+		c.PollInterval = 5 * time.Minute
+	}
+	if c.ResolveAfter <= 0 {
+		c.ResolveAfter = 15 * time.Minute
+	}
 }
 
 // EventCheckerChecks contains settings for specific event-based checks
@@ -491,8 +556,11 @@ type CommonErrorCheckConfig struct {
 // shape of EventCheckerConfig so operators see a familiar layout. It lives at
 // keycloak.global.amfa_checker. Disabled by default; operators opt in.
 type AmfaCheckerConfig struct {
-	Enabled      bool                    `mapstructure:"enabled"`       // master switch; default false
-	PollInterval time.Duration           `mapstructure:"poll_interval"` // default 1m
+	Enabled      bool          `mapstructure:"enabled"`       // master switch; default false
+	PollInterval time.Duration `mapstructure:"poll_interval"` // default 1m
+	// ResolveAfter is how long a login-error or client-login-error burst must
+	// go undetected before its alert resolves on its own. Default 15m.
+	ResolveAfter time.Duration           `mapstructure:"resolve_after"`
 	Checks       AmfaCheckerChecksConfig `mapstructure:"checks"`
 }
 
@@ -555,6 +623,9 @@ func (c *AmfaCheckerConfig) ApplyDefaults() {
 	if c.PollInterval <= 0 {
 		c.PollInterval = time.Minute
 	}
+	if c.ResolveAfter <= 0 {
+		c.ResolveAfter = 15 * time.Minute
+	}
 	if c.Checks.RepeatedRisky.Threshold <= 0 {
 		c.Checks.RepeatedRisky.Threshold = 3
 	}
@@ -606,6 +677,10 @@ type NotificationsConfig struct {
 	GitLab  GitLabConfig `mapstructure:"gitlab"`
 	Slack   SlackConfig  `mapstructure:"slack"`
 	Email   EmailConfig  `mapstructure:"email"`
+	// RetryInterval is how often a failed send of a tenant health, event
+	// storage or Keycloak event alert is retried while the alert stays open
+	// and unacknowledged.
+	RetryInterval time.Duration `mapstructure:"retry_interval"`
 }
 
 // GitLabConfig represents GitLab issue integration configuration

@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
@@ -13,6 +16,13 @@ import (
 // update or delete a tenant that is managed via config.yaml. Such tenants
 // can only be changed by editing config.yaml and restarting the app.
 var ErrConfigDefinedTenantReadOnly = errors.New("tenant is config-defined and read-only; edit config.yaml and restart to change it")
+
+// ErrClientSecretRequired is returned when an update points the tenant at a
+// different server without supplying the client secret. The stored secret is
+// sent to server_url to get tokens, and those tokens are sent to the AMFA API
+// URL, so keeping it would hand the secret, or a token made with it, to
+// whoever runs the new server.
+var ErrClientSecretRequired = errors.New("changing the Keycloak server URL or the AMFA API URL to a different server requires entering the client secret again")
 
 // Service defines the interface for tenant operations.
 type Service interface {
@@ -70,10 +80,44 @@ type Service interface {
 
 // service implements the Service interface.
 type service struct {
-	repo      Repository
-	cache     sync.Map // map[string]*domain.KeycloakTenant (tenant_id -> tenant)
+	repo Repository
+	// cache entries are replaced, never changed in place: the API handlers,
+	// the monitors and the change callbacks all keep the pointer they were
+	// handed, so writing a field would show them a change the database has
+	// not accepted yet, or may reject outright.
+	cache sync.Map // map[string]*domain.KeycloakTenant (tenant_id -> tenant)
+	// cacheMu orders the writers that load an entry, copy it and store the
+	// copy; without it one of them stores a copy older than another's.
+	cacheMu sync.Mutex
+	// updateMu orders the writes of a tenant's configuration (create, update,
+	// sync from config, unmark, delete) from the read they start from to
+	// the store they end with, so each reads what the last one stored and the
+	// cache takes them in the order the database did. It is held across the
+	// database call. Health and error writes do not take it: they own other
+	// columns, and an edit must not hold up a health check.
+	updateMu  sync.Mutex
 	callbacks []*registeredCallback
 	mu        sync.RWMutex
+
+	deletionHook DeletionHook
+}
+
+// DeletionHook takes part in deleting a tenant. Deleting purges every row the
+// tenant owns, its alerts included, so whatever must be read from those rows
+// has to be read first.
+type DeletionHook interface {
+	// PrepareDeletion runs before the tenant's rows are purged. It returns
+	// what to run once the deletion has committed, or nil; that is not run
+	// when the deletion fails.
+	PrepareDeletion(ctx context.Context, tenant *domain.KeycloakTenant) func(context.Context)
+}
+
+// ServiceOption configures optional Service behavior.
+type ServiceOption func(*service)
+
+// WithDeletionHook wires a hook that takes part in deleting a tenant.
+func WithDeletionHook(h DeletionHook) ServiceOption {
+	return func(s *service) { s.deletionHook = h }
 }
 
 // callbackQueueSize bounds how far a callback can fall behind the tenant
@@ -112,11 +156,15 @@ func (rc *registeredCallback) run() {
 }
 
 // NewService creates a new tenant service.
-func NewService(repo Repository) Service {
-	return &service{
+func NewService(repo Repository, opts ...ServiceOption) Service {
+	s := &service{
 		repo:      repo,
 		callbacks: make([]*registeredCallback, 0),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // LoadTenants loads all tenants into the cache.
@@ -126,6 +174,8 @@ func (s *service) LoadTenants(ctx context.Context) error {
 		return fmt.Errorf("failed to load tenants: %w", err)
 	}
 
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
 	for _, tenant := range tenants {
 		s.cache.Store(tenant.TenantID, tenant)
 	}
@@ -146,7 +196,13 @@ func (s *service) GetTenant(ctx context.Context, tenantID string) (*domain.Keycl
 		return nil, err
 	}
 
-	// Update cache
+	// Update cache, unless a writer stored the tenant while it was read: that
+	// entry is the newer one.
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	if value, ok := s.cache.Load(tenantID); ok {
+		return value.(*domain.KeycloakTenant), nil
+	}
 	s.cache.Store(tenantID, tenant)
 	return tenant, nil
 }
@@ -176,6 +232,8 @@ func (s *service) ListEnabledTenants(ctx context.Context) ([]*domain.KeycloakTen
 
 // CreateTenant creates a new tenant.
 func (s *service) CreateTenant(ctx context.Context, req *CreateRequest) (*domain.KeycloakTenant, error) {
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
 	return s.applyCreate(ctx, req, false)
 }
 
@@ -190,13 +248,6 @@ func (s *service) applyCreate(ctx context.Context, req *CreateRequest, isConfigD
 	// Check if tenant already exists
 	if _, ok := s.cache.Load(req.TenantID); ok {
 		return nil, fmt.Errorf("tenant %s already exists", req.TenantID)
-	}
-
-	// If setting as default, unset other defaults first
-	if req.IsDefault {
-		if err := s.repo.UnsetDefault(ctx); err != nil {
-			return nil, fmt.Errorf("failed to unset other default tenants: %w", err)
-		}
 	}
 
 	tenant := &domain.KeycloakTenant{
@@ -223,7 +274,7 @@ func (s *service) applyCreate(ctx context.Context, req *CreateRequest, isConfigD
 	}
 
 	// Add to cache
-	s.cache.Store(tenant.TenantID, tenant)
+	s.storeTenant(tenant)
 
 	// Notify callbacks
 	s.notifyCallbacks(EventAdded, tenant)
@@ -245,6 +296,8 @@ func (s *service) applyCreate(ctx context.Context, req *CreateRequest, isConfigD
 // "previously config, now orphaned". Recovering config-management for such a
 // tenant requires deleting the row and letting config.yaml recreate it.
 func (s *service) SyncFromConfig(ctx context.Context, tenantID string, createReq *CreateRequest, updateReq *UpdateRequest) (*domain.KeycloakTenant, error) {
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
 	existing, err := s.GetTenant(ctx, tenantID)
 	if err == nil && existing != nil {
 		if !existing.IsConfigDefined {
@@ -279,6 +332,8 @@ func (s *service) ListConfigDefinedTenants(ctx context.Context) ([]*domain.Keycl
 // SyncFromConfig does: this is the config-sync path unlocking its own prior
 // lock, not a public mutation.
 func (s *service) UnmarkConfigDefined(ctx context.Context, tenantID string) error {
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
 	existing, err := s.GetTenant(ctx, tenantID)
 	if err != nil {
 		return fmt.Errorf("tenant %s not found", tenantID)
@@ -287,16 +342,19 @@ func (s *service) UnmarkConfigDefined(ctx context.Context, tenantID string) erro
 		return nil
 	}
 
-	existing.IsConfigDefined = false
-	if err := s.repo.Update(ctx, existing); err != nil {
+	unmarked := cloneTenant(existing)
+	unmarked.IsConfigDefined = false
+	if err := s.repo.Update(ctx, unmarked); err != nil {
 		return fmt.Errorf("failed to unmark tenant %s as config-defined: %w", tenantID, err)
 	}
-	s.cache.Store(tenantID, existing)
+	s.storeTenant(unmarked)
 	return nil
 }
 
 // UpdateTenant updates an existing tenant.
 func (s *service) UpdateTenant(ctx context.Context, tenantID string, req *UpdateRequest) (*domain.KeycloakTenant, error) {
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
 	tenant, err := s.GetTenant(ctx, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("tenant %s not found", tenantID)
@@ -306,15 +364,68 @@ func (s *service) UpdateTenant(ctx context.Context, tenantID string, req *Update
 		return nil, ErrConfigDefinedTenantReadOnly
 	}
 
+	secretGiven := req.ClientSecret != nil && *req.ClientSecret != ""
+	if !secretGiven && credentialDestinationChanges(tenant, req) {
+		return nil, ErrClientSecretRequired
+	}
+
 	return s.applyUpdate(ctx, tenant, req, false)
 }
 
-// applyUpdate applies req onto tenant and persists it. Shared by UpdateTenant
+// credentialDestinationChanges reports whether req sends the tenant's
+// credentials to a server they have not gone to before: server_url, which
+// receives the client secret, or the AMFA API URL, which receives tokens
+// issued with it. A path change on the same scheme, host and port is not a
+// new destination. Setting an AMFA API URL where there was none is.
+func credentialDestinationChanges(t *domain.KeycloakTenant, req *UpdateRequest) bool {
+	if req.ServerURL != nil && !sameOrigin(t.ServerURL, *req.ServerURL) {
+		return true
+	}
+	if req.Amfa != nil && req.Amfa.APIBaseURL != "" {
+		previous := ""
+		if t.Amfa != nil {
+			previous = t.Amfa.APIBaseURL
+		}
+		if !sameOrigin(previous, req.Amfa.APIBaseURL) {
+			return true
+		}
+	}
+	return false
+}
+
+// sameOrigin reports whether two URLs share scheme, host and port. A URL that
+// does not parse or has no host is never the same origin as anything, so an
+// unexpected value asks for the secret rather than keeping it.
+func sameOrigin(a, b string) bool {
+	ua, errA := url.Parse(strings.TrimSpace(a))
+	ub, errB := url.Parse(strings.TrimSpace(b))
+	if errA != nil || errB != nil || ua.Hostname() == "" || ub.Hostname() == "" {
+		return false
+	}
+	return strings.EqualFold(ua.Scheme, ub.Scheme) &&
+		strings.EqualFold(ua.Hostname(), ub.Hostname()) &&
+		effectivePort(ua) == effectivePort(ub)
+}
+
+func effectivePort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	}
+	return ""
+}
+
+// applyUpdate applies req onto a copy of current and persists it, publishing
+// the copy only once the database has taken it. Shared by UpdateTenant
 // (guarded, public, isConfigDefined=false) and SyncFromConfig (unguarded,
 // isConfigDefined=true).
-func (s *service) applyUpdate(ctx context.Context, tenant *domain.KeycloakTenant, req *UpdateRequest, isConfigDefined bool) (*domain.KeycloakTenant, error) {
-	tenantID := tenant.TenantID
-	wasEnabled := tenant.Enabled
+func (s *service) applyUpdate(ctx context.Context, current *domain.KeycloakTenant, req *UpdateRequest, isConfigDefined bool) (*domain.KeycloakTenant, error) {
+	tenant := cloneTenant(current)
 	tenant.IsConfigDefined = isConfigDefined
 
 	// Apply updates
@@ -366,11 +477,6 @@ func (s *service) applyUpdate(ctx context.Context, tenant *domain.KeycloakTenant
 		tenant.Enabled = *req.Enabled
 	}
 	if req.IsDefault != nil {
-		if *req.IsDefault {
-			if err := s.repo.UnsetDefault(ctx); err != nil {
-				return nil, fmt.Errorf("failed to unset other default tenants: %w", err)
-			}
-		}
 		tenant.IsDefault = *req.IsDefault
 	}
 	if req.Tags != nil {
@@ -394,13 +500,13 @@ func (s *service) applyUpdate(ctx context.Context, tenant *domain.KeycloakTenant
 	}
 
 	// Update cache
-	s.cache.Store(tenantID, tenant)
+	s.storeTenant(tenant)
 
 	// Determine event type
 	event := EventUpdated
-	if !wasEnabled && tenant.Enabled {
+	if !current.Enabled && tenant.Enabled {
 		event = EventEnabled
-	} else if wasEnabled && !tenant.Enabled {
+	} else if current.Enabled && !tenant.Enabled {
 		event = EventDisabled
 	}
 
@@ -412,6 +518,8 @@ func (s *service) applyUpdate(ctx context.Context, tenant *domain.KeycloakTenant
 
 // DeleteTenant removes a tenant.
 func (s *service) DeleteTenant(ctx context.Context, tenantID string) error {
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
 	tenant, err := s.GetTenant(ctx, tenantID)
 	if err != nil {
 		return fmt.Errorf("tenant %s not found", tenantID)
@@ -421,12 +529,23 @@ func (s *service) DeleteTenant(ctx context.Context, tenantID string) error {
 		return ErrConfigDefinedTenantReadOnly
 	}
 
+	var afterDelete func(context.Context)
+	if s.deletionHook != nil {
+		afterDelete = s.deletionHook.PrepareDeletion(ctx, tenant)
+	}
+
 	if err := s.repo.Delete(ctx, tenantID); err != nil {
 		return fmt.Errorf("failed to delete tenant: %w", err)
 	}
 
+	if afterDelete != nil {
+		afterDelete(ctx)
+	}
+
 	// Remove from cache
+	s.cacheMu.Lock()
 	s.cache.Delete(tenantID)
+	s.cacheMu.Unlock()
 
 	// Notify callbacks
 	s.notifyCallbacks(EventRemoved, tenant)
@@ -440,11 +559,13 @@ func (s *service) UpdateHealth(ctx context.Context, tenantID, status, message st
 		return err
 	}
 
-	// Update cache if tenant is cached
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
 	if value, ok := s.cache.Load(tenantID); ok {
-		tenant := value.(*domain.KeycloakTenant)
+		tenant := cloneTenant(value.(*domain.KeycloakTenant))
 		tenant.HealthStatus = status
 		tenant.HealthMessage = message
+		tenant.LastHealthCheck = time.Now()
 		s.cache.Store(tenantID, tenant)
 	}
 
@@ -457,9 +578,10 @@ func (s *service) UpdateError(ctx context.Context, tenantID, errorMsg string) er
 		return err
 	}
 
-	// Update cache if tenant is cached
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
 	if value, ok := s.cache.Load(tenantID); ok {
-		tenant := value.(*domain.KeycloakTenant)
+		tenant := cloneTenant(value.(*domain.KeycloakTenant))
 		tenant.LastError = errorMsg
 		s.cache.Store(tenantID, tenant)
 	}
@@ -534,6 +656,60 @@ func (s *service) validateCreateRequest(req *CreateRequest) error {
 		return fmt.Errorf("client_secret is required")
 	}
 	return nil
+}
+
+// cloneTenant copies t far enough to be changed without touching the original:
+// every field an update can replace is copied rather than shared.
+func cloneTenant(t *domain.KeycloakTenant) *domain.KeycloakTenant {
+	clone := *t
+	if t.Tags != nil {
+		clone.Tags = append([]string(nil), t.Tags...)
+	}
+	if t.Amfa != nil {
+		amfa := *t.Amfa
+		clone.Amfa = &amfa
+	}
+	if t.LastErrorAt != nil {
+		at := *t.LastErrorAt
+		clone.LastErrorAt = &at
+	}
+	return &clone
+}
+
+// storeTenant publishes a saved tenant to the cache. Its health and error
+// fields are taken from the entry it replaces: the health and error writers
+// own them, and one may have written since the tenant was copied, which the
+// repository's Update leaves alone in the database too. A tenant that is now
+// the default also clears the flag on every other cached tenant, to follow the
+// repository having just cleared it in the database; nothing else reloads the
+// cache before a restart.
+func (s *service) storeTenant(tenant *domain.KeycloakTenant) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+
+	if value, ok := s.cache.Load(tenant.TenantID); ok {
+		current := value.(*domain.KeycloakTenant)
+		tenant.HealthStatus = current.HealthStatus
+		tenant.HealthMessage = current.HealthMessage
+		tenant.LastHealthCheck = current.LastHealthCheck
+		tenant.LastError = current.LastError
+		tenant.LastErrorAt = current.LastErrorAt
+	}
+	s.cache.Store(tenant.TenantID, tenant)
+	if !tenant.IsDefault {
+		return
+	}
+
+	s.cache.Range(func(key, value interface{}) bool {
+		other := value.(*domain.KeycloakTenant)
+		if other.TenantID == tenant.TenantID || !other.IsDefault {
+			return true
+		}
+		cleared := cloneTenant(other)
+		cleared.IsDefault = false
+		s.cache.Store(key, cleared)
+		return true
+	})
 }
 
 // notifyCallbacks notifies all registered callbacks.

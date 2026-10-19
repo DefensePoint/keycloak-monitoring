@@ -23,10 +23,8 @@
 
 services:
   postgres:
-    image: timescale/timescaledb:latest-pg16
+    image: timescale/timescaledb:2.30.2-pg16@sha256:6f139d56042989bd35f50ba5986e492cd32e35cc6778c50be2659add298dc09f
     container_name: kmt-postgres
-    ports:
-      - "5432:5432"
     environment:
       POSTGRES_DB: monitoring
       POSTGRES_USER: ${POSTGRES_USER}
@@ -62,13 +60,24 @@ services:
   api-server:
     image: ${KMT_API_IMAGE:-kmt-server:latest}
     container_name: kmt-server
+    # Docker publishes ports ahead of ufw's rules, so a port meant only for the
+    # host is bound to loopback here rather than blocked in the firewall.
     ports:
-      - "7888:7888"
+      - "127.0.0.1:7888:7888"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+    # Environment for config.yaml's ${NAME} placeholders and MONITORING_*
+    # overrides, kept on the server next to this file. Create it, even empty,
+    # before the first start: Compose refuses a missing env_file. All three
+    # services load the same config.yaml, so all three read it.
+    env_file:
+      - kmt.env
+    # The postgres service has no TLS and is reachable only on the internal
+    # network; config.yaml's database.ssl_mode applies to any other database.
+    environment:
+      MONITORING_DATABASE_SSL_MODE: disable
     networks:
       - kmt-network
-      - traefik-network
     restart: unless-stopped
     # web and mcp run distroless images (no shell, no curl), so container
     # healthchecks can only be the binary probing itself; api-server uses the
@@ -88,6 +97,11 @@ services:
     container_name: kmt-mcp-server
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+    env_file:
+      - kmt.env
+    # As api-server: the postgres service has no TLS.
+    environment:
+      MONITORING_MCP_DATABASE_SSL_MODE: disable
     networks:
       - kmt-network
     restart: on-failure
@@ -105,9 +119,15 @@ services:
     image: ${KMT_WEB_IMAGE:-kmt-web:latest}
     container_name: kmt-web
     ports:
-      - "7880:7880"
+      - "127.0.0.1:7880:7880"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+    env_file:
+      - kmt.env
+    # The port published above and routed by Traefik; config.yaml.example
+    # defaults the web server to 3000.
+    environment:
+      MONITORING_WEB_SERVER_PORT: "7880"
     networks:
       - kmt-network
       - traefik-network

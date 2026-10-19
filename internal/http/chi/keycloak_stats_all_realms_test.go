@@ -3,6 +3,7 @@ package chi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -22,6 +23,7 @@ import (
 type statsStubService struct {
 	*stubKeycloakService
 	statsByRealm map[string]*keycloak.EventStats
+	failRealm    string
 	calls        []string
 	windows      [][2]time.Time
 }
@@ -29,6 +31,9 @@ type statsStubService struct {
 func (s *statsStubService) GetEventStats(_ context.Context, _, realmName string, from, to time.Time) (*keycloak.EventStats, error) {
 	s.calls = append(s.calls, realmName)
 	s.windows = append(s.windows, [2]time.Time{from, to})
+	if realmName == s.failRealm {
+		return nil, errors.New("count query failed")
+	}
 	if st, ok := s.statsByRealm[realmName]; ok {
 		return st, nil
 	}
@@ -127,10 +132,7 @@ func TestEventStats_AllRealmsRefusesACallerWithNoRealms(t *testing.T) {
 
 func TestEventStats_HonoursStartAndEndRatherThanTheHoursDefault(t *testing.T) {
 	svc := newStatsStub()
-	rbacSvc := &mockRBACChecker{
-		policies:           policyFor("tenant-a", "realmA"),
-		hasAccessToRealmFn: func(_ context.Context, _ uint, _, realm string) (bool, error) { return realm == "realmA", nil },
-	}
+	rbacSvc := &mockRBACChecker{policies: policyFor("tenant-a", "realmA")}
 	router := setupTestKeycloakRouter(newTestKeycloakHandlers(svc, rbacSvc))
 
 	start := time.Now().UTC().Add(-7 * 24 * time.Hour).Truncate(time.Second)
@@ -155,5 +157,33 @@ func TestEventStats_HonoursStartAndEndRatherThanTheHoursDefault(t *testing.T) {
 	}
 	if !gotTo.Equal(end) {
 		t.Errorf("to = %s, want the requested %s", gotTo, end)
+	}
+}
+
+// A count that fails must fail the request. Before, GetEventStats swallowed
+// the error and the tile showed zero; summing the realms that did answer would
+// bring the same silent undercount back for the All Realms view.
+func TestEventStats_AFailedRealmFailsTheRequestInsteadOfReportingZero(t *testing.T) {
+	for _, tc := range []struct{ name, path string }{
+		{"all realms, one failing", "/api/tenants/tenant-a/keycloak/events/stats"},
+		{"single failing realm", "/api/tenants/tenant-a/keycloak/events/stats?realm=realmB"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newStatsStub()
+			svc.failRealm = "realmB"
+			router := setupTestKeycloakRouter(newTestKeycloakHandlers(svc, &mockRBACChecker{}))
+
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500; body = %s", rec.Code, rec.Body.String())
+			}
+			var body map[string]any
+			_ = json.Unmarshal(rec.Body.Bytes(), &body)
+			if _, ok := body["login_count"]; ok {
+				t.Errorf("a failed request returned counts: %s", rec.Body.String())
+			}
+		})
 	}
 }

@@ -54,12 +54,50 @@ func (s *fakeAlertStore) GetAlertByID(_ context.Context, _, alertID string) (*do
 	}
 	return a, nil
 }
+
+// SaveAlert keeps alerts the way the alerts repository does: an insert stamps
+// UpdatedAt, and a save of an existing alert writes only status, last_seen,
+// resolved_at and the acknowledgement.
 func (s *fakeAlertStore) SaveAlert(_ context.Context, alert *domain.Alert) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.saveCount[alert.AlertID]++
+	if existing, ok := s.existing[alert.AlertID]; ok {
+		existing.Status, existing.LastSeen, existing.ResolvedAt = alert.Status, alert.LastSeen, alert.ResolvedAt
+		existing.AcknowledgedAt, existing.AcknowledgedBy = alert.AcknowledgedAt, alert.AcknowledgedBy
+		return nil
+	}
 	stored := *alert
+	if stored.UpdatedAt.IsZero() {
+		stored.UpdatedAt = time.Now()
+	}
 	s.existing[alert.AlertID] = &stored
+	return nil
+}
+func (s *fakeAlertStore) AlertExists(_ context.Context, _, alertID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.existing[alertID]
+	return ok, nil
+}
+func (s *fakeAlertStore) ListOpenAlertsByCheck(_ context.Context, _, checkType string) ([]*domain.Alert, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*domain.Alert
+	for _, a := range s.existing {
+		if a.CheckType == checkType && (a.Status == domain.AlertStatusActive || a.Status == domain.AlertStatusAcknowled) {
+			cp := *a
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+func (s *fakeAlertStore) ResolveAlert(_ context.Context, _, alertID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if a, ok := s.existing[alertID]; ok {
+		a.Status = domain.AlertStatusResolved
+	}
 	return nil
 }
 func (s *fakeAlertStore) saves(alertID string) int {
@@ -69,11 +107,25 @@ func (s *fakeAlertStore) saves(alertID string) int {
 }
 
 type fakeNotifier struct {
-	mu      sync.Mutex
-	notered map[string]int
+	mu       sync.Mutex
+	notered  map[string]int
+	resolved map[string]int
 }
 
-func newFakeNotifier() *fakeNotifier { return &fakeNotifier{notered: map[string]int{}} }
+func newFakeNotifier() *fakeNotifier {
+	return &fakeNotifier{notered: map[string]int{}, resolved: map[string]int{}}
+}
+func (n *fakeNotifier) NotifyAlertResolution(_ context.Context, alert *domain.Alert) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.resolved[alert.AlertID]++
+	return nil
+}
+func (n *fakeNotifier) resolutions(alertID string) int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.resolved[alertID]
+}
 func (n *fakeNotifier) NotifyAlert(_ context.Context, alert *domain.Alert) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()

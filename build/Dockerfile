@@ -3,7 +3,7 @@
 ARG SERVICE=server
 
 # -------- Frontend Builder: Node.js for web assets --------
-FROM node:26-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:26.11.1-alpine@sha256:143494b1da2945f061539253adc65e4f1569ddf07da2d384c022c791a9d90a4a AS frontend-builder
 
 # Re-declare ARG to use it in this stage
 ARG SERVICE
@@ -30,7 +30,7 @@ else \
 fi
 
 # -------- Backend Builder: pinned Go toolchain, no network after mod download --------
-FROM golang:1.27.1-alpine AS backend-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS backend-builder
 
 # Re-declare ARG to use it in this stage
 ARG SERVICE
@@ -64,7 +64,9 @@ ARG BUILD_DATE=unknown
 #  - -buildvcs=false prevents embedding VCS info automatically (we pass our own)
 #  - -ldflags strip symbols, set version fields; -extldflags '-static' ensures static link
 ENV CGO_ENABLED=0
-RUN GOOS=linux GOARCH=amd64 go build \
+ARG TARGETOS
+ARG TARGETARCH
+RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
     -mod=readonly -trimpath -buildvcs=false \
     -ldflags="-w -s -extldflags '-static' \
       -X 'github.com/DefensePoint/keycloak-monitoring/internal/version.Version=${VERSION}' \
@@ -77,7 +79,7 @@ RUN GOOS=linux GOARCH=amd64 go build \
 # For web: use distroless for minimal size
 
 # Server runtime with Chrome
-FROM debian:13-slim AS runtime-server
+FROM debian:13.7-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS runtime-server
 
 # Install Chrome and dependencies for PDF generation
 RUN apt-get update && apt-get install -y \
@@ -120,7 +122,7 @@ ENTRYPOINT ["/app/kmt"]
 CMD ["-config", "/app/config.yaml"]
 
 # Web runtime with distroless
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime-web
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS runtime-web
 
 WORKDIR /app
 
@@ -143,7 +145,7 @@ ENTRYPOINT ["/app/kmt"]
 CMD ["-config", "/app/config.yaml"]
 
 # MCP server runtime with distroless
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime-mcp-server
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS runtime-mcp-server
 
 WORKDIR /app
 

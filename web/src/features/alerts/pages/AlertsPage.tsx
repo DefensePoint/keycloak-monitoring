@@ -249,7 +249,7 @@ export function AlertsPage() {
       open: true,
       title: "Resolve Alert",
       message:
-        "Mark this alert as resolved? The configuration should already be fixed. The alert will be removed on the next check cycle if the issue no longer exists.",
+        "Mark this alert as resolved? Do this once the problem is fixed. If the problem is detected again, the alert reopens and notifies again.",
       confirmText: "Resolve",
       confirmColor: "success",
       onConfirm: () => {

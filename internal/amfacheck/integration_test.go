@@ -32,10 +32,21 @@ func (m *memAlertStore) SaveAlert(_ context.Context, a *domain.Alert) error {
 	m.saved[a.AlertID] = &cp
 	return nil
 }
+func (m *memAlertStore) ListOpenAlertsByCheck(context.Context, string, string) ([]*domain.Alert, error) {
+	return nil, nil
+}
+func (m *memAlertStore) ResolveAlert(context.Context, string, string) error { return nil }
+func (m *memAlertStore) AlertExists(_ context.Context, _, alertID string) (bool, error) {
+	_, ok := m.saved[alertID]
+	return ok, nil
+}
 
 type nopNotifier struct{}
 
 func (nopNotifier) NotifyAlert(_ context.Context, _ *domain.Alert) error { return nil }
+func (nopNotifier) NotifyAlertResolution(_ context.Context, _ *domain.Alert) error {
+	return nil
+}
 
 type itLogger struct{}
 
@@ -51,8 +62,7 @@ func openAmfaDB(t *testing.T) *gorm.DB {
 	if dsn == "" {
 		t.Skip("AMFA_TEST_DSN not set; skipping amfacheck integration test")
 	}
-
-	testdb.ShareDatabase(t, dsn)
+	testdb.Lock(t, dsn)
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("connect AMFA DB: %v", err)

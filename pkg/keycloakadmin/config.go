@@ -30,10 +30,9 @@ type ClientConfig struct {
 	// Realms to monitor (empty = all realms)
 	Realms []string
 
-	// Events configuration (for GetRecentEvents)
-	EventTypes            []string
-	EventLookbackDuration time.Duration
-	MaxEventsPerPoll      int
+	// Events configuration (for GetEventsSince)
+	EventTypes       []string
+	MaxEventsPerPoll int
 
 	// Infinispan metrics port (0 = use default server port)
 	InfinispanPort int
@@ -41,11 +40,10 @@ type ClientConfig struct {
 
 func DefaultConfig() *ClientConfig {
 	return &ClientConfig{
-		Timeout:               30 * time.Second,
-		MaxRetries:            3,
-		RetryBackoff:          5 * time.Second,
-		EventLookbackDuration: 5 * time.Minute,
-		MaxEventsPerPoll:      1000,
+		Timeout:          30 * time.Second,
+		MaxRetries:       3,
+		RetryBackoff:     5 * time.Second,
+		MaxEventsPerPoll: 1000,
 	}
 }
 
@@ -82,10 +80,7 @@ func (c *ClientConfig) ApplyDefaults() {
 	if c.RetryBackoff == 0 {
 		c.RetryBackoff = defaults.RetryBackoff
 	}
-	if c.EventLookbackDuration == 0 {
-		c.EventLookbackDuration = defaults.EventLookbackDuration
-	}
-	if c.MaxEventsPerPoll == 0 {
+	if c.MaxEventsPerPoll <= 0 {
 		c.MaxEventsPerPoll = defaults.MaxEventsPerPoll
 	}
 }

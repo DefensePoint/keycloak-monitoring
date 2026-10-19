@@ -6,8 +6,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/spf13/viper"
+
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/pgdsn"
 )
 
 // LoadConfig loads configuration using Viper, narrating every step to
@@ -76,6 +78,7 @@ func loadConfig(configPath string, out io.Writer) (*AppConfig, error) {
 	say.println("└─────────────────────────────────────────────────────────────────────────────┘")
 
 	configFileLoaded := false
+	var placeholderWarnings []string
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
 			say.println("  ✗ Config file NOT FOUND")
@@ -86,25 +89,19 @@ func loadConfig(configPath string, out io.Writer) (*AppConfig, error) {
 		}
 	} else {
 		configFileLoaded = true
+		// Only the path: the file's contents are not printed, because this
+		// output reaches the shipped logs and the file may hold secrets inline.
 		say.printf("  ✓ Config file LOADED: %s\n", v.ConfigFileUsed())
 
-		// Print RAW file contents for debugging
-		say.println()
-		say.println("  ┌─── RAW CONFIG FILE CONTENTS ───────────────────────────────────────────────┐")
-		if rawContent, err := os.ReadFile(v.ConfigFileUsed()); err == nil {
-			lines := strings.Split(string(rawContent), "\n")
-			for i, line := range lines {
-				if i < 30 { // Only show first 30 lines
-					say.printf("  │ %3d: %s\n", i+1, line)
-				}
-			}
-			if len(lines) > 30 {
-				say.printf("  │ ... (%d more lines)\n", len(lines)-30)
-			}
-		} else {
-			say.printf("  │ ERROR reading file: %v\n", err)
+		warnings, err := rereadWithEnvPlaceholders(v)
+		if err != nil {
+			say.printf("  ✗ %v\n", err)
+			return nil, err
 		}
-		say.println("  └─────────────────────────────────────────────────────────────────────────────┘")
+		placeholderWarnings = warnings
+		for _, w := range warnings {
+			say.printf("  ⚠ %s\n", w)
+		}
 	}
 	say.println()
 
@@ -153,7 +150,11 @@ func loadConfig(configPath string, out io.Writer) (*AppConfig, error) {
 	if err := v.Unmarshal(&config); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
+	if err := checkTenantOverrides(&config.Keycloak); err != nil {
+		return nil, err
+	}
 	config.MCP.RemovedKeys = removedMCPKeysInFile(v)
+	config.PlaceholderWarnings = placeholderWarnings
 
 	// Step 5: Final configuration summary
 	say.println("┌─────────────────────────────────────────────────────────────────────────────┐")
@@ -226,8 +227,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.port", 5432)
 	v.SetDefault("database.database", "monitoring")
 	v.SetDefault("database.user", "monitoring")
-	v.SetDefault("database.password", "monitoring_password")
-	v.SetDefault("database.ssl_mode", "disable")
+	// No built-in password: startup refuses an empty one. The key stays
+	// registered so MONITORING_DATABASE_PASSWORD binds without it in config.yaml.
+	v.SetDefault("database.password", "")
+	v.SetDefault("database.ssl_mode", pgdsn.DefaultSSLMode)
 	v.SetDefault("database.max_conns", 25)
 	v.SetDefault("database.min_conns", 5)
 	v.SetDefault("database.timeout", "30s")
@@ -254,20 +257,27 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("auth.oauth2.enabled", false)
 	v.SetDefault("auth.oauth2.skip_issuer_check", false)
 	v.SetDefault("auth.oauth2.skip_expiry_check", false)
+	v.SetDefault("auth.oauth2.link_by_verified_email", false)
 	v.SetDefault("auth.oauth2.scopes", []string{"openid", "profile", "email"})
 
 	// Session
 	v.SetDefault("auth.session.name", "monitoring_session")
 	v.SetDefault("auth.session.max_age", "24h")
-	v.SetDefault("auth.session.secure", false)
+	// Secure by default: deployments are served over HTTPS. Local development
+	// over plain HTTP sets it to false. Over HTTPS the cookies are Secure
+	// whatever this says.
+	v.SetDefault("auth.session.secure", true)
 	v.SetDefault("auth.session.same_site", "lax")
 	v.SetDefault("auth.session.state_max_age", "10m")
 
-	// HTTP security headers — defaults follow OWASP secure headers guidance.
-	// HSTS stays empty by default since enabling it on an HTTP-only deployment
-	// would break access; operators must opt in once HTTPS is mandatory.
+	v.SetDefault("http.cors.allowed_origins", []string{})
+
+	// HTTP security headers, following OWASP secure headers guidance. HSTS is
+	// on: browsers ignore it on a response over plain HTTP (RFC 6797 section
+	// 8.1), so it binds only a deployment the browser already reached over
+	// HTTPS, and it makes every later visit HTTPS from the first request.
 	v.SetDefault("http.security_headers.enabled", true)
-	v.SetDefault("http.security_headers.hsts", "")
+	v.SetDefault("http.security_headers.hsts", "max-age=31536000")
 	v.SetDefault("http.security_headers.content_security_policy",
 		"default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
 	v.SetDefault("http.security_headers.x_content_type_options", "nosniff")
@@ -291,6 +301,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("keycloak.global.polling.realm_info_interval", "15m")
 	v.SetDefault("keycloak.global.events.max_events_per_poll", 1000)
 	v.SetDefault("keycloak.global.events.lookback_duration", "1h")
+	v.SetDefault("keycloak.global.events.late_commit_window", "5m")
 	v.SetDefault("keycloak.global.connection.timeout", "30s")
 	v.SetDefault("keycloak.global.connection.skip_tls_verify", false)
 	v.SetDefault("keycloak.global.connection.max_retries", 3)
@@ -303,6 +314,7 @@ func setDefaults(v *viper.Viper) {
 	// =============================================================================
 	// Global Keycloak Configuration Checker Defaults
 	// =============================================================================
+	v.SetDefault("keycloak.global.config_checker.enabled", false)
 	v.SetDefault("keycloak.global.config_checker.poll_interval", "5m")
 
 	// Identity Provider Metadata Check defaults
@@ -355,6 +367,7 @@ func setDefaults(v *viper.Viper) {
 	// =============================================================================
 	// Base URL for Keycloak Monitoring Tool web UI (used in notification links)
 	v.SetDefault("notifications.base_url", "")
+	v.SetDefault("notifications.retry_interval", "5m")
 
 	// GitLab defaults
 	v.SetDefault("notifications.gitlab.enabled", false)

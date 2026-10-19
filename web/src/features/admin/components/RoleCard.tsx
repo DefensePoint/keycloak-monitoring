@@ -8,7 +8,7 @@ import {
   alpha,
   useTheme,
 } from "@mui/material";
-import { Visibility, Delete } from "@mui/icons-material";
+import { Visibility, Delete, ToggleOn, ToggleOff } from "@mui/icons-material";
 import { PermissionGate } from "@/shared/components";
 import { PERMISSIONS } from "@/shared/constants";
 import type { RoleCardProps } from "../types";
@@ -17,6 +17,7 @@ export const RoleCard: React.FC<RoleCardProps> = ({
   role,
   onView,
   onDelete,
+  onToggleActive,
 }) => {
   const theme = useTheme();
 
@@ -80,6 +81,17 @@ export const RoleCard: React.FC<RoleCardProps> = ({
                 color: badgeColors.color,
               }}
             />
+            {!role.is_active && (
+              <Chip
+                label="Inactive"
+                size="small"
+                variant="outlined"
+                sx={{
+                  color: theme.palette.warning.main,
+                  borderColor: theme.palette.warning.main,
+                }}
+              />
+            )}
             {role.is_system && (
               <Chip
                 label="System"
@@ -101,6 +113,29 @@ export const RoleCard: React.FC<RoleCardProps> = ({
           >
             <Visibility fontSize="small" />
           </IconButton>
+          <PermissionGate permission={PERMISSIONS.ROLES.WRITE}>
+            {!role.is_system && onToggleActive && (
+              <IconButton
+                size="small"
+                onClick={() => onToggleActive(role)}
+                sx={{
+                  color: role.is_active
+                    ? theme.palette.success.main
+                    : theme.palette.text.secondary,
+                }}
+                title={role.is_active ? "Deactivate role" : "Activate role"}
+                aria-label={
+                  role.is_active ? "Deactivate role" : "Activate role"
+                }
+              >
+                {role.is_active ? (
+                  <ToggleOn fontSize="small" />
+                ) : (
+                  <ToggleOff fontSize="small" />
+                )}
+              </IconButton>
+            )}
+          </PermissionGate>
           <PermissionGate permission={PERMISSIONS.ROLES.DELETE}>
             {!role.is_system && (
               <IconButton
