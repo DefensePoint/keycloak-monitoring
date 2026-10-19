@@ -44,6 +44,8 @@ import {
   FeatureErrorBoundary,
 } from "@/shared/components";
 import { useGenerateReport } from "../hooks";
+import { LiveIndicator, type LiveSource } from "../components/LiveIndicator";
+import { requestFailed } from "@/shared/lib";
 import {
   formatBytes,
   formatUptime,
@@ -84,6 +86,8 @@ export function DashboardPage() {
   const getSeverityColor = useCallback(
     (severity: string): "error" | "warning" | "info" => {
       switch (severity) {
+        // critical shares error's red; left to the default it was info's blue.
+        case "critical":
         case "error":
           return "error";
         case "warning":
@@ -156,7 +160,15 @@ export function DashboardPage() {
         },
         onError: (err) => {
           console.error("Error generating report:", err);
-          showToast({ message: "Failed to generate report", type: "error" });
+          // 403: the account may see neither the alerts nor the operator
+          // metrics the report is made of.
+          const forbidden = err instanceof Error && err.message === "HTTP 403";
+          showToast({
+            message: forbidden
+              ? "You don't have permission to generate this report: it needs alerts:read or metrics:read"
+              : "Failed to generate report",
+            type: "error",
+          });
         },
       },
     );
@@ -168,10 +180,12 @@ export function DashboardPage() {
     showToast,
   ]);
 
+  const keycloakQuery = useKeycloakDashboard({
+    tenantId: selectedTenant?.tenant_id,
+  });
   const { data: keycloakDashboard, dataUpdatedAt: keycloakUpdatedAt } =
-    useKeycloakDashboard({
-      tenantId: selectedTenant?.tenant_id,
-    });
+    keycloakQuery;
+  const keycloakFailed = requestFailed(keycloakQuery);
 
   const realms = useMemo(
     () => keycloakDashboard?.realms ?? [],
@@ -186,7 +200,7 @@ export function DashboardPage() {
     availableRealms: realms,
   });
 
-  const { data: eventsResponse } = useEvents({
+  const eventsQuery = useEvents({
     tenantId: selectedTenant?.tenant_id,
     limit: 10,
     startTime,
@@ -196,25 +210,52 @@ export function DashboardPage() {
     // the counts and the list disagreed on the same page.
     realm: selectedRealm !== "all" ? selectedRealm : undefined,
   });
+  const { data: eventsResponse } = eventsQuery;
 
-  const { data: stats, dataUpdatedAt: statsUpdatedAt } = useEventStats({
+  const statsQuery = useEventStats({
     tenantId: selectedTenant?.tenant_id,
     startTime,
     endTime,
     realm: selectedRealm !== "all" ? selectedRealm : undefined,
   });
+  const { data: stats } = statsQuery;
+  const statsFailed = requestFailed(statsQuery);
 
   // Login counts come from the events table for the selected window. Summing
   // the per-realm metrics instead reported zero on any system that was not
   // mid-login, because those are collected over one metrics polling interval.
-  const { data: loginStats } = useKeycloakEventStats({
+  // A failed request leaves data empty; the tile must say so rather than
+  // fall back to 0, which reads as "no failed logins".
+  const loginStatsQuery = useKeycloakEventStats({
     tenantId: selectedTenant?.tenant_id,
     realm: selectedRealm !== "all" ? selectedRealm : undefined,
     start: startTime,
     end: endTime,
   });
+  const { data: loginStats } = loginStatsQuery;
+  const loginStatsFailed = requestFailed(loginStatsQuery);
 
-  const { data: alertStats } = useAlertStats(selectedTenant?.tenant_id);
+  const alertStatsQuery = useAlertStats(selectedTenant?.tenant_id);
+  const { data: alertStats } = alertStatsQuery;
+  const alertStatsFailed = requestFailed(alertStatsQuery);
+
+  // Every query the page shows data from, for the header's live indicator.
+  const tenantSelected = !!selectedTenant?.tenant_id;
+  const liveSources: LiveSource[] = (
+    [
+      ["Keycloak status and realms", keycloakQuery],
+      ["recent events", eventsQuery],
+      ["event counts", statsQuery],
+      ["login counts", loginStatsQuery],
+      ["alert counts", alertStatsQuery],
+    ] as const
+  ).map(([label, q]) => ({
+    label,
+    enabled: tenantSelected,
+    error: q.error,
+    dataUpdatedAt: q.dataUpdatedAt,
+    errorUpdatedAt: q.errorUpdatedAt,
+  }));
 
   // Pre-format events with timestamps to avoid repeated formatting in render
   const events = useMemo<EventWithFormattedTime[]>(() => {
@@ -225,12 +266,14 @@ export function DashboardPage() {
     }));
   }, [eventsResponse?.events]);
 
-  // Memoize formatted last update time
-  const lastUpdateTime = useMemo(() => {
-    return new Date(
-      Math.max(statsUpdatedAt || 0, keycloakUpdatedAt || 0),
-    ).toLocaleTimeString();
-  }, [statsUpdatedAt, keycloakUpdatedAt]);
+  // The dashboard query keeps its last answer when a refresh fails, so the
+  // health panel says how old that answer is instead of showing a live "UP".
+  const keycloakStaleNote = useMemo(() => {
+    if (!keycloakFailed) return "";
+    return keycloakUpdatedAt
+      ? `Last updated ${new Date(keycloakUpdatedAt).toLocaleTimeString()}, refresh failed`
+      : "Refresh failed";
+  }, [keycloakFailed, keycloakUpdatedAt]);
 
   // Memoize realm filtering
   const filteredRealms = useMemo(() => {
@@ -252,8 +295,10 @@ export function DashboardPage() {
       ),
       totalLogins: loginStats?.login_count ?? 0,
       totalFailedLogins: loginStats?.login_error_count ?? 0,
-      healthyRealms: filteredRealms.filter((r) => r.enabled && r.is_healthy)
-        .length,
+      // A realm KMT cannot read shows its last known health, not its health now.
+      healthyRealms: filteredRealms.filter(
+        (r) => r.enabled && r.is_healthy && !r.unreadable_since,
+      ).length,
     };
   }, [filteredRealms, loginStats]);
 
@@ -282,32 +327,7 @@ export function DashboardPage() {
         subtitle="Real-time monitoring overview"
         showBreadcrumb={false}
       >
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-            <Box
-              sx={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                bgcolor: "success.main",
-                animation: "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
-                "@keyframes pulse": {
-                  "0%, 100%": { opacity: 1 },
-                  "50%": { opacity: 0.5 },
-                },
-              }}
-            />
-            <Typography variant="caption" color="text.secondary">
-              Live
-            </Typography>
-          </Box>
-          <Typography variant="caption" color="text.secondary">
-            •
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            Updated {lastUpdateTime}
-          </Typography>
-        </Box>
+        <LiveIndicator sources={liveSources} />
         <RealmSelector
           selectedRealm={selectedRealm}
           onRealmChange={handleRealmChange}
@@ -374,14 +394,21 @@ export function DashboardPage() {
                   Total Events
                 </Typography>
                 <Typography variant="h3" sx={{ mt: 0.5, fontWeight: 700 }}>
-                  {stats?.total_events?.toLocaleString() || 0}
+                  {statsFailed
+                    ? "—"
+                    : stats?.total_events?.toLocaleString() || 0}
                 </Typography>
               </Box>
             </Box>
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              <DotIcon sx={{ fontSize: 12, color: "success.main" }} />
+              <DotIcon
+                sx={{
+                  fontSize: 12,
+                  color: statsFailed ? "warning.main" : "success.main",
+                }}
+              />
               <Typography variant="caption" color="text.secondary">
-                View all events →
+                {statsFailed ? "Event counts unavailable" : "View all events →"}
               </Typography>
             </Box>
           </CardContent>
@@ -425,6 +452,8 @@ export function DashboardPage() {
                 <Typography variant="h3" sx={{ mt: 0.5, fontWeight: 700 }}>
                   {realmsConnectionBroken ? (
                     <WarningAmber color="error" sx={{ fontSize: 32 }} />
+                  ) : keycloakFailed ? (
+                    <WarningAmber color="warning" sx={{ fontSize: 32 }} />
                   ) : (
                     realms.length
                   )}
@@ -435,17 +464,21 @@ export function DashboardPage() {
               <DotIcon
                 sx={{
                   fontSize: 12,
-                  color: realmsConnectionBroken
-                    ? "error.main"
-                    : metrics.healthyRealms === realms.length
+                  color: (() => {
+                    if (realmsConnectionBroken) return "error.main";
+                    if (keycloakFailed) return "warning.main";
+                    return metrics.healthyRealms === realms.length
                       ? "success.main"
-                      : "warning.main",
+                      : "warning.main";
+                  })(),
                 }}
               />
               <Typography variant="caption" color="text.secondary">
                 {realmsConnectionBroken
                   ? "Connection error • View realms →"
-                  : `${metrics.healthyRealms} healthy • View realms →`}
+                  : keycloakFailed
+                    ? "Realm data unavailable • View realms →"
+                    : `${metrics.healthyRealms} healthy • View realms →`}
               </Typography>
             </Box>
           </CardContent>
@@ -489,7 +522,9 @@ export function DashboardPage() {
                   Active Alerts
                 </Typography>
                 <Typography variant="h3" sx={{ mt: 0.5, fontWeight: 700 }}>
-                  {alertStats?.total_active?.toLocaleString() || 0}
+                  {alertStatsFailed
+                    ? "—"
+                    : alertStats?.total_active?.toLocaleString() || 0}
                 </Typography>
               </Box>
             </Box>
@@ -498,6 +533,7 @@ export function DashboardPage() {
                 sx={{
                   fontSize: 12,
                   color: (() => {
+                    if (alertStatsFailed) return "warning.main";
                     if ((alertStats?.by_severity?.critical || 0) > 0)
                       return "error.main";
                     if ((alertStats?.total_active || 0) > 0)
@@ -507,9 +543,12 @@ export function DashboardPage() {
                 }}
               />
               <Typography variant="caption" color="text.secondary">
-                {(alertStats?.by_severity?.critical || 0) > 0
-                  ? `${alertStats?.by_severity?.critical} critical`
-                  : "View all alerts →"}
+                {(() => {
+                  if (alertStatsFailed) return "Alert counts unavailable";
+                  if ((alertStats?.by_severity?.critical || 0) > 0)
+                    return `${alertStats?.by_severity?.critical} critical`;
+                  return "View all alerts →";
+                })()}
               </Typography>
             </Box>
           </CardContent>
@@ -548,14 +587,21 @@ export function DashboardPage() {
                   Total Users
                 </Typography>
                 <Typography variant="h3" sx={{ mt: 0.5, fontWeight: 700 }}>
-                  {metrics.totalUsers.toLocaleString()}
+                  {keycloakFailed ? "—" : metrics.totalUsers.toLocaleString()}
                 </Typography>
               </Box>
             </Box>
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              <DotIcon sx={{ fontSize: 12, color: "info.main" }} />
+              <DotIcon
+                sx={{
+                  fontSize: 12,
+                  color: keycloakFailed ? "warning.main" : "info.main",
+                }}
+              />
               <Typography variant="caption" color="text.secondary">
-                {metrics.totalSessions} active sessions
+                {keycloakFailed
+                  ? "User counts unavailable"
+                  : `${metrics.totalSessions} active sessions`}
               </Typography>
             </Box>
           </CardContent>
@@ -594,7 +640,9 @@ export function DashboardPage() {
                   Failed Logins
                 </Typography>
                 <Typography variant="h3" sx={{ mt: 0.5, fontWeight: 700 }}>
-                  {metrics.totalFailedLogins.toLocaleString()}
+                  {loginStatsFailed
+                    ? "—"
+                    : metrics.totalFailedLogins.toLocaleString()}
                 </Typography>
               </Box>
             </Box>
@@ -602,14 +650,17 @@ export function DashboardPage() {
               <DotIcon
                 sx={{
                   fontSize: 12,
-                  color:
-                    metrics.totalFailedLogins > 0
+                  color: loginStatsFailed
+                    ? "warning.main"
+                    : metrics.totalFailedLogins > 0
                       ? "error.main"
                       : "success.main",
                 }}
               />
               <Typography variant="caption" color="text.secondary">
-                {metrics.totalLogins} successful
+                {loginStatsFailed
+                  ? "Login counts unavailable"
+                  : `${metrics.totalLogins} successful`}
               </Typography>
             </Box>
           </CardContent>
@@ -654,8 +705,9 @@ export function DashboardPage() {
                           width: 12,
                           height: 12,
                           borderRadius: "50%",
-                          bgcolor:
-                            keycloakDashboard.health.status === "UP"
+                          bgcolor: keycloakFailed
+                            ? "warning.main"
+                            : keycloakDashboard.health.status === "UP"
                               ? "success.main"
                               : "error.main",
                         }}
@@ -668,8 +720,9 @@ export function DashboardPage() {
                       variant="h5"
                       sx={{
                         fontWeight: 700,
-                        color:
-                          keycloakDashboard.health.status === "UP"
+                        color: keycloakFailed
+                          ? "warning.main"
+                          : keycloakDashboard.health.status === "UP"
                             ? "success.main"
                             : "error.main",
                       }}
@@ -678,10 +731,12 @@ export function DashboardPage() {
                     </Typography>
                     <Typography
                       variant="caption"
-                      color="text.secondary"
+                      color={keycloakFailed ? "warning.main" : "text.secondary"}
                       sx={{ mt: 0.5 }}
                     >
-                      {keycloakDashboard.health.response_time_ms}ms response
+                      {keycloakFailed
+                        ? keycloakStaleNote
+                        : `${keycloakDashboard.health.response_time_ms}ms response`}
                     </Typography>
                   </Box>
                   {memoryMetrics && (

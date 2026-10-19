@@ -8,6 +8,10 @@ export interface RealmGridItem {
   events_enabled: boolean;
   events_listeners?: string[];
   metrics?: KeycloakMetrics;
+  /** When the realm's settings were last read. */
+  last_checked?: string;
+  /** When the monitoring client stopped being able to read the realm; absent while it can. */
+  unreadable_since?: string;
 }
 
 // Component Props

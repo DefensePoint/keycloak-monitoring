@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { Box, Typography, Button } from "@mui/material";
-import { useTenant } from "@/shared/context";
+import { useAuth, useTenant } from "@/shared/context";
+import { PERMISSIONS } from "@/shared/constants";
 import { Toast } from "@/shared/components/Toast";
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
 import {
@@ -24,6 +25,7 @@ export function AlertDetailPage() {
     tenantId: string;
   }>();
   const { selectedTenant } = useTenant();
+  const { hasPermission } = useAuth();
 
   // Toast and dialog state
   const [toast, setToast] = useState<{
@@ -121,7 +123,7 @@ export function AlertDetailPage() {
       open: true,
       title: "Resolve Alert",
       message:
-        "Mark this alert as resolved? The configuration should already be fixed. The alert will be removed on the next check cycle if the issue no longer exists.",
+        "Mark this alert as resolved? Do this once the problem is fixed. If the problem is detected again, the alert reopens and notifies again.",
       confirmText: "Resolve",
       confirmColor: "success",
       onConfirm: () => {
@@ -352,6 +354,8 @@ export function AlertDetailPage() {
           onAcknowledge={handleAcknowledgeAlert}
           onIgnore={handleIgnoreAlert}
           onResolve={handleResolveAlert}
+          canAcknowledge={hasPermission(PERMISSIONS.ALERTS.ACKNOWLEDGE)}
+          canResolve={hasPermission(PERMISSIONS.ALERTS.RESOLVE)}
         />
       </Box>
 

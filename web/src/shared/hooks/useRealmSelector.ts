@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 
 interface UseRealmSelectorProps {
   tenantId: string | undefined;
@@ -6,36 +6,27 @@ interface UseRealmSelectorProps {
   availableRealms: Array<{ realm_name: string }>;
 }
 
-function getInitialRealm(
+interface RealmChoice {
+  tenantId: string | undefined;
+  realm: string;
+}
+
+function readSavedRealm(tenantId: string): string | null {
+  try {
+    return sessionStorage.getItem(`selectedRealm_${tenantId}`);
+  } catch {
+    return null;
+  }
+}
+
+function wantedRealm(
+  choice: RealmChoice | undefined,
   tenantId: string | undefined,
   defaultRealm: string | undefined,
-  availableRealms: Array<{ realm_name: string }>,
-): string {
-  if (!tenantId || availableRealms.length === 0) return "all";
-
-  // Try sessionStorage first
-  try {
-    const sessionRealm = sessionStorage.getItem(`selectedRealm_${tenantId}`);
-    if (sessionRealm === "all") return "all";
-    if (
-      sessionRealm &&
-      availableRealms.some((r) => r.realm_name === sessionRealm)
-    ) {
-      return sessionRealm;
-    }
-  } catch {
-    // Ignore sessionStorage errors
-  }
-
-  // Fallback to default realm
-  if (
-    defaultRealm &&
-    availableRealms.some((r) => r.realm_name === defaultRealm)
-  ) {
-    return defaultRealm;
-  }
-
-  return "all";
+): string | undefined {
+  if (choice && choice.tenantId === tenantId) return choice.realm;
+  if (!tenantId) return undefined;
+  return readSavedRealm(tenantId) ?? defaultRealm;
 }
 
 export function useRealmSelector({
@@ -43,20 +34,21 @@ export function useRealmSelector({
   defaultRealm,
   availableRealms,
 }: UseRealmSelectorProps) {
-  const initialRealm = useMemo(
-    () => getInitialRealm(tenantId, defaultRealm, availableRealms),
-    [tenantId, defaultRealm, availableRealms],
-  );
+  const [choice, setChoice] = useState<RealmChoice>();
 
-  const [selectedRealm, setSelectedRealm] = useState<string>(initialRealm);
+  const wanted = wantedRealm(choice, tenantId, defaultRealm);
+  const selectedRealm =
+    wanted && availableRealms.some((r) => r.realm_name === wanted)
+      ? wanted
+      : "all";
 
   const handleRealmChange = (realm: string) => {
-    setSelectedRealm(realm);
+    setChoice({ tenantId, realm });
     if (tenantId) {
       try {
         sessionStorage.setItem(`selectedRealm_${tenantId}`, realm);
       } catch {
-        // Silently fail if sessionStorage is unavailable
+        return;
       }
     }
   };

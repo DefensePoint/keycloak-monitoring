@@ -60,8 +60,12 @@ type Data struct {
 	AlertList        []AlertDetail
 
 	// Operator metrics
-	OperatorMetrics    []*domain.OperatorMetricsSummary
-	TotalOperators     int
+	OperatorMetrics []*domain.OperatorMetricsSummary
+	TotalOperators  int
+
+	// Sections left out because the caller lacks the permission for them.
+	Omitted            []OmittedSection
+	AlertsOmitted      bool
 	TotalOperatorHours float64
 	AvgResponseTimeMin float64 // in minutes
 
@@ -108,4 +112,23 @@ type GenerateRequest struct {
 	EndDate    time.Time
 	// Scope bounds both the alerts and the events the report may include.
 	Scope RealmScope
+	// Access says which sections the caller may see. The zero value includes
+	// none, so a caller that forgets to set it gets an empty report rather
+	// than one that ignores permissions.
+	Access SectionAccess
+}
+
+// SectionAccess mirrors the permissions that guard the same data elsewhere:
+// alerts:read for alerts, keycloak:read for events, metrics:read for the
+// operator metrics.
+type SectionAccess struct {
+	Alerts    bool
+	Events    bool
+	Operators bool
+}
+
+// OmittedSection names a report section left out and the permission it needs.
+type OmittedSection struct {
+	Name       string
+	Permission string
 }

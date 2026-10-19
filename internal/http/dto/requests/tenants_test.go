@@ -420,7 +420,7 @@ func TestTestTenantConnection_Validation(t *testing.T) {
 			name: "admin_realm with dot",
 			input: TestTenantConnection{
 				ServerURL:    "https://keycloak.example.com",
-				AdminRealm:   "acme.production",
+				AdminRealm:   "realm-a.production",
 				ClientID:     "monitoring-service",
 				ClientSecret: "client-secret",
 			},
@@ -431,7 +431,7 @@ func TestTestTenantConnection_Validation(t *testing.T) {
 			name: "admin_realm valid hyphenated",
 			input: TestTenantConnection{
 				ServerURL:    "https://keycloak.example.com",
-				AdminRealm:   "acme-corp_2",
+				AdminRealm:   "realm-a-corp_2",
 				ClientID:     "monitoring-service",
 				ClientSecret: "client-secret",
 			},

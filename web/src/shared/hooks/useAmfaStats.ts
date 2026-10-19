@@ -25,6 +25,13 @@ export const AMFA_ALL_REALMS_UNSUPPORTED = "amfa_all_realms_unsupported";
 export const AMFA_REALM_SCOPE_REQUIRES_REALM =
   "amfa_realm_scope_requires_realm";
 
+/**
+ * Error code the backend returns (HTTP 403) when the caller's realm scope in
+ * the tenant is empty: unlike AMFA_REALM_SCOPE_REQUIRES_REALM there is no
+ * realm to select, so selecting one cannot lift it either.
+ */
+export const AMFA_REALM_SCOPE_NO_REALMS = "amfa_realm_scope_no_realms";
+
 export function isAllRealmsUnsupportedError(error: unknown): boolean {
   return (
     error instanceof Error && error.message === AMFA_ALL_REALMS_UNSUPPORTED
@@ -37,10 +44,19 @@ export function isRealmScopeRequiresRealmError(error: unknown): boolean {
   );
 }
 
-/** Neither refusal can change until the user selects a single realm. */
+export function isRealmScopeNoRealmsError(error: unknown): boolean {
+  return error instanceof Error && error.message === AMFA_REALM_SCOPE_NO_REALMS;
+}
+
+/**
+ * None of these refusals changes on its own: the first two only once the user
+ * selects a single realm, the last only once an administrator grants one.
+ */
 function isSettledAllRealmsRefusal(error: unknown): boolean {
   return (
-    isAllRealmsUnsupportedError(error) || isRealmScopeRequiresRealmError(error)
+    isAllRealmsUnsupportedError(error) ||
+    isRealmScopeRequiresRealmError(error) ||
+    isRealmScopeNoRealmsError(error)
   );
 }
 

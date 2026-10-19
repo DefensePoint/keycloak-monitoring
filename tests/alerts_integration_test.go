@@ -15,13 +15,18 @@ package main_test
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	_ "github.com/lib/pq"
+
+	"github.com/DefensePoint/keycloak-monitoring/tests/alertscleanup"
 )
 
 // TestAlertsIntegration tests the full alert pipeline:
@@ -30,10 +35,9 @@ import (
 // 3. Verify alerts are created in configuration_alerts table
 // 4. Verify alerts show in UI (via API)
 // 5. Verify Slack notification was sent (check notification_logs table)
-// e2eFixtureTenantID is the tenant this test inserts into and cleans up.
-// Deliberately unguessable rather than production-shaped: cleanup removes every
-// row for this tenant inside a 15 minute window, not only the rows the test
-// created, so the id must not collide with anything real.
+// e2eFixtureTenantID is the tenant this test inserts into. Deliberately
+// unguessable rather than production-shaped. Cleanup deletes this run's
+// events and the health row it stamped. It does not delete alerts.
 const e2eFixtureTenantID = "e2e-alerts-fixture-8f42c1"
 
 func TestAlertsIntegration(t *testing.T) {
@@ -50,31 +54,43 @@ func TestAlertsIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect to database: %v", err)
 	}
-	defer func() {
+	// Close is registered first so it runs last. t.Cleanup is LIFO, and a
+	// defer would close the database before any cleanup registered later.
+	t.Cleanup(func() {
 		if err := db.Close(); err != nil {
-			t.Logf("Warning: Failed to close database connection: %v", err)
+			t.Errorf("close database: %v", err)
 		}
-	}()
+	})
 
-	// Verify connection
 	if err := db.Ping(); err != nil {
 		t.Fatalf("Failed to ping database: %v", err)
 	}
 
 	ctx := context.Background()
 	// Not "prod-keycloak": that name is shipped in config.yaml.example, so a
-	// deployment built from the example really does have a tenant by that name,
-	// and cleanup below deletes rows for whatever tenant this names. The default
-	// is a fixture id nothing provisions by accident. Override it to run against
-	// a tenant you have deliberately set aside for this test.
+	// deployment built from the example really does have a tenant by that name.
+	// The default is a fixture id nothing provisions by accident. Override it
+	// only for a tenant set aside for this test.
 	tenantID := os.Getenv("KMT_E2E_TEST_TENANT_ID")
 	if tenantID == "" {
 		tenantID = e2eFixtureTenantID
 	}
+	eventLike := newEventLike(t)
+	var started time.Time
+	if err := db.QueryRow(`SELECT NOW()`).Scan(&started); err != nil {
+		t.Fatalf("read database clock: %v", err)
+	}
 
-	// Clean up any existing test data
-	t.Log("Cleaning up existing test data...")
-	cleanup(t, db, tenantID)
+	t.Cleanup(func() {
+		if err := alertscleanup.Cleanup(db, tenantID, eventLike); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
+	})
+
+	t.Log("Cleaning up a leftover health row from an earlier run...")
+	if err := alertscleanup.Cleanup(db, tenantID, eventLike); err != nil {
+		t.Fatalf("pre-run cleanup: %v", err)
+	}
 
 	// Get realm name for this tenant
 	realmName := getRealmName(t, db, tenantID)
@@ -83,10 +99,10 @@ func TestAlertsIntegration(t *testing.T) {
 	// Test 1: LOGIN_ERROR events (threshold: 10, should trigger WARNING alert)
 	t.Run("LoginErrorAlert", func(t *testing.T) {
 		t.Log("Inserting 15 LOGIN_ERROR events...")
-		insertLoginErrors(t, db, tenantID, realmName, 15)
+		insertLoginErrors(t, db, tenantID, realmName, eventLike, 15)
 
 		t.Log("Waiting for event checker to run (up to 6 minutes)...")
-		alert := waitForAlert(t, db, tenantID, "login_error_events", 6*time.Minute)
+		alert := waitForAlert(t, db, tenantID, "login_error_events", started, 6*time.Minute)
 
 		if alert == nil {
 			t.Fatal("Expected LOGIN_ERROR alert to be created, but none found")
@@ -107,10 +123,10 @@ func TestAlertsIntegration(t *testing.T) {
 	// Test 2: CODE_TO_TOKEN_ERROR events (threshold: 1, should trigger CRITICAL alert)
 	t.Run("CodeToTokenErrorAlert", func(t *testing.T) {
 		t.Log("Inserting 3 CODE_TO_TOKEN_ERROR events...")
-		insertCodeToTokenErrors(t, db, tenantID, realmName, 3)
+		insertCodeToTokenErrors(t, db, tenantID, realmName, eventLike, 3)
 
 		t.Log("Waiting for event checker to run...")
-		alert := waitForAlert(t, db, tenantID, "code_to_token_error_events", 6*time.Minute)
+		alert := waitForAlert(t, db, tenantID, "code_to_token_error_events", started, 6*time.Minute)
 
 		if alert == nil {
 			t.Fatal("Expected CODE_TO_TOKEN_ERROR alert to be created, but none found")
@@ -131,7 +147,7 @@ func TestAlertsIntegration(t *testing.T) {
 		insertHighMemoryHealth(t, db, tenantID, 85)
 
 		t.Log("Waiting for config checker to run...")
-		alert := waitForAlert(t, db, tenantID, "health", 6*time.Minute)
+		alert := waitForAlert(t, db, tenantID, "health", started, 6*time.Minute)
 
 		if alert == nil {
 			t.Fatal("Expected high memory alert to be created, but none found")
@@ -167,10 +183,6 @@ func TestAlertsIntegration(t *testing.T) {
 			t.Logf("✓ Found %d notifications sent", count)
 		}
 	})
-
-	// Cleanup
-	t.Log("Cleaning up test data...")
-	cleanup(t, db, tenantID)
 }
 
 type Alert struct {
@@ -184,27 +196,37 @@ type Alert struct {
 	Description string
 }
 
+func newEventLike(t *testing.T) string {
+	t.Helper()
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		t.Fatalf("event prefix: %v", err)
+	}
+	return "test-" + hex.EncodeToString(b[:]) + "-%"
+}
+
 func getRealmName(t *testing.T, db *sql.DB, tenantID string) string {
 	var realmName string
 	err := db.QueryRow(`
-		SELECT DISTINCT realm_name
-		FROM keycloak_realm_info
+		SELECT realm_name
+		FROM keycloak_realms
 		WHERE tenant_id = $1
 		LIMIT 1
 	`, tenantID).Scan(&realmName)
-
-	if err != nil {
-		// Fallback to master if no realms found
-		t.Logf("No realms found in keycloak_realm_info, using 'master' as fallback")
+	if err == sql.ErrNoRows {
+		t.Logf("No realms for tenant %s, using master", tenantID)
 		return "master"
 	}
-
+	if err != nil {
+		t.Fatalf("lookup realm: %v", err)
+	}
 	return realmName
 }
 
-func insertLoginErrors(t *testing.T, db *sql.DB, tenantID, realmName string, count int) {
+func insertLoginErrors(t *testing.T, db *sql.DB, tenantID, realmName, eventLike string, count int) {
+	prefix := strings.TrimSuffix(eventLike, "%")
 	for i := 0; i < count; i++ {
-		eventID := fmt.Sprintf("test-login-error-%d-%d", i, time.Now().Unix())
+		eventID := fmt.Sprintf("%slogin-error-%d-%d", prefix, i, time.Now().Unix())
 		// Insert all events within last 30 seconds so they're all in the 5-minute window
 		eventTime := time.Now().Add(-time.Duration(i) * time.Second)
 
@@ -225,9 +247,10 @@ func insertLoginErrors(t *testing.T, db *sql.DB, tenantID, realmName string, cou
 	t.Logf("Inserted %d LOGIN_ERROR events", count)
 }
 
-func insertCodeToTokenErrors(t *testing.T, db *sql.DB, tenantID, realmName string, count int) {
+func insertCodeToTokenErrors(t *testing.T, db *sql.DB, tenantID, realmName, eventLike string, count int) {
+	prefix := strings.TrimSuffix(eventLike, "%")
 	for i := 0; i < count; i++ {
-		eventID := fmt.Sprintf("test-code-token-error-%d-%d", i, time.Now().Unix())
+		eventID := fmt.Sprintf("%scode-token-error-%d-%d", prefix, i, time.Now().Unix())
 		// Insert all events within last 30 seconds so they're all in the 5-minute window
 		eventTime := time.Now().Add(-time.Duration(i) * time.Second)
 
@@ -258,7 +281,7 @@ func insertHighMemoryHealth(t *testing.T, db *sql.DB, tenantID string, memoryPer
 			server_version, uptime_millis, memory_used,
 			memory_max, memory_free
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	`, tenantID, time.Now(), "UP", 100, "23.0.7",
+	`, tenantID, time.Now(), "UP", 100, alertscleanup.HealthMarker,
 		int64(3600000), memoryUsed, memoryMax, memoryFree)
 
 	if err != nil {
@@ -267,7 +290,7 @@ func insertHighMemoryHealth(t *testing.T, db *sql.DB, tenantID string, memoryPer
 	t.Logf("Inserted health data with %d%% memory usage", memoryPercent)
 }
 
-func waitForAlert(t *testing.T, db *sql.DB, tenantID, checkType string, timeout time.Duration) *Alert {
+func waitForAlert(t *testing.T, db *sql.DB, tenantID, checkType string, since time.Time, timeout time.Duration) *Alert {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -285,10 +308,10 @@ func waitForAlert(t *testing.T, db *sql.DB, tenantID, checkType string, timeout 
 				FROM configuration_alerts
 				WHERE tenant_id = $1
 				AND check_type = $2
-				AND first_detected > NOW() - INTERVAL '10 minutes'
-				ORDER BY first_detected DESC
+				AND last_seen >= $3
+				ORDER BY last_seen DESC
 				LIMIT 1
-			`, tenantID, checkType).Scan(
+			`, tenantID, checkType, since).Scan(
 				&alert.ID, &alert.TenantID, &alert.AlertID,
 				&alert.Title, &alert.Severity, &alert.Status,
 				&alert.CheckType, &alert.Description,
@@ -304,37 +327,5 @@ func waitForAlert(t *testing.T, db *sql.DB, tenantID, checkType string, timeout 
 
 			return &alert
 		}
-	}
-}
-
-func cleanup(t *testing.T, db *sql.DB, tenantID string) {
-	// Delete test events
-	_, err := db.Exec(`
-		DELETE FROM keycloak_events
-		WHERE tenant_id = $1
-		AND (event_id LIKE 'test-%' OR time > NOW() - INTERVAL '15 minutes')
-	`, tenantID)
-	if err != nil {
-		t.Logf("Warning: Failed to cleanup events: %v", err)
-	}
-
-	// Delete test alerts
-	_, err = db.Exec(`
-		DELETE FROM configuration_alerts
-		WHERE tenant_id = $1
-		AND first_detected > NOW() - INTERVAL '15 minutes'
-	`, tenantID)
-	if err != nil {
-		t.Logf("Warning: Failed to cleanup alerts: %v", err)
-	}
-
-	// Delete test health data
-	_, err = db.Exec(`
-		DELETE FROM keycloak_health
-		WHERE tenant_id = $1
-		AND time > NOW() - INTERVAL '15 minutes'
-	`, tenantID)
-	if err != nil {
-		t.Logf("Warning: Failed to cleanup health data: %v", err)
 	}
 }

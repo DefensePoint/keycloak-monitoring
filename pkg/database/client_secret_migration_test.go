@@ -3,7 +3,6 @@ package database
 import (
 	"encoding/base64"
 	"io"
-	"os"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -31,12 +30,8 @@ var testTenantIDs = []string{
 func newTenantMigrationTestClient(t *testing.T) *Client {
 	t.Helper()
 
-	dsn := os.Getenv("KMT_TEST_DATABASE_DSN")
-	if dsn == "" {
-		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
-	}
-
-	testdb.ShareDatabase(t, dsn)
+	dsn := testdb.DSN(t, "KMT_TEST_DATABASE_DSN")
+	testdb.Lock(t, dsn)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger:                 gormlogger.Default.LogMode(gormlogger.Silent),
@@ -45,6 +40,7 @@ func newTenantMigrationTestClient(t *testing.T) *Client {
 	if err != nil {
 		t.Fatalf("failed to open test database: %v", err)
 	}
+	closeOnCleanup(t, db)
 
 	if err := db.AutoMigrate(&KeycloakTenant{}); err != nil {
 		t.Fatalf("failed to auto-migrate keycloak_tenants: %v", err)

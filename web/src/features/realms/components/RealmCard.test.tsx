@@ -125,3 +125,46 @@ describe("RealmCard", () => {
     expect(screen.getByText("Unhealthy")).toBeInTheDocument();
   });
 });
+
+// A realm the monitoring client can no longer read keeps the data last read,
+// so its stored health says nothing about now.
+describe("RealmCard for a realm KMT cannot read", () => {
+  const unreadable = {
+    realm_name: "rx",
+    enabled: true,
+    is_healthy: true,
+    events_enabled: true,
+    events_listeners: ["jboss-logging"],
+    last_checked: "2026-10-14T10:00:00Z",
+    unreadable_since: "2026-10-14T10:05:00Z",
+  };
+
+  it("says it cannot be read instead of healthy, and when it was last read", async () => {
+    renderWithTheme(<RealmCard realm={unreadable} onClick={vi.fn()} />);
+
+    expect(screen.getByText("Can't read")).toBeInTheDocument();
+    expect(screen.queryByText("Healthy")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        `Last read ${new Date("2026-10-14T10:00:00Z").toLocaleString()}`,
+      ),
+    ).toBeInTheDocument();
+
+    await userEvent.hover(screen.getByText("Can't read"));
+    expect(
+      await screen.findByText(/cannot read this realm's settings since/),
+    ).toBeInTheDocument();
+  });
+
+  it("is healthy again once it can be read", () => {
+    renderWithTheme(
+      <RealmCard
+        realm={{ ...unreadable, unreadable_since: undefined }}
+        onClick={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Healthy")).toBeInTheDocument();
+    expect(screen.queryByText("Can't read")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Last read/)).not.toBeInTheDocument();
+  });
+});

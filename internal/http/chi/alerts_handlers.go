@@ -415,18 +415,21 @@ func (h *AlertsHandlers) handleUpdateAlertStatusByID(w http.ResponseWriter, r *h
 	h.updateAlertStatusByID(w, r, tenantID, alertID)
 }
 
+// statusChangePermission is the permission a status change needs.
+// Acknowledging needs alerts:acknowledge. Ignoring closes an alert without
+// fixing it and setting it back to active reopens a closed one, so both need
+// alerts:resolve, like resolving. Every status the request accepts used to
+// need only alerts:acknowledge.
+func statusChangePermission(status domain.AlertStatus) string {
+	if status == domain.AlertStatusAcknowled {
+		return rbac.PermissionAlertsAcknowledge
+	}
+	return rbac.PermissionAlertsResolve
+}
+
 // updateAlertStatusByID is the shared implementation for updating alert status
 func (h *AlertsHandlers) updateAlertStatusByID(w http.ResponseWriter, r *http.Request, tenantID, alertID string) {
-	if !h.checkAlertPermission(w, r, tenantID, rbac.PermissionAlertsAcknowledge) {
-		return
-	}
-
 	ctx := r.Context()
-
-	_, isAdmin, ok := h.alertInScope(w, r, tenantID, alertID)
-	if !ok {
-		return
-	}
 
 	req, ok := httputil.ValidateAndParse[requests.UpdateAlertStatus](w, r, h.log)
 	if !ok {
@@ -434,6 +437,25 @@ func (h *AlertsHandlers) updateAlertStatusByID(w http.ResponseWriter, r *http.Re
 	}
 
 	status := domain.AlertStatus(req.Status)
+
+	// Resolving through the status endpoint is the same action as POST
+	// .../resolve: it needs alerts:resolve, stamps resolved_at, records a
+	// "resolved" operator action and sends the resolution notices. A plain
+	// status write did none of those, so an alert resolved this way stayed
+	// open in GitLab and never announced its resolution in Slack.
+	if status == domain.AlertStatusResolved {
+		h.resolveAlertByID(w, r, tenantID, alertID)
+		return
+	}
+
+	if !h.checkAlertPermission(w, r, tenantID, statusChangePermission(status)) {
+		return
+	}
+
+	_, isAdmin, ok := h.alertInScope(w, r, tenantID, alertID)
+	if !ok {
+		return
+	}
 
 	updatedAlert, err := h.service.UpdateStatus(ctx, tenantID, alertID, status, req.AcknowledgedBy)
 	if err != nil {
@@ -539,8 +561,10 @@ func (h *AlertsHandlers) resolveAlertByID(w http.ResponseWriter, r *http.Request
 		h.recordOperatorAction(ctx, resolvedAlert, "resolved", user.Email, user.ID, "")
 	}
 
-	// Send resolution notifications asynchronously
-	if h.notificationService != nil && alertBefore.Status != domain.AlertStatusResolved {
+	// Send resolution notifications asynchronously. The goroutine reads
+	// resolvedAlert, and a nil there would panic outside any request recovery
+	// and take the whole process down.
+	if h.notificationService != nil && resolvedAlert != nil && alertBefore.Status != domain.AlertStatusResolved {
 		go func() {
 			notifAlert := &domain.Alert{
 				AlertID:        resolvedAlert.AlertID,

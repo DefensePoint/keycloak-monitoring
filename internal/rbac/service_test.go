@@ -28,6 +28,7 @@ type mockRoleRepository struct {
 	deleteRoleFn             func(ctx context.Context, roleID uint) error
 	getRoleWithPermissionsFn func(ctx context.Context, roleID uint) (*domain.Role, error)
 	assignPermissionsFn      func(ctx context.Context, roleID uint, permissionIDs []uint) error
+	setPermissionsFn         func(ctx context.Context, roleID uint, permissionIDs []uint) error
 }
 
 func (m *mockRoleRepository) CreateRole(ctx context.Context, role *domain.Role) error {
@@ -87,6 +88,13 @@ func (m *mockRoleRepository) AssignPermissionsToRole(ctx context.Context, roleID
 }
 
 func (m *mockRoleRepository) RemovePermissionsFromRole(ctx context.Context, roleID uint, permissionIDs []uint) error {
+	return nil
+}
+
+func (m *mockRoleRepository) SetRolePermissions(ctx context.Context, roleID uint, permissionIDs []uint) error {
+	if m.setPermissionsFn != nil {
+		return m.setPermissionsFn(ctx, roleID, permissionIDs)
+	}
 	return nil
 }
 
@@ -186,6 +194,10 @@ func (m *mockUserRoleRepository) HasPermission(ctx context.Context, userID uint,
 	if m.hasPermissionFn != nil {
 		return m.hasPermissionFn(ctx, userID, permission, tenantID)
 	}
+	return false, nil
+}
+
+func (m *mockUserRoleRepository) HasGlobalPermission(ctx context.Context, userID uint, permission string) (bool, error) {
 	return false, nil
 }
 
@@ -415,7 +427,7 @@ func TestHasAccessToTenant(t *testing.T) {
 			tenantID: "tenant-1",
 			getUserRoles: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
 				return []*domain.UserRole{
-					{UserID: 1, Role: &domain.Role{Name: RoleAdmin}},
+					{UserID: 1, Role: &domain.Role{Name: RoleAdmin, IsActive: true}},
 				}, nil
 			},
 			hasAccessFn: nil, // Should not be called for admin
@@ -428,7 +440,7 @@ func TestHasAccessToTenant(t *testing.T) {
 			tenantID: "tenant-1",
 			getUserRoles: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
 				return []*domain.UserRole{
-					{UserID: 2, Role: &domain.Role{Name: RoleViewer}},
+					{UserID: 2, Role: &domain.Role{Name: RoleViewer, IsActive: true}},
 				}, nil
 			},
 			hasAccessFn: func(ctx context.Context, userID uint, tenantID string) (bool, error) {
@@ -443,7 +455,7 @@ func TestHasAccessToTenant(t *testing.T) {
 			tenantID: "tenant-1",
 			getUserRoles: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
 				return []*domain.UserRole{
-					{UserID: 3, Role: &domain.Role{Name: RoleViewer}},
+					{UserID: 3, Role: &domain.Role{Name: RoleViewer, IsActive: true}},
 				}, nil
 			},
 			hasAccessFn: func(ctx context.Context, userID uint, tenantID string) (bool, error) {
@@ -485,8 +497,8 @@ func TestGetUserRoles(t *testing.T) {
 			userID: 1,
 			mockFn: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
 				return []*domain.UserRole{
-					{UserID: 1, RoleID: 1, Role: &domain.Role{Name: RoleAdmin}},
-					{UserID: 1, RoleID: 2, Role: &domain.Role{Name: RoleOperator}},
+					{UserID: 1, RoleID: 1, Role: &domain.Role{Name: RoleAdmin, IsActive: true}},
+					{UserID: 1, RoleID: 2, Role: &domain.Role{Name: RoleOperator, IsActive: true}},
 				}, nil
 			},
 			want:    2,
@@ -742,7 +754,7 @@ func TestIsAdmin(t *testing.T) {
 			userID: 1,
 			mockFn: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
 				return []*domain.UserRole{
-					{UserID: 1, Role: &domain.Role{Name: RoleAdmin}},
+					{UserID: 1, Role: &domain.Role{Name: RoleAdmin, IsActive: true}},
 				}, nil
 			},
 			want:    true,
@@ -753,7 +765,7 @@ func TestIsAdmin(t *testing.T) {
 			userID: 2,
 			mockFn: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
 				return []*domain.UserRole{
-					{UserID: 2, Role: &domain.Role{Name: RoleOperator}},
+					{UserID: 2, Role: &domain.Role{Name: RoleOperator, IsActive: true}},
 				}, nil
 			},
 			want:    false,
@@ -774,7 +786,7 @@ func TestIsAdmin(t *testing.T) {
 			mockFn: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
 				tenant := "tenant-a"
 				return []*domain.UserRole{
-					{UserID: 4, Role: &domain.Role{Name: RoleAdmin}, TenantID: &tenant},
+					{UserID: 4, Role: &domain.Role{Name: RoleAdmin, IsActive: true}, TenantID: &tenant},
 				}, nil
 			},
 			want:    false,
@@ -786,7 +798,7 @@ func TestIsAdmin(t *testing.T) {
 			mockFn: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
 				past := time.Now().Add(-time.Hour)
 				return []*domain.UserRole{
-					{UserID: 5, Role: &domain.Role{Name: RoleAdmin}, ExpiresAt: &past},
+					{UserID: 5, Role: &domain.Role{Name: RoleAdmin, IsActive: true}, ExpiresAt: &past},
 				}, nil
 			},
 			want:    false,
@@ -798,12 +810,27 @@ func TestIsAdmin(t *testing.T) {
 			mockFn: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
 				tenant := "tenant-a"
 				return []*domain.UserRole{
-					{UserID: 6, Role: &domain.Role{Name: RoleAdmin}, TenantID: &tenant},
-					{UserID: 6, Role: &domain.Role{Name: RoleAdmin}},
+					{UserID: 6, Role: &domain.Role{Name: RoleAdmin, IsActive: true}, TenantID: &tenant},
+					{UserID: 6, Role: &domain.Role{Name: RoleAdmin, IsActive: true}},
 				}, nil
 			},
 			want:    true,
 			wantErr: false,
+		}, {
+			name:   "inactive admin role is not admin",
+			userID: 7,
+			mockFn: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
+				return []*domain.UserRole{{UserID: 7, Role: &domain.Role{Name: RoleAdmin}}}, nil
+			},
+			want: false,
+		},
+		{
+			name:   "assignment whose role was deleted is not admin",
+			userID: 8,
+			mockFn: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
+				return []*domain.UserRole{{UserID: 8, RoleID: 1}}, nil
+			},
+			want: false,
 		},
 	}
 
@@ -825,43 +852,131 @@ func TestIsAdmin(t *testing.T) {
 }
 
 func TestIsOperator(t *testing.T) {
+	tenantA := "tenant-a"
+	tenantB := "tenant-b"
+	past := time.Now().Add(-time.Hour)
+	future := time.Now().Add(time.Hour)
+
 	tests := []struct {
-		name    string
-		userID  uint
-		mockFn  func(ctx context.Context, userID uint) ([]*domain.UserRole, error)
-		want    bool
-		wantErr bool
+		name     string
+		userID   uint
+		tenantID string
+		mockFn   func(ctx context.Context, userID uint, tenantID string) ([]*domain.UserRole, error)
+		want     bool
+		wantErr  bool
 	}{
 		{
-			name:   "user is operator",
-			userID: 1,
-			mockFn: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
+			name:     "global operator is operator for a tenant",
+			userID:   1,
+			tenantID: tenantA,
+			mockFn: func(ctx context.Context, userID uint, tenantID string) ([]*domain.UserRole, error) {
 				return []*domain.UserRole{
-					{UserID: 1, Role: &domain.Role{Name: RoleOperator}},
+					{UserID: 1, Role: &domain.Role{Name: RoleOperator, IsActive: true}},
 				}, nil
 			},
-			want:    true,
-			wantErr: false,
+			want: true,
 		},
 		{
-			name:   "user is not operator",
-			userID: 2,
-			mockFn: func(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
+			name:     "operator on the requested tenant",
+			userID:   2,
+			tenantID: tenantA,
+			mockFn: func(ctx context.Context, userID uint, tenantID string) ([]*domain.UserRole, error) {
 				return []*domain.UserRole{
-					{UserID: 2, Role: &domain.Role{Name: RoleViewer}},
+					{UserID: 2, Role: &domain.Role{Name: RoleOperator, IsActive: true}, TenantID: &tenantA},
 				}, nil
 			},
-			want:    false,
-			wantErr: false,
+			want: true,
+		},
+		{
+			name:     "operator on another tenant is not operator here",
+			userID:   3,
+			tenantID: tenantA,
+			mockFn: func(ctx context.Context, userID uint, tenantID string) ([]*domain.UserRole, error) {
+				return []*domain.UserRole{
+					{UserID: 3, Role: &domain.Role{Name: RoleOperator, IsActive: true}, TenantID: &tenantB},
+				}, nil
+			},
+			want: false,
+		},
+		{
+			name:     "expired operator is not operator",
+			userID:   4,
+			tenantID: tenantA,
+			mockFn: func(ctx context.Context, userID uint, tenantID string) ([]*domain.UserRole, error) {
+				return []*domain.UserRole{
+					{UserID: 4, Role: &domain.Role{Name: RoleOperator, IsActive: true}, TenantID: &tenantA, ExpiresAt: &past},
+				}, nil
+			},
+			want: false,
+		},
+		{
+			name:     "expired global operator is not operator",
+			userID:   5,
+			tenantID: tenantA,
+			mockFn: func(ctx context.Context, userID uint, tenantID string) ([]*domain.UserRole, error) {
+				return []*domain.UserRole{
+					{UserID: 5, Role: &domain.Role{Name: RoleOperator, IsActive: true}, ExpiresAt: &past},
+				}, nil
+			},
+			want: false,
+		},
+		{
+			name:     "unexpired operator on the tenant is operator",
+			userID:   6,
+			tenantID: tenantA,
+			mockFn: func(ctx context.Context, userID uint, tenantID string) ([]*domain.UserRole, error) {
+				return []*domain.UserRole{
+					{UserID: 6, Role: &domain.Role{Name: RoleOperator, IsActive: true}, TenantID: &tenantA, ExpiresAt: &future},
+				}, nil
+			},
+			want: true,
+		},
+		{
+			name:     "viewer is not operator",
+			userID:   7,
+			tenantID: tenantA,
+			mockFn: func(ctx context.Context, userID uint, tenantID string) ([]*domain.UserRole, error) {
+				return []*domain.UserRole{
+					{UserID: 7, Role: &domain.Role{Name: RoleViewer, IsActive: true}},
+				}, nil
+			},
+			want: false,
+		},
+		{
+			name:     "inactive operator role is not operator",
+			userID:   9,
+			tenantID: tenantA,
+			mockFn: func(ctx context.Context, userID uint, tenantID string) ([]*domain.UserRole, error) {
+				return []*domain.UserRole{{UserID: 9, Role: &domain.Role{Name: RoleOperator}}}, nil
+			},
+			want: false,
+		},
+		{
+			name:     "assignment whose role was deleted is not operator",
+			userID:   10,
+			tenantID: tenantA,
+			mockFn: func(ctx context.Context, userID uint, tenantID string) ([]*domain.UserRole, error) {
+				return []*domain.UserRole{{UserID: 10, RoleID: 2}}, nil
+			},
+			want: false,
+		},
+		{
+			name:     "no roles",
+			userID:   8,
+			tenantID: tenantA,
+			mockFn: func(ctx context.Context, userID uint, tenantID string) ([]*domain.UserRole, error) {
+				return []*domain.UserRole{}, nil
+			},
+			want: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			userRoleRepo := &mockUserRoleRepository{getUserRolesFn: tt.mockFn}
+			userRoleRepo := &mockUserRoleRepository{getUserRolesForTenantFn: tt.mockFn}
 			svc := newTestService(nil, nil, userRoleRepo, nil)
 
-			got, err := svc.IsOperator(context.Background(), tt.userID)
+			got, err := svc.IsOperator(context.Background(), tt.userID, tt.tenantID)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("IsOperator() error = %v, wantErr %v", err, tt.wantErr)
 				return

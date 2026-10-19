@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -42,15 +41,11 @@ type blankRealmStack struct {
 func newBlankRealmStack(t *testing.T) *blankRealmStack {
 	t.Helper()
 
-	dsn := os.Getenv("KMT_TEST_DATABASE_DSN")
-	if dsn == "" {
-		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping e2e test")
-	}
-
-	testdb.ShareDatabase(t, dsn)
+	dsn := testdb.DSN(t, "KMT_TEST_DATABASE_DSN")
+	testdb.Lock(t, dsn)
 
 	log := logger.NewNoop()
-	client, err := database.NewClient(dsnConfig(t, dsn), log)
+	client, err := database.NewClient(testdb.DatabaseConfig(t, dsn), log)
 	if err != nil {
 		t.Fatalf("open test database: %v", err)
 	}

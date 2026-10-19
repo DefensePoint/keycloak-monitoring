@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/users"
 )
 
 // The OAuth2 callback must refuse an account the platform has deactivated or
@@ -19,14 +22,20 @@ import (
 
 type callbackProviderStub struct{ userInfo *UserInfo }
 
-func (p *callbackProviderStub) GetAuthCodeURL(state string) string { return "https://idp.invalid/auth" }
+func (p *callbackProviderStub) GetAuthCodeURL(_ string, _ ...oauth2.AuthCodeOption) string {
+	return "https://idp.invalid/auth"
+}
 
-func (p *callbackProviderStub) Exchange(_ context.Context, _ string) (*oauth2.Token, error) {
+func (p *callbackProviderStub) Exchange(_ context.Context, _ string, _ ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
 	return (&oauth2.Token{AccessToken: "access", Expiry: time.Now().Add(time.Hour)}).
 		WithExtra(map[string]interface{}{"id_token": "id-token"}), nil
 }
 
 func (p *callbackProviderStub) VerifyIDToken(_ context.Context, _ string) (*UserInfo, error) {
+	return p.userInfo, nil
+}
+
+func (p *callbackProviderStub) VerifyLoginIDToken(_ context.Context, _, _ string) (*UserInfo, error) {
 	return p.userInfo, nil
 }
 
@@ -52,10 +61,14 @@ func (s *callbackSessionStoreSpy) UpdateLastAccessed(_ context.Context, _ string
 type callbackUserRepoStub struct {
 	storedUser *domain.User
 	received   *domain.User
+	err        error
 }
 
 func (r *callbackUserRepoStub) FindOrCreateBySubject(_ context.Context, user *domain.User) (*domain.User, error) {
 	r.received = user
+	if r.err != nil {
+		return nil, r.err
+	}
 	return r.storedUser, nil
 }
 func (r *callbackUserRepoStub) GetBySubject(_ context.Context, _ string) (*domain.User, error) {
@@ -87,69 +100,8 @@ func newCallbackService(stored *domain.User) (*service, *callbackSessionStoreSpy
 	return svc, sessions, users
 }
 
-func TestCallback_ActiveUserGetsASession(t *testing.T) {
-	svc, sessions, _ := newCallbackService(&domain.User{
-		ID: 1, Subject: "idp-subject", Email: "person@example.com",
-		IsActive: true, IsBlocked: false,
-	})
-
-	session, user, err := svc.Callback(context.Background(), "code", "state", "state")
-	if err != nil {
-		t.Fatalf("active user should sign in, got error: %v", err)
-	}
-	if session == nil || user == nil {
-		t.Fatalf("active user should get a session and a user, got session=%v user=%v", session, user)
-	}
-	if sessions.saved != 1 {
-		t.Errorf("expected exactly one session saved, got %d", sessions.saved)
-	}
-}
-
-func TestCallback_DeactivatedUserIsRefused(t *testing.T) {
-	svc, sessions, users := newCallbackService(&domain.User{
-		ID: 1, Subject: "idp-subject", Email: "person@example.com",
-		IsActive: false, IsBlocked: false,
-	})
-
-	session, user, err := svc.Callback(context.Background(), "code", "state", "state")
-	if err == nil {
-		t.Fatal("a deactivated account must not be able to sign in via SSO")
-	}
-	if session != nil || user != nil {
-		t.Errorf("no session or user may be returned for a deactivated account, got session=%v user=%v", session, user)
-	}
-	if sessions.saved != 0 {
-		t.Errorf("no session may be persisted for a deactivated account, saved %d", sessions.saved)
-	}
-	// Pins the reason this bug was invisible: the profile built from IdP claims
-	// always says active, so only the persisted row can refuse the login.
-	if users.received == nil || !users.received.IsActive {
-		t.Errorf("expected the service to pass an active profile in, so the refusal must come from the stored row")
-	}
-}
-
-func TestCallback_BlockedUserIsRefused(t *testing.T) {
-	svc, sessions, _ := newCallbackService(&domain.User{
-		ID: 1, Subject: "idp-subject", Email: "person@example.com",
-		IsActive: true, IsBlocked: true,
-	})
-
-	session, user, err := svc.Callback(context.Background(), "code", "state", "state")
-	if err == nil {
-		t.Fatal("a blocked account must not be able to sign in via SSO")
-	}
-	if session != nil || user != nil {
-		t.Errorf("no session or user may be returned for a blocked account, got session=%v user=%v", session, user)
-	}
-	if sessions.saved != 0 {
-		t.Errorf("no session may be persisted for a blocked account, saved %d", sessions.saved)
-	}
-}
-
-// FindOrCreateUser is the method the live OAuth2 callback actually reaches:
-// handleCallback (internal/http/chi/auth_handlers.go) calls it directly and
-// then mints a session, never going through service.Callback. Guarding only
-// Callback would leave the real login path open.
+// FindOrCreateUser is the method the OAuth2 callback reaches: handleCallback
+// (internal/http/chi/auth_handlers.go) calls it and then mints a session.
 
 func TestFindOrCreateUser_ActiveUserIsReturned(t *testing.T) {
 	svc, _, _ := newCallbackService(&domain.User{
@@ -166,7 +118,7 @@ func TestFindOrCreateUser_ActiveUserIsReturned(t *testing.T) {
 }
 
 func TestFindOrCreateUser_DeactivatedUserIsRefused(t *testing.T) {
-	svc, _, _ := newCallbackService(&domain.User{
+	svc, _, users := newCallbackService(&domain.User{
 		ID: 1, Subject: "idp-subject", IsActive: false, IsBlocked: false,
 	})
 
@@ -176,6 +128,11 @@ func TestFindOrCreateUser_DeactivatedUserIsRefused(t *testing.T) {
 	}
 	if user != nil {
 		t.Errorf("no user may be handed back for a deactivated account, got %v", user)
+	}
+	// Pins the reason this bug was invisible: the profile built from IdP claims
+	// always says active, so only the persisted row can refuse the login.
+	if users.received == nil || !users.received.IsActive {
+		t.Errorf("expected the service to pass an active profile in, so the refusal must come from the stored row")
 	}
 }
 
@@ -193,12 +150,12 @@ func TestFindOrCreateUser_BlockedUserIsRefused(t *testing.T) {
 	}
 }
 
-func TestCallback_RefusalMatchesSimpleAuth(t *testing.T) {
+func TestFindOrCreateUser_RefusalMatchesSimpleAuth(t *testing.T) {
 	svc, _, _ := newCallbackService(&domain.User{
 		ID: 1, Subject: "idp-subject", IsActive: false,
 	})
 
-	_, _, err := svc.Callback(context.Background(), "code", "state", "state")
+	_, err := svc.FindOrCreateUser(context.Background(), &UserInfo{Subject: "idp-subject"})
 
 	authErr, ok := err.(*AuthError)
 	if !ok {
@@ -206,5 +163,28 @@ func TestCallback_RefusalMatchesSimpleAuth(t *testing.T) {
 	}
 	if authErr.Code != ErrCodeUnauthorized {
 		t.Errorf("expected %q to match simple auth, got %q", ErrCodeUnauthorized, authErr.Code)
+	}
+}
+
+// A login whose address belongs to another account is a refusal, not a server
+// fault: the callback answers 401 for ErrCodeUnauthorized and 500 otherwise,
+// and a 500 would send whoever investigates looking for a bug instead of at the
+// account the log names.
+func TestFindOrCreateUser_AnEmailHeldByAnotherAccountIsRefused(t *testing.T) {
+	svc, _, repo := newCallbackService(nil)
+	repo.err = fmt.Errorf("wrapped: %w", &users.EmailInUseError{UserID: 7})
+
+	user, err := svc.FindOrCreateUser(context.Background(), &UserInfo{
+		Subject: "new-subject", Email: "person@example.com", EmailVerified: true,
+	})
+	if user != nil {
+		t.Errorf("no user may be handed back, got %v", user)
+	}
+	var authErr *AuthError
+	if !errors.As(err, &authErr) || authErr.Code != ErrCodeUnauthorized {
+		t.Fatalf("want an unauthorized AuthError, got %v", err)
+	}
+	if !errors.Is(err, users.ErrEmailInUse) {
+		t.Errorf("the refusal lost the cause: %v", err)
 	}
 }

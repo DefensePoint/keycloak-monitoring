@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/url"
 )
 
 // GetAuthenticationFlows returns the realm's top-level authentication flows.
 func (c *Client) GetAuthenticationFlows(ctx context.Context, realmName string) ([]AuthenticationFlowRepresentation, error) {
-	path := fmt.Sprintf("/admin/realms/%s/authentication/flows", url.PathEscape(realmName))
+	realmSeg, err := pathSegment(realmName)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/admin/realms/%s/authentication/flows", realmSeg)
 
 	resp, err := c.get(ctx, path)
 	if err != nil {
@@ -25,8 +28,8 @@ func (c *Client) GetAuthenticationFlows(ctx context.Context, realmName string) (
 
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf(
-			"failed to get authentication flows for realm %q, status: %d, body: %s",
-			realmName, resp.StatusCode, string(body),
+			"failed to get authentication flows for realm %q, status: %d%s",
+			realmName, resp.StatusCode, c.replyDetail("get authentication flows", resp.StatusCode, body),
 		)
 	}
 
@@ -42,10 +45,15 @@ func (c *Client) GetAuthenticationFlows(ctx context.Context, realmName string) (
 // authentication flow, identified by its alias (e.g. "browser"). The list
 // includes nested subflow executions; authenticator rows carry a ProviderID.
 func (c *Client) GetFlowExecutions(ctx context.Context, realmName, flowAlias string) ([]AuthenticationExecutionInfoRepresentation, error) {
-	path := fmt.Sprintf(
-		"/admin/realms/%s/authentication/flows/%s/executions",
-		url.PathEscape(realmName), url.PathEscape(flowAlias),
-	)
+	realmSeg, err := pathSegment(realmName)
+	if err != nil {
+		return nil, err
+	}
+	flowSeg, err := pathSegment(flowAlias)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/admin/realms/%s/authentication/flows/%s/executions", realmSeg, flowSeg)
 
 	resp, err := c.get(ctx, path)
 	if err != nil {
@@ -60,8 +68,8 @@ func (c *Client) GetFlowExecutions(ctx context.Context, realmName, flowAlias str
 
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf(
-			"failed to get flow executions for realm %q flow %q, status: %d, body: %s",
-			realmName, flowAlias, resp.StatusCode, string(body),
+			"failed to get flow executions for realm %q flow %q, status: %d%s",
+			realmName, flowAlias, resp.StatusCode, c.replyDetail("get flow executions", resp.StatusCode, body),
 		)
 	}
 

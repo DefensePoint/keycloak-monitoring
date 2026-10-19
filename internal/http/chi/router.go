@@ -4,6 +4,7 @@
 package chi
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -11,6 +12,7 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/healthcheck"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/metrics"
 
@@ -38,6 +40,13 @@ type Router struct {
 	handlers       []RouteRegistrar
 	metrics        *metrics.Registry
 	metricsConfig  config.MetricsConfig
+	readiness      *healthcheck.Readiness
+}
+
+// SetReadinessCheck sets what /ready requires, the database answering. Without
+// it /ready always answers 200. /health stays a liveness check either way.
+func (r *Router) SetReadinessCheck(check func(context.Context) error) {
+	r.readiness.SetCheck(check)
 }
 
 // SetMetrics enables the /metrics endpoint and request instrumentation. It must
@@ -63,12 +72,6 @@ func NewRouter(
 
 	// Add Chi's built-in middleware (optional, can be customized)
 	r.Use(middleware.RequestID)
-	// chi RealIP still prefers True-Client-IP, then X-Real-IP, then the
-	// leftmost X-Forwarded-For, from the client even when a proxy is in
-	// front. nginx overwriting X-Real-IP does not stop a client
-	// True-Client-IP. The nginx sample now clears that header; that is
-	// an interim mitigation, not a trusted-proxy implementation.
-	r.Use(middleware.RealIP) //nolint:staticcheck // SA1019
 
 	return &Router{
 		chi:            r,
@@ -76,6 +79,7 @@ func NewRouter(
 		authMiddleware: authMiddleware,
 		rbacMiddleware: rbacMiddleware,
 		handlers:       handlers,
+		readiness:      healthcheck.NewReadiness(log),
 	}
 }
 
@@ -83,7 +87,7 @@ func NewRouter(
 func (r *Router) RegisterAllRoutes() {
 	// Register health check endpoints (no auth required)
 	r.chi.Get("/health", r.handleHealth)
-	r.chi.Get("/ready", r.handleReady)
+	r.chi.Method(http.MethodGet, "/ready", r.readiness)
 
 	if r.metrics != nil && r.metricsConfig.Enabled {
 		r.chi.Get("/metrics", r.handleMetrics())
@@ -125,13 +129,6 @@ func (r *Router) handleHealth(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"healthy"}`))
-}
-
-// handleReady returns a readiness check response.
-func (r *Router) handleReady(w http.ResponseWriter, req *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ready"}`))
 }
 
 // handleMetrics serves the Prometheus exposition endpoint, optionally behind a

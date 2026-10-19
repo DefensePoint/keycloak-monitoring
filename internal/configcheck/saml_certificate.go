@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/saferequest"
 )
 
 // SAMLMetadata represents the structure of SAML metadata XML
@@ -64,20 +65,53 @@ type CertificateExpirationStatus struct {
 	ErrorMessage        string
 }
 
+// maxSAMLMetadataBytes caps how much of a metadata document is read. One
+// identity provider's metadata is a few kilobytes; without a cap a server could
+// stream until memory ran out.
+const maxSAMLMetadataBytes = 10 << 20
+
+// maxSAMLMetadataRedirects bounds the redirects followed for one fetch.
+const maxSAMLMetadataRedirects = 3
+
 // SAMLMetadataFetcher provides functionality to fetch and parse SAML metadata
 type SAMLMetadataFetcher struct {
 	httpClient *http.Client
+	policy     saferequest.Policy
 	logger     *logger.Logger
 }
 
-// NewSAMLMetadataFetcher creates a new SAML metadata fetcher
-func NewSAMLMetadataFetcher(timeout time.Duration, log *logger.Logger) *SAMLMetadataFetcher {
+// NewSAMLMetadataFetcher creates a new SAML metadata fetcher.
+//
+// The metadata URL is the identity provider's metadataDescriptorUrl, which
+// anyone administering that realm in Keycloak can set, and the fetch runs from
+// this server's network. policy is the same SSRF policy the Keycloak clients
+// use: loopback, link-local (cloud metadata) and other never-legitimate ranges
+// are refused at dial time, and private ranges follow AllowPrivateRanges.
+func NewSAMLMetadataFetcher(policy saferequest.Policy, log *logger.Logger) *SAMLMetadataFetcher {
+	client := saferequest.HTTPClient(policy)
+	// saferequest refuses every redirect. Metadata URLs do redirect (http to
+	// https, a CDN), and the dial-time check still runs on each hop, so follow
+	// a few, never from https down to http.
+	client.CheckRedirect = checkSAMLMetadataRedirect
 	return &SAMLMetadataFetcher{
-		httpClient: &http.Client{
-			Timeout: timeout,
-		},
-		logger: log.WithComponent("saml_metadata_fetcher"),
+		httpClient: client,
+		policy:     policy,
+		logger:     log.WithComponent("saml_metadata_fetcher"),
 	}
+}
+
+func checkSAMLMetadataRedirect(req *http.Request, via []*http.Request) error {
+	// via holds the requests made so far, so this redirect is number len(via).
+	if len(via) > maxSAMLMetadataRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxSAMLMetadataRedirects)
+	}
+	if req.URL.Scheme != "https" && req.URL.Scheme != "http" {
+		return fmt.Errorf("redirect to %q scheme refused", req.URL.Scheme)
+	}
+	if via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme == "http" {
+		return fmt.Errorf("redirect from https to http refused")
+	}
+	return nil
 }
 
 // FetchAndParseCertificates fetches SAML metadata from a URL and extracts certificates
@@ -101,6 +135,13 @@ func (f *SAMLMetadataFetcher) FetchAndParseCertificates(ctx context.Context, met
 func (f *SAMLMetadataFetcher) fetchMetadata(ctx context.Context, metadataURL string) (*SAMLMetadata, error) {
 	f.logger.Debug("Fetching SAML metadata", logger.Str("url", metadataURL))
 
+	// Refuse a blocked address before connecting, for a clear error. The
+	// dialer checks again at connect time, which also covers redirects and a
+	// DNS answer that changes between the two.
+	if err := saferequest.ValidateURLContext(ctx, metadataURL, f.policy); err != nil {
+		return nil, err
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -120,9 +161,12 @@ func (f *SAMLMetadataFetcher) fetchMetadata(ctx context.Context, metadataURL str
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSAMLMetadataBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	if len(body) > maxSAMLMetadataBytes {
+		return nil, fmt.Errorf("metadata is larger than %d bytes", maxSAMLMetadataBytes)
 	}
 
 	var metadata SAMLMetadata

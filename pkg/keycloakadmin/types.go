@@ -228,6 +228,8 @@ type ServerInfoRepresentation struct {
 	Themes          map[string][]interface{} `json:"themes"`
 	SocialProviders []interface{}            `json:"socialProviders"`
 	Providers       map[string]interface{}   `json:"providers"`
+	// Enums lists Keycloak's enumerations by name, such as "eventType".
+	Enums map[string][]string `json:"enums"`
 }
 
 // SystemInfo represents system information

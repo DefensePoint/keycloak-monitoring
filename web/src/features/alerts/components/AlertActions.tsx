@@ -8,6 +8,10 @@ interface AlertActionsProps {
   onAcknowledge: () => void;
   onIgnore: () => void;
   onResolve: () => void;
+  /** alerts:acknowledge */
+  canAcknowledge: boolean;
+  /** alerts:resolve, which ignoring and resolving both need */
+  canResolve: boolean;
 }
 
 export const AlertActions: React.FC<AlertActionsProps> = ({
@@ -15,8 +19,12 @@ export const AlertActions: React.FC<AlertActionsProps> = ({
   onAcknowledge,
   onIgnore,
   onResolve,
+  canAcknowledge,
+  canResolve,
 }) => {
   const isResolved = status === "resolved" || status === "ignored";
+  const showAcknowledge = status === "active" && canAcknowledge;
+  const showIgnore = status !== "ignored" && canResolve;
 
   return (
     <SectionCard title="Actions">
@@ -28,9 +36,13 @@ export const AlertActions: React.FC<AlertActionsProps> = ({
             . No further actions available.
           </Typography>
         </Box>
+      ) : !showAcknowledge && !canResolve ? (
+        <Typography variant="body2" color="text.secondary">
+          You don&apos;t have permission to change this alert.
+        </Typography>
       ) : (
         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
-          {status === "active" && (
+          {showAcknowledge && (
             <Button
               variant="contained"
               color="warning"
@@ -44,7 +56,7 @@ export const AlertActions: React.FC<AlertActionsProps> = ({
               Acknowledge
             </Button>
           )}
-          {status !== "ignored" && (
+          {showIgnore && (
             <Button
               variant="outlined"
               onClick={onIgnore}
@@ -57,18 +69,20 @@ export const AlertActions: React.FC<AlertActionsProps> = ({
               Ignore
             </Button>
           )}
-          <Button
-            variant="contained"
-            color="success"
-            onClick={onResolve}
-            sx={{
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              fontWeight: 600,
-            }}
-          >
-            Resolve
-          </Button>
+          {canResolve && (
+            <Button
+              variant="contained"
+              color="success"
+              onClick={onResolve}
+              sx={{
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+                fontWeight: 600,
+              }}
+            >
+              Resolve
+            </Button>
+          )}
         </Box>
       )}
     </SectionCard>

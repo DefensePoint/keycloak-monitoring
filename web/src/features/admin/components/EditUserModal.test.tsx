@@ -140,6 +140,103 @@ describe("EditUserModal", () => {
     expect(activeCheckbox).not.toBeChecked();
   });
 
+  describe("Deactivation warning", () => {
+    const warning = /revokes their API tokens/i;
+
+    it.each([
+      ["local", mockLocalUser],
+      ["OAuth", mockOAuthUser],
+    ])(
+      "warns that unticking Active on an active %s user revokes their tokens",
+      async (_, account) => {
+        const user = userEvent.setup();
+        render(<EditUserModal {...defaultProps} user={account} />);
+        expect(screen.queryByText(warning)).not.toBeInTheDocument();
+
+        await user.click(screen.getByLabelText("Active"));
+        expect(screen.getByText(warning)).toBeInTheDocument();
+
+        await user.click(screen.getByLabelText("Active"));
+        expect(screen.queryByText(warning)).not.toBeInTheDocument();
+      },
+    );
+
+    it("warns that ticking Blocked on an unblocked user revokes their tokens", async () => {
+      const user = userEvent.setup();
+      render(<EditUserModal {...defaultProps} />);
+
+      await user.click(screen.getByLabelText("Blocked"));
+      expect(
+        screen.getByText(
+          /blocks this user and revokes their API tokens\. Unblocking/i,
+        ),
+      ).toBeInTheDocument();
+
+      await user.click(screen.getByLabelText("Blocked"));
+      expect(screen.queryByText(warning)).not.toBeInTheDocument();
+    });
+
+    it("names both changes when deactivating and blocking at once", async () => {
+      const user = userEvent.setup();
+      render(<EditUserModal {...defaultProps} />);
+
+      await user.click(screen.getByLabelText("Active"));
+      await user.click(screen.getByLabelText("Blocked"));
+      expect(
+        screen.getByText(/deactivates and blocks this user/i),
+      ).toBeInTheDocument();
+    });
+
+    it.each([
+      [
+        "reactivating an inactive",
+        { is_active: false },
+        "Active",
+        "reactivates",
+      ],
+      ["unblocking a blocked", { is_blocked: true }, "Blocked", "unblocks"],
+    ])(
+      "tells the admin that %s user revokes any tokens still held",
+      async (_, status, checkbox, action) => {
+        const user = userEvent.setup();
+        render(
+          <EditUserModal
+            {...defaultProps}
+            user={{ ...mockLocalUser, ...status }}
+          />,
+        );
+        const note = new RegExp(
+          `Saving ${action} this user\\. Any API tokens they still hold are revoked`,
+          "i",
+        );
+        expect(screen.queryByText(note)).not.toBeInTheDocument();
+
+        await user.click(screen.getByLabelText(checkbox));
+        expect(screen.getByText(note)).toBeInTheDocument();
+        expect(screen.queryByText(warning)).not.toBeInTheDocument();
+
+        await user.click(screen.getByLabelText(checkbox));
+        expect(screen.queryByText(note)).not.toBeInTheDocument();
+      },
+    );
+
+    it("names both when reactivating and unblocking at once", async () => {
+      const user = userEvent.setup();
+      render(
+        <EditUserModal
+          {...defaultProps}
+          user={{ ...mockLocalUser, is_active: false, is_blocked: true }}
+        />,
+      );
+
+      await user.click(screen.getByLabelText("Active"));
+      await user.click(screen.getByLabelText("Blocked"));
+      expect(
+        screen.getByText(/reactivates and unblocks this user/i),
+      ).toBeInTheDocument();
+    });
+  });
+
   it("should toggle blocked checkbox correctly", async () => {
     const user = userEvent.setup();
     render(<EditUserModal {...defaultProps} />);

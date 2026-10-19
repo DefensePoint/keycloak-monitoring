@@ -33,6 +33,25 @@ type Client struct {
 	tokenMu     sync.RWMutex
 	accessToken string
 	tokenExpiry time.Time
+
+	// Clock comparison with Keycloak (see checkClock); now is replaced in tests.
+	clockMu       sync.Mutex
+	lastClockWarn time.Time
+	now           func() time.Time
+
+	// What server info says about events (see refreshServerEventsLocked):
+	// how this Keycloak reads event times, and the configured event types it
+	// knows (queryTypes), or why none can be fetched (queryTypesErr).
+	eventTimesMu      sync.Mutex
+	eventTimesExact   bool
+	eventTimesDecided bool
+	eventTimesChecked time.Time
+	eventTimesVersion string
+	// The precision last logged, so it is logged only when it changes.
+	eventTimesReported      bool
+	eventTimesReportedExact bool
+	queryTypes              []string
+	queryTypesErr           error
 }
 
 // NewClient creates a new Keycloak Admin API client. The supplied ctx bounds
@@ -48,6 +67,7 @@ func NewClient(ctx context.Context, cfg *ClientConfig, logger Logger) (*Client, 
 
 	// Apply defaults for unset values
 	cfg.ApplyDefaults()
+	cfg.EventTypes = normalizeEventTypes(cfg.EventTypes)
 
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
@@ -163,11 +183,7 @@ func (c *Client) authenticate(ctx context.Context) error {
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
-		var errResp ErrorResponse
-		if err := json.Unmarshal(body, &errResp); err == nil {
-			return fmt.Errorf("authentication failed: %s - %s", errResp.Error, errResp.ErrorDescription)
-		}
-		return fmt.Errorf("authentication failed with status %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("authentication failed with status %d%s", resp.StatusCode, c.replyDetail("token request", resp.StatusCode, body))
 	}
 
 	// Parse token response
@@ -237,6 +253,9 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		resp, err = c.httpClient.Do(req)
+		if err == nil {
+			c.checkClock(resp)
+		}
 		if err == nil && resp.StatusCode < 500 {
 			// Success or client error (4xx) - don't retry
 			break

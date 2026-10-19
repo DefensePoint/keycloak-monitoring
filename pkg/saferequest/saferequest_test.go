@@ -48,6 +48,22 @@ func TestValidateURL_BlockedRanges(t *testing.T) {
 		// Other reserved.
 		{"multicast_v4", "http://224.0.0.1/"},
 		{"broadcast_v4", "http://255.255.255.255/"},
+
+		// Cloud metadata outside link-local, refused even with private
+		// ranges allowed.
+		{"alibaba_metadata", "http://100.100.100.200/latest/meta-data/"},
+		{"azure_wireserver", "http://168.63.129.16/machine?comp=goalstate"},
+		{"oracle_classic_metadata", "http://192.0.0.192/"},
+		{"aws_metadata_v6", "http://[fd00:ec2::254]/latest/meta-data/"},
+		{"aws_eks_pod_identity_v6", "http://[fd00:ec2::23]/"},
+		{"gcp_metadata_v6", "http://[fd20:ce::254]/computeMetadata/v1/"},
+
+		// IPv4 wrapped in IPv6 is judged by the IPv4 address.
+		{"nat64_metadata", "http://[64:ff9b::a9fe:a9fe]/"},
+		{"nat64_loopback", "http://[64:ff9b::7f00:1]/"},
+		{"nat64_alibaba_metadata", "http://[64:ff9b::6464:64c8]/"},
+		{"sixtofour_metadata", "http://[2002:a9fe:a9fe::1]/"},
+		{"v4compatible_metadata", "http://[::a9fe:a9fe]/"},
 	}
 
 	policy := Policy{AllowPrivateRanges: true} // permissive: on-prem default
@@ -189,6 +205,26 @@ func TestHTTPClient_DialContextBlocksMetadataIP(t *testing.T) {
 	}
 }
 
+// The dial-time check refuses the IPv6 metadata endpoint too, so a hostname
+// that resolves to it at connect time (DNS rebinding) gets nowhere.
+func TestHTTPClient_DialContextBlocksMetadataIPv6(t *testing.T) {
+	client := HTTPClient(Policy{AllowPrivateRanges: true})
+	_, err := client.Get("http://[fd00:ec2::254]/latest/meta-data/")
+	if err == nil {
+		t.Fatalf("expected dial to be refused for the IPv6 metadata endpoint")
+	}
+	if !errors.Is(err, ErrBlockedAddress) || !strings.Contains(err.Error(), "cloud metadata") {
+		t.Fatalf("expected a cloud metadata refusal, got %v", err)
+	}
+}
+
+func TestValidateURL_HostnameResolvesToIPv6Metadata(t *testing.T) {
+	policy := Policy{AllowPrivateRanges: true, Lookup: stubLookup("93.184.216.34", "fd00:ec2::254")}
+	if err := ValidateURL("https://keycloak.example.com/", policy); !errors.Is(err, ErrBlockedAddress) {
+		t.Fatalf("expected a name resolving to the IPv6 metadata endpoint to be refused, got %v", err)
+	}
+}
+
 // TestHTTPClient_AllowsPublic confirms the client is not so paranoid that it
 // breaks legitimate traffic. We use httptest and bypass the dialer (which
 // blocks loopback by design) — what we're checking is that nothing OTHER
@@ -235,6 +271,26 @@ func TestClassify(t *testing.T) {
 		{"172.16.0.1", false, true},
 		{"8.8.8.8", false, false},
 		{"8.8.8.8", true, false},
+
+		// Metadata endpoints, whatever the private-range policy.
+		{"100.100.100.200", true, true},
+		{"168.63.129.16", true, true},
+		{"fd00:ec2::254", true, true},
+		{"fd20:ce::254", true, true},
+		// Their neighbours keep their usual treatment: shared address space
+		// (Tailscale and similar), a public address, and ULA gated by policy.
+		{"100.100.100.201", true, false},
+		{"100.100.100.201", false, false},
+		{"168.63.129.17", false, false},
+		{"fd00:ec2::1", true, false},
+		{"fd00:ec2::1", false, true},
+
+		// Embedded IPv4 follows the policy of the address it carries.
+		{"64:ff9b::5db8:d822", false, false}, // NAT64 of public 93.184.216.34
+		{"2002:5db8:d822::1", false, false},  // 6to4 of the same
+		{"64:ff9b::a00:5", true, false},      // NAT64 of 10.0.0.5, private allowed
+		{"64:ff9b::a00:5", false, true},      // and refused when it is not
+		{"2001:db8::1", false, false},        // an ordinary IPv6 address is untouched
 	}
 	for _, tc := range cases {
 		ip := net.ParseIP(tc.ip)

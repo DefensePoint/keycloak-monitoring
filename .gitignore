@@ -20,6 +20,7 @@ coverage.html
 # Dependency directories
 vendor/
 node_modules/
+__pycache__/
 
 # Go workspace file
 go.work
@@ -27,11 +28,16 @@ go.work
 # Configuration files with credentials
 config.yaml
 *.yaml
+!deployments/local/config.bundled.yaml
 # Both patterns are needed: `*.env` catches names like `local.env`, while
-# `.env*` catches the dotfile variants (.env.production, .env.local).
+# `.env*` catches the dotfile variants (.env.production, .env.local). Without
+# the latter, a build-time secret sitting in web/.env.production is
+# committable — Vite inlines any VITE_-prefixed var at build time.
 .env
 *.env
 .env*
+# ...but keep the committed template, which holds names and no values.
+!.env.example
 
 # Keep example and compose files
 !config.yaml.example

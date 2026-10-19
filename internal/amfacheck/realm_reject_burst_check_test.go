@@ -46,7 +46,10 @@ func TestRealmRejectBurstCheck_NoAlertBelowThreshold(t *testing.T) {
 	}
 }
 
-func TestRealmRejectBurstCheck_AlertIDIncludesUTCDate(t *testing.T) {
+// The ID names the condition and nothing else. A date in it made every
+// burst after the first on the same day map onto the first one's alert, which
+// stayed resolved or acknowledged and so never announced the new burst.
+func TestRealmRejectBurstCheck_AlertIDIsOnePerConditionNotPerDay(t *testing.T) {
 	repo := &checkRepoStub{distinctUsers: 15}
 	c := NewRealmRejectBurstCheck("tenant-1", singleRealm("master"), repo, 10, 10*time.Minute, testLogger{})
 
@@ -54,8 +57,7 @@ func TestRealmRejectBurstCheck_AlertIDIncludesUTCDate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	day := time.Now().UTC().Format("2006-01-02")
-	want := alertID("amfa-realm-reject-burst", "tenant-1", "master", day)
+	want := alertID("amfa-realm-reject-burst", "tenant-1", "master")
 	if alerts[0].AlertID != want {
 		t.Errorf("AlertID = %q, want %q", alerts[0].AlertID, want)
 	}

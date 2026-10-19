@@ -7,9 +7,9 @@
 The Keycloak Monitoring Tool enforces access control through **two independent layers**:
 
 1. **Permissions** — gate *what actions* a user can perform (e.g. `alerts:read`, `tenants:write`).
-2. **Tenant policies** — gate *which tenants' data* a non-admin user can access.
+2. **Tenant policies** narrow *which realms* of a tenant a non-admin user can read.
 
-A user needs to pass **both** layers to access tenant-scoped data. Having `tenants:read` globally is **not** enough to read a specific tenant's alerts, events, or metrics — the user also needs an explicit policy for that tenant (or be an admin, which bypasses the policy check).
+A user needs to pass **both** layers to access tenant-scoped data. The permission layer decides whether the user reaches a tenant at all: `RequireTenantAccess` checks `tenants:read` for that tenant, and a globally assigned role holds it for every tenant. Tenant policies then narrow the realms the user may read within the tenant. A policy is an opt-in restriction, not a grant: a user with no policy row for a tenant reads every realm of it. A global admin bypasses the policy check.
 
 ### Key concepts
 
@@ -45,7 +45,7 @@ Permissions:
 - `alerts:read`, `alerts:acknowledge`, `alerts:resolve`
 - `metrics:read`, `keycloak:read`
 
-Operators **cannot** create/modify/delete alerts, tenants, users, realms, or clients. They **do not** bypass tenant policies — they only see tenants for which they have an explicit policy.
+Operators **cannot** create/modify/delete alerts, tenants, users, realms, or clients. They **do not** bypass tenant policies: where they hold policy rows for a tenant, they read only the realms those rows name. With no row for a tenant they read every realm of it, and a globally assigned operator role reaches every tenant.
 
 **Typical users:** SOC analysts, on-call engineers.
 
@@ -192,28 +192,27 @@ Persisted via `rbac/postgres/repository.go:330-419` (`TenantPolicy` model). Each
 |--------|---------|
 | `user_id` | Platform user receiving access |
 | `tenant_id` | Tenant being granted |
-| `allowed_realms` | JSON array of realm names — empty array means "all realms of this tenant" |
+| `allowed_realms` | JSON array of realm names the user may read. SQL NULL, or the legacy `null` literal, means every realm; an empty array `[]` means no realm |
 | `granted_by` | Who granted the policy |
 | `granted_at` | Timestamp |
 
-### `HasAccessToTenant()`
+### Realm scope: `rbac.ResolveRealmScope()`
 
-`rbac/service.go:86-100`. Logic:
+`rbac/realm_scope.go` defines what a user's policy rows mean within one tenant. The web handlers, the Keycloak single-realm checks included, reach it through `allowedRealms` (`internal/http/chi/middleware.go:494`), and the MCP authorizer calls it directly (`internal/mcp/authz.go`). In order:
 
-1. If the user has the `admin` role → **return true** (admin bypass).
-2. Otherwise delegate to `policyRepo.HasAccessToTenant(userID, tenantID)` — checks the `policies` table.
+1. **Global admin bypass.** A global, unexpired `admin` assignment (`rbac.Service.IsAdmin`) reads every realm whatever its rows say. Callers apply this before `ResolveRealmScope`.
+2. **No row means unrestricted.** A user with no policy row for the tenant reads every realm of it. Rows for other tenants do not restrict it.
+3. **An unrestricted row wins.** A row whose `allowed_realms` is NULL or the legacy `null` literal grants every realm, whatever the user's other rows name.
+4. **Rows union.** Otherwise the user reads the union of the realms named across all of their rows for the tenant, since `(user_id, tenant_id)` is not unique.
+5. **Blank entries are ignored.** A blank realm name grants nothing, so a row of only blanks grants no realm, like `[]`.
 
-### `HasAccessToRealm()`
+A single-realm request is allowed when the scope is unrestricted or names that realm exactly, and the all-realms routes read the same scope, so both give the same answer. Deleting a policy row therefore widens the user to every realm of the tenant. To deny every realm, leave the user only `"allowed_realms": []` rows for it.
 
-`rbac/service.go:102-121`. Logic:
-
-1. Admin bypass (same as above).
-2. Must pass `HasAccessToTenant` first.
-3. Checks whether `realmName` is in the policy's `allowed_realms` array. Empty array means "all realms."
+`rbac.Service.HasAccessToTenant` and `rbac.Service.HasAccessToRealm` are separate readers. The latter wraps the legacy `TenantPolicyRepository.HasAccessToRealm`, which applies a different rule: no row denies and only the first row counts. No HTTP or MCP route calls either; new routes use `allowedRealms`.
 
 ### `RequireTenantAccess()` middleware
 
-`internal/http/chi/middleware.go:566-606`. Applied to tenant-scoped routes. For the current request's `tenantID`, it calls `HasPermission(userID, "tenants:read", &tenantID)` — a **tenant-scoped** permission check. This leverages the fact that a user can be assigned a role **for a specific tenant**, so the permission resolution also considers the tenant policy for that user.
+`internal/http/chi/middleware.go:684-723`. Applied to tenant-scoped routes. For the current request's `tenantID`, it calls `HasPermission(userID, "tenants:read", &tenantID)`, a **tenant-scoped** permission check. It counts role assignments scoped to that tenant as well as global ones, so a globally assigned role passes for every tenant. Tenant policies play no part in this check.
 
 On failure, returns `403 {"error":"Access to tenant denied"}`.
 
@@ -232,10 +231,10 @@ All endpoints below require `RequireAdmin()` except `/api/rbac/me`. Source: `int
 | Method | Path | Auth |
 |--------|------|------|
 | GET | `/api/rbac/me` | authenticated user (no admin required) |
-| GET | `/api/rbac/roles` | admin |
-| POST | `/api/rbac/roles` | admin |
+| GET | `/api/rbac/roles` | admin (inactive roles only with `?include_inactive=true`) |
+| POST | `/api/rbac/roles` | admin (optional `is_active`, default true; 409 when a live role has the name) |
 | GET | `/api/rbac/roles/{roleID}` | admin |
-| PUT | `/api/rbac/roles/{roleID}` | admin (system roles cannot be modified) |
+| PUT | `/api/rbac/roles/{roleID}` | admin (`is_active` deactivates or reactivates; system roles cannot be modified) |
 | DELETE | `/api/rbac/roles/{roleID}` | admin (system roles cannot be deleted) |
 | GET | `/api/rbac/permissions` | admin (optional `?resource=` filter) |
 | GET | `/api/rbac/users/{userID}/roles` | admin (optional `?tenant_id=` filter) |
@@ -245,7 +244,13 @@ All endpoints below require `RequireAdmin()` except `/api/rbac/me`. Source: `int
 | POST | `/api/rbac/users/{userID}/policies` | admin (body: `tenant_id`, `allowed_realms`) |
 | DELETE | `/api/rbac/policies/{policyID}` | admin |
 
-The `GET /api/rbac/me` endpoint returns the current user's roles, permissions, and tenant policies. Accepts an optional `?tenant_id=` query parameter to scope the returned permissions to a specific tenant.
+The `GET /api/rbac/me` endpoint returns the current user's roles, permissions, and tenant policies. It lists only roles that grant: active, not deleted and not expired. Accepts an optional `?tenant_id=` query parameter to scope the returned permissions to a specific tenant.
+
+### Custom role lifecycle
+
+- **Deactivate:** a deactivated role grants nothing to its users from the next request, and reactivating it restores that. Use the toggle on the Roles page or `PUT /api/rbac/roles/{roleID}` with `{"is_active": false}`. A role can also be created inactive.
+- **Delete:** deleting a role removes its user assignments. Its name is free for a new role, since role names are unique among roles that are not deleted.
+- **Upgrade cleanup:** at startup, the server removes assignments left by roles deleted before deletion did this. Those assignments granted nothing but showed as blank roles on the Users page.
 
 ### Tenant routes (`/api/tenants/*`)
 
@@ -292,6 +297,8 @@ Source: `internal/http/chi/user_handlers.go:65-80`.
 | POST | `/api/users` | `platform_users:write` |
 | PUT | `/api/users/{id}` | `platform_users:write` |
 | DELETE | `/api/users/{id}` | `platform_users:delete` |
+
+A caller who is not a platform administrator may change or delete only users who hold no role, and themselves. Anyone holding a role, expired or of a deactivated role included, is managed by administrators only, since a password reset would otherwise let the caller sign in as that user and use their permissions. Only administrators assign roles, so a user manager can create accounts and look after them until an administrator gives them a role. The refusal is a 403: `Only an administrator can change or delete a user who holds a role`.
 
 ### Other tenant-scoped groups
 
@@ -343,11 +350,13 @@ Or via environment variable:
 export MONITORING_AUTH_OAUTH2_ADMIN_USERS="admin@company.com,ops-lead@company.com"
 ```
 
-Behavior (`auth/oauth2_admin.go:58-134`):
+Behavior (`auth/oauth2_admin.go:58-148`):
 
 - On first login, `ShouldBeAdmin` normalizes the user's email (trim + lowercase) and checks for an exact match against the normalized admin list.
-- If matched, `EnsureAdminRole` calls `AssignRoleToUser(user.ID, adminRole.ID, nil, "system", nil)` — unscoped (global) admin role.
-- A `SECURITY NOTICE` is logged at INFO level.
+- The role is granted only if the identity provider has verified the address (`email_verified` true in that login's ID token). An unverified address proves nothing about who holds it: a realm that allows self-registration or self-service profile editing lets anyone enter an address from the list. Such a login succeeds without the admin role, and a `SECURITY NOTICE` warning names the address. Mark the address verified in the identity provider, then sign in again.
+- If matched and verified, `EnsureAdminRole` calls `AssignRoleToUser(user.ID, adminRole.ID, nil, "system", nil)` — unscoped (global) admin role.
+- A user who already holds the admin role keeps it; the check applies to granting it.
+- A `SECURITY NOTICE` is logged at WARN level when the role is granted.
 - If OAuth2 is the only enabled auth method, at least one admin email **must** be configured or startup fails.
 
 ### Password requirements
@@ -447,10 +456,10 @@ Tenant-scoped role assignments and tenant policies together support multi-tenant
 - **Customer isolation** — each customer has dedicated operators with policies limited to their tenant.
 - **Environment separation** — dev/staging/prod tenants with separate operator groups.
 
-Assigning an operator to a tenant requires two steps:
+Assigning an operator to a tenant:
 
-1. Assign the `operator` role to the user (global or scoped).
-2. Create a tenant policy granting access to the specific tenant: `POST /api/rbac/users/{userID}/policies` with `tenant_id` and optionally `allowed_realms`.
+1. Assign the `operator` role to the user scoped to that tenant. A global assignment reaches every tenant.
+2. Optionally, restrict the operator to specific realms of the tenant with a tenant policy: `POST /api/rbac/users/{userID}/policies` with `tenant_id` and `allowed_realms`. Without a policy row the operator reads every realm of the tenant.
 
 ---
 
@@ -493,7 +502,7 @@ Two commits address cross-tenant isolation bugs identified during penetration te
 
 - Added `RequireTenantAccess()` to `GET/PUT/DELETE /api/tenants/{tenantID}` and `/health`. Commit message: *"Previously, users could access any tenant's information if they had the base permission, bypassing tenant policies."*
 
-> **Design intent confirmed.** Tenant isolation is a security requirement, not a feature gap. Having a `*:read` permission is not equivalent to having access to a specific tenant's data — the `policies` table and `HasAccessToTenant` check are the authoritative mechanism.
+> **Design intent confirmed.** Tenant isolation is a security requirement, not a feature gap. A `*:read` permission reaches a tenant's data only through a role assignment that is global or scoped to that tenant, which `RequireTenantAccess` checks as `tenants:read` for the tenant in the URL. Within the tenant, policy rows narrow the realms through `rbac.ResolveRealmScope`.
 
 ---
 
@@ -506,7 +515,7 @@ At present, RBAC changes (role assignments, policy creation, role updates/delete
 ## Best Practices
 
 1. **Use least privilege.** Assign the most restrictive role that still lets the user do their job. Promote to `operator` or `admin` only when needed.
-2. **Scope operators to tenants.** A bare `operator` role with no tenant policy grants zero data access. Always pair the role assignment with a tenant policy.
+2. **Scope operators to tenants.** Assign the `operator` role scoped to a tenant rather than globally: a global assignment reaches every tenant, and with no policy row it reads every realm of each. Add a tenant policy to narrow the realms. To take a tenant's realms away, leave only `"allowed_realms": []` rows rather than deleting the rows, since no row means unrestricted.
 3. **Reserve simple auth for bootstrap.** In environments with OAuth2 available, use OAuth2 for regular users and keep simple auth only for emergency admin access.
 4. **Add tenant policies through the API, not directly in the database.** The `/api/rbac/users/{userID}/policies` endpoint ensures proper validation.
 5. **When adding new routes**, always apply `RequireTenantAccess()` to tenant-scoped endpoints in addition to permission checks. Permission checks alone do not enforce tenant isolation.

@@ -53,8 +53,9 @@ class RbacService {
   }
 
   // Roles API
-  async getRoles(): Promise<Role[]> {
+  async getRoles(includeInactive = false): Promise<Role[]> {
     const response = await axios.get(`${API_BASE_URL}/api/rbac/roles`, {
+      params: includeInactive ? { include_inactive: true } : undefined,
       withCredentials: true,
     });
     return response.data.roles || [];

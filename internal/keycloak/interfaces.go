@@ -34,6 +34,13 @@ type Logger interface {
 type MonitorEventRepository interface {
 	SaveEvents(ctx context.Context, events []*domain.KeycloakEvent) error
 	CountEventsByType(ctx context.Context, tenantID, realmName, eventType string, from, to time.Time) (int64, error)
+	// StoredEventIDs returns which of ids the tenant has events stored under
+	// with a time from from to to.
+	StoredEventIDs(ctx context.Context, tenantID string, ids []string, from, to time.Time) (map[string]bool, error)
+	// IDlessEventTimes returns the times of the tenant's newest events at or
+	// after since stored under an id the poller made, as for Keycloak before
+	// 26.2 which returns none: a legacy one and a hashed one, zero if none.
+	IDlessEventTimes(ctx context.Context, tenantID string, since time.Time) (legacy, hashed time.Time, err error)
 }
 
 // MonitorMetricsRepository defines the minimal interface for metrics persistence used by Monitor.
@@ -50,6 +57,13 @@ type MonitorHealthRepository interface {
 type MonitorRealmRepository interface {
 	SaveRealm(ctx context.Context, realm *domain.KeycloakRealmInfo) error
 	GetRealms(ctx context.Context, tenantID string) ([]*domain.KeycloakRealmInfo, error)
+	// RetireRealmsNotIn soft-deletes the tenant's realms Keycloak no longer
+	// lists; see RealmWriter.
+	RetireRealmsNotIn(ctx context.Context, tenantID string, realmIDs []string) (int64, error)
+	// MarkRealmsUnreadable records that the monitoring client cannot read the
+	// tenant's realms named in realmNames, from since on. A realm already
+	// marked keeps the time it was first found unreadable.
+	MarkRealmsUnreadable(ctx context.Context, tenantID string, realmNames []string, since time.Time) error
 }
 
 // ============================================================================
@@ -74,6 +88,31 @@ type EventAlertConverter interface {
 // HealthAlertManager defines the interface for health status alert management.
 type HealthAlertManager interface {
 	ProcessHealthStatus(ctx context.Context, tenantID, tenantName, status, errorMessage string, responseTime int) error
+}
+
+// EventStorageReporter is told, after each events cycle, how storing the
+// polled events went, so that a tenant whose events keep failing to be stored
+// is noticed: a failed write is retried on the next cycle only while the event
+// is still inside the lookback window, and lost after that.
+type EventStorageReporter interface {
+	ReportEventStorage(ctx context.Context, tenantID, tenantName string, outcome EventStorageOutcome)
+}
+
+// EventStorageOutcome counts one events cycle's writes across all realms. An
+// event counts once per table it is written to.
+type EventStorageOutcome struct {
+	Attempted int
+	Failed    int
+	// FirstError is the first write error of the cycle, nil when none failed.
+	FirstError error
+}
+
+func (o *EventStorageOutcome) add(attempted, failed int, err error) {
+	o.Attempted += attempted
+	o.Failed += failed
+	if o.FirstError == nil && err != nil {
+		o.FirstError = err
+	}
 }
 
 // TenantHealthUpdater lets the monitor keep the tenant record's health status
@@ -143,7 +182,7 @@ type AdminAPI interface {
 
 	// Events
 	GetEvents(ctx context.Context, realmName string, options *keycloakadmin.EventQueryOptions) ([]*keycloakadmin.EventRepresentation, error)
-	GetRecentEvents(ctx context.Context, realmName string) ([]*keycloakadmin.EventRepresentation, error)
+	GetEventsSince(ctx context.Context, realmName string, since time.Time, first int, read keycloakadmin.EventsRead) (events []*keycloakadmin.EventRepresentation, full bool, err error)
 
 	// Health
 	GetHealthMetrics(ctx context.Context) *keycloakadmin.HealthMetrics

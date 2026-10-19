@@ -13,6 +13,8 @@ export interface Role {
   display_name: string;
   description: string;
   is_system: boolean;
+  // An inactive role grants nothing to its users until it is reactivated.
+  is_active: boolean;
   permissions?: Permission[];
   created_at?: string;
   updated_at?: string;
@@ -57,17 +59,22 @@ export interface CreateUserRequest {
   name: string;
 }
 
+// The API takes permission names, not IDs.
 export interface CreateRoleRequest {
   name: string;
   display_name: string;
   description: string;
-  permission_ids: number[];
+  permissions: string[];
+  is_active?: boolean;
 }
 
+// Fields left out are unchanged. permissions replaces the role's permissions:
+// any not listed are removed.
 export interface UpdateRoleRequest {
   display_name?: string;
   description?: string;
-  permission_ids?: number[];
+  permissions?: string[];
+  is_active?: boolean;
 }
 
 export interface AssignRoleRequest {

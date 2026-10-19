@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -53,6 +55,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
 		os.Exit(1)
 	}
+	for _, w := range cfg.PlaceholderWarnings {
+		log.Printf("WARNING: %s", w)
+	}
 
 	// Verify static directory exists
 	if _, err := os.Stat(cfg.Web.Server.StaticDir); os.IsNotExist(err) {
@@ -80,9 +85,9 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", cfg.Web.Server.Host, cfg.Web.Server.Port)
 	server := &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:      withHSTS(cfg.HTTP.SecurityHeaders, mux),
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: writeTimeoutFor(upstreamTimeout),
 		IdleTimeout:  120 * time.Second,
 	}
 
@@ -116,8 +121,40 @@ func main() {
 	}
 }
 
+// withHSTS adds the configured Strict-Transport-Security header to every
+// response, the application page included: the API sets it on its own
+// responses, but the page the browser loads first comes from here.
+func withHSTS(headers config.SecurityHeadersConfig, next http.Handler) http.Handler {
+	if !headers.Enabled || headers.HSTS == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Strict-Transport-Security", headers.HSTS)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// upstreamTimeout is how long the proxy waits for the API to answer.
+const upstreamTimeout = 30 * time.Second
+
+// writeMargin is how much longer than the upstream timeout the server keeps a
+// response writable. With the two equal, the proxy's timeout error was written
+// after the write deadline, so the connection closed with no response and the
+// browser silently retried the GET, running the slow request again.
+const writeMargin = 10 * time.Second
+
+// writeTimeoutFor is the server's write deadline for a given upstream timeout.
+func writeTimeoutFor(upstream time.Duration) time.Duration {
+	return upstream + writeMargin
+}
+
 // createProxyHandler creates a reverse proxy handler for API requests
 func createProxyHandler(backendURL string) http.Handler {
+	return newProxyHandler(backendURL, upstreamTimeout)
+}
+
+// newProxyHandler is createProxyHandler with the upstream timeout given.
+func newProxyHandler(backendURL string, timeout time.Duration) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Build target URL
 		targetURL := backendURL + r.URL.Path
@@ -125,8 +162,9 @@ func createProxyHandler(backendURL string) http.Handler {
 			targetURL += "?" + r.URL.RawQuery
 		}
 
-		// Create new request
-		proxyReq, err := http.NewRequest(r.Method, targetURL, r.Body)
+		// Create new request. It carries the browser's context, so the API
+		// stops working on it once the browser has gone.
+		proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, r.Body)
 		if err != nil {
 			log.Printf("Failed to create proxy request: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -139,11 +177,20 @@ func createProxyHandler(backendURL string) http.Handler {
 				proxyReq.Header.Add(key, value)
 			}
 		}
+		// The backend sees this proxy's Host, so pass on the host the browser
+		// addressed. Logout compares it with Origin to refuse requests from
+		// another site. An outer proxy that already set it wins.
+		if proxyReq.Header.Get("X-Forwarded-Host") == "" {
+			proxyReq.Header.Set("X-Forwarded-Host", r.Host)
+		}
+		// The API server's cross-origin check compares Origin with the Host it
+		// receives, so it gets the browser's Host too.
+		proxyReq.Host = r.Host
 
 		// Execute request
 		// Don't follow redirects - pass them through to the client
 		client := &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: timeout,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
@@ -151,7 +198,14 @@ func createProxyHandler(backendURL string) http.Handler {
 		resp, err := client.Do(proxyReq)
 		if err != nil {
 			log.Printf("Failed to proxy request to %s: %v", targetURL, err)
-			http.Error(w, "Bad gateway", http.StatusBadGateway)
+			switch {
+			case r.Context().Err() != nil:
+				// The browser left; nobody reads an answer.
+			case isTimeout(err):
+				writeJSONError(w, http.StatusGatewayTimeout, "The API did not answer in time")
+			default:
+				http.Error(w, "Bad gateway", http.StatusBadGateway)
+			}
 			return
 		}
 		defer func() {
@@ -160,8 +214,10 @@ func createProxyHandler(backendURL string) http.Handler {
 			}
 		}()
 
-		// Copy response headers
+		// Copy response headers. The backend's replace this server's own,
+		// so a header both set, such as HSTS, is sent once.
 		for key, values := range resp.Header {
+			w.Header().Del(key)
 			for _, value := range values {
 				w.Header().Add(key, value)
 			}
@@ -175,30 +231,72 @@ func createProxyHandler(backendURL string) http.Handler {
 	})
 }
 
+// isTimeout reports whether err is the proxy giving up on the API.
+func isTimeout(err error) bool {
+	var netErr net.Error
+	return errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout())
+}
+
+// writeJSONError answers with the {"error": ...} body the API's own errors
+// have, which the web client reads.
+func writeJSONError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": message}); err != nil {
+		log.Printf("Failed to write error response: %v", err)
+	}
+}
+
+// Cache-Control values for the files the web server serves. Vite names the
+// build files under assets/ after their content, so a new build gives them
+// new names and a cached copy can be kept for good. Everything else keeps its
+// name from build to build: index.html above all, which names the build files
+// of its own build. Without a Cache-Control a browser could reuse an
+// index.html from before a deploy without asking, and run the old build, or
+// show a blank page once the old build files were gone. Those files are
+// revalidated on every load instead, which costs a 304 when they are
+// unchanged.
+const (
+	cacheRevalidate = "no-cache"
+	cacheImmutable  = "public, max-age=31536000, immutable"
+	cacheNever      = "no-store"
+)
+
 // createSPAHandler creates a handler for static files with SPA routing fallback
 func createSPAHandler(staticDir string) http.Handler {
 	fileServer := http.FileServer(http.Dir(staticDir))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := filepath.Join(staticDir, r.URL.Path)
-
 		// Check if file exists
-		_, err := os.Stat(path)
+		info, err := os.Stat(path)
 		if err == nil {
+			// Only the files are named after their content, not the
+			// directory, which the file server lists.
+			buildFile := strings.HasPrefix(r.URL.Path, "/assets/") && !info.IsDir()
 			// File exists, serve it
+			if buildFile {
+				w.Header().Set("Cache-Control", cacheImmutable)
+			} else {
+				w.Header().Set("Cache-Control", cacheRevalidate)
+			}
 			fileServer.ServeHTTP(w, r)
 			return
 		}
 
 		// File doesn't exist, check if it's an asset request (has extension)
 		if strings.Contains(filepath.Base(r.URL.Path), ".") {
-			// It's a file request but file doesn't exist - 404
+			// It's a file request but file doesn't exist - 404. A page from
+			// before a deploy asks for build files the deploy removed; the
+			// answer must not be kept, as a later deploy may bring them back.
+			w.Header().Set("Cache-Control", cacheNever)
 			http.NotFound(w, r)
 			return
 		}
 
 		// It's a SPA route (no extension), serve index.html
 		indexPath := filepath.Join(staticDir, "index.html")
+		w.Header().Set("Cache-Control", cacheRevalidate)
 		http.ServeFile(w, r, indexPath)
 	})
 }

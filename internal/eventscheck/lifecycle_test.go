@@ -17,6 +17,10 @@ func (noopAlertStore) GetAlertByID(context.Context, string, string) (*domain.Ale
 	return nil, nil
 }
 func (noopAlertStore) SaveAlert(context.Context, *domain.Alert) error { return nil }
+func (noopAlertStore) ListOpenAlertsByCheck(context.Context, string, string) ([]*domain.Alert, error) {
+	return nil, nil
+}
+func (noopAlertStore) ResolveAlert(context.Context, string, string) error { return nil }
 
 // discardLogger satisfies Logger without producing output.
 type discardLogger struct{}

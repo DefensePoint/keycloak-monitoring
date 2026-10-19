@@ -28,8 +28,7 @@ func openAmfaTestDB(t *testing.T) *gorm.DB {
 		t.Skip("AMFA_TEST_DSN not set; skipping integration test. " +
 			"Example: 'host=localhost port=5455 dbname=adaptive_mfa user=keycloak password=password sslmode=disable'")
 	}
-
-	testdb.ShareDatabase(t, dsn)
+	testdb.Lock(t, dsn)
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("connect to AMFA DB: %v", err)

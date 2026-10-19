@@ -111,6 +111,24 @@ describe("UserEventsTable", () => {
     expect(errorChip).toBeInTheDocument();
   });
 
+  it("renders a critical chip in the error red, not the info blue", () => {
+    const critical = {
+      ...mockEvents[1],
+      event_id: "event-3",
+      type: "IDENTITY_PROVIDER_LOGIN_ERROR",
+      severity: "critical",
+    };
+    renderWithTheme(
+      <UserEventsTable {...defaultProps} events={[...mockEvents, critical]} />,
+    );
+
+    const chipColor = (label: string) =>
+      getComputedStyle(screen.getByText(label).closest(".MuiChip-root")!).color;
+
+    expect(chipColor("critical")).toBe(chipColor("error"));
+    expect(chipColor("critical")).not.toBe(chipColor("info"));
+  });
+
   it("should call onEventClick when a row is clicked", async () => {
     const user = userEvent.setup();
     renderWithTheme(<UserEventsTable {...defaultProps} />);
@@ -163,5 +181,17 @@ describe("UserEventsTable", () => {
 
     const sources = screen.getAllByText("keycloak");
     expect(sources).toHaveLength(2);
+  });
+
+  it("shows pageSize rows per page", () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      ...mockEvents[0],
+      event_id: `event-${i}`,
+      description: `row ${i}`,
+    }));
+    render(<UserEventsTable {...defaultProps} events={many} pageSize={25} />);
+
+    expect(screen.getByText("row 24")).toBeInTheDocument();
+    expect(screen.queryByText("row 25")).not.toBeInTheDocument();
   });
 });

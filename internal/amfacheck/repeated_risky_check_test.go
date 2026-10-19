@@ -13,7 +13,7 @@ func TestRepeatedRiskyCheck_OneAlertPerUserOverThreshold(t *testing.T) {
 		{UserID: "user-a", Count: 4},
 		{UserID: "user-b", Count: 3},
 	}}
-	c := NewRepeatedRiskyCheck("tenant-1", singleRealm("master"), repo, 3, 24*time.Hour, 2, testLogger{})
+	c := NewRepeatedRiskyCheck("tenant-1", singleRealm("master"), repo, 3, 24*time.Hour, 2, 15*time.Minute, testLogger{})
 
 	alerts, err := c.Execute(context.Background())
 	if err != nil {
@@ -37,16 +37,18 @@ func TestRepeatedRiskyCheck_OneAlertPerUserOverThreshold(t *testing.T) {
 	}
 }
 
-func TestRepeatedRiskyCheck_AlertIDIncludesUTCDate(t *testing.T) {
+// The ID names the condition and nothing else. A date in it made every
+// burst after the first on the same day map onto the first one's alert, which
+// stayed resolved or acknowledged and so never announced the new burst.
+func TestRepeatedRiskyCheck_AlertIDIsOnePerConditionNotPerDay(t *testing.T) {
 	repo := &checkRepoStub{userCounts: []amfa.UserRiskyCount{{UserID: "user-a", Count: 5}}}
-	c := NewRepeatedRiskyCheck("tenant-1", singleRealm("master"), repo, 3, 24*time.Hour, 2, testLogger{})
+	c := NewRepeatedRiskyCheck("tenant-1", singleRealm("master"), repo, 3, 24*time.Hour, 2, 15*time.Minute, testLogger{})
 
 	alerts, err := c.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	day := time.Now().UTC().Format("2006-01-02")
-	want := alertID("amfa-repeated-risky", "tenant-1", "master", "user-a", day)
+	want := alertID("amfa-repeated-risky", "tenant-1", "master", "user-a")
 	if alerts[0].AlertID != want {
 		t.Errorf("AlertID = %q, want %q", alerts[0].AlertID, want)
 	}
@@ -54,7 +56,7 @@ func TestRepeatedRiskyCheck_AlertIDIncludesUTCDate(t *testing.T) {
 
 func TestRepeatedRiskyCheck_NoUsersNoAlerts(t *testing.T) {
 	repo := &checkRepoStub{userCounts: nil}
-	c := NewRepeatedRiskyCheck("tenant-1", singleRealm("master"), repo, 3, 24*time.Hour, 2, testLogger{})
+	c := NewRepeatedRiskyCheck("tenant-1", singleRealm("master"), repo, 3, 24*time.Hour, 2, 15*time.Minute, testLogger{})
 	alerts, err := c.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("Execute: %v", err)

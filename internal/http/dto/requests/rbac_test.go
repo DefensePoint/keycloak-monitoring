@@ -134,14 +134,14 @@ func TestUpdateRole_Validation(t *testing.T) {
 		{
 			name: "valid display_name update",
 			input: UpdateRole{
-				DisplayName: "Updated Display Name",
+				DisplayName: ptr("Updated Display Name"),
 			},
 			wantErr: false,
 		},
 		{
 			name: "display_name too long",
 			input: UpdateRole{
-				DisplayName: strings.Repeat("a", 256),
+				DisplayName: ptr(strings.Repeat("a", 256)),
 			},
 			wantErr:  true,
 			errField: "DisplayName",
@@ -149,14 +149,14 @@ func TestUpdateRole_Validation(t *testing.T) {
 		{
 			name: "valid description update",
 			input: UpdateRole{
-				Description: "Updated description",
+				Description: ptr("Updated description"),
 			},
 			wantErr: false,
 		},
 		{
 			name: "description too long",
 			input: UpdateRole{
-				Description: strings.Repeat("a", 1001),
+				Description: ptr(strings.Repeat("a", 1001)),
 			},
 			wantErr:  true,
 			errField: "Description",
@@ -164,16 +164,31 @@ func TestUpdateRole_Validation(t *testing.T) {
 		{
 			name: "valid permissions update",
 			input: UpdateRole{
-				Permissions: []string{"alerts:read", "alerts:write"},
+				Permissions: ptr([]string{"alerts:read", "alerts:write"}),
+			},
+			wantErr: false,
+		},
+		{
+			name: "display_name sent empty",
+			input: UpdateRole{
+				DisplayName: ptr(""),
+			},
+			wantErr:  true,
+			errField: "DisplayName",
+		},
+		{
+			name: "empty permissions list removes all",
+			input: UpdateRole{
+				Permissions: ptr([]string{}),
 			},
 			wantErr: false,
 		},
 		{
 			name: "valid full update",
 			input: UpdateRole{
-				DisplayName: "Updated Name",
-				Description: "Updated description",
-				Permissions: []string{"alerts:read"},
+				DisplayName: ptr("Updated Name"),
+				Description: ptr("Updated description"),
+				Permissions: ptr([]string{"alerts:read"}),
 			},
 			wantErr: false,
 		},
@@ -371,3 +386,5 @@ func TestCreateTenantPolicy_Validation(t *testing.T) {
 		})
 	}
 }
+
+func ptr[T any](v T) *T { return &v }

@@ -4,25 +4,23 @@
 // KMT_TEST_DATABASE_DSN environment variable; the tests are skipped when
 // unset. Run with:
 //
-//	KMT_TEST_DATABASE_DSN="host=localhost port=5432 dbname=monitoring_test user=monitoring password=monitoring sslmode=disable" \
-//	    go test ./tenant/postgres/... -run 'TestCreateStores|TestUpdateTogglesEnabled'
+//	KMT_TEST_DATABASE_DSN="host=localhost port=55432 dbname=kmt_test user=kmt password=kmt sslmode=disable" \
+//	    go test ./tenant/postgres/...
 //
-// The -run filter is not optional: the sibling purge tests in this package
-// reset a hardcoded database with DROP SCHEMA.
+// These tests deliberately do not skip under -short: they only remove the
+// tenants they create, so a run against a shared database can include them
+// with -short on. The sibling purge tests in this package are the destructive ones, and
+// they skip under -short and read KMT_DESTRUCTIVE_TEST_DATABASE_DSN instead.
 package postgres
 
 import (
 	"context"
 	"fmt"
-	"os"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
 	"gorm.io/gorm"
 
-	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
@@ -30,53 +28,15 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
-// dsnConfig turns a libpq key=value DSN into the config NewClient builds its
-// own DSN from. Nothing here is echoed back to the test log: the DSN carries a
-// password.
-func dsnConfig(t *testing.T, dsn string) *config.DatabaseConfig {
-	t.Helper()
-
-	cfg := &config.DatabaseConfig{MaxConns: 5, MinConns: 1, Timeout: 30 * time.Second}
-	for _, pair := range strings.Fields(dsn) {
-		key, value, ok := strings.Cut(pair, "=")
-		if !ok {
-			continue
-		}
-		switch key {
-		case "host":
-			cfg.Host = value
-		case "port":
-			port, err := strconv.Atoi(value)
-			if err != nil {
-				t.Fatalf("KMT_TEST_DATABASE_DSN has a non-numeric port")
-			}
-			cfg.Port = port
-		case "dbname":
-			cfg.Database = value
-		case "user":
-			cfg.User = value
-		case "password":
-			cfg.Password = value
-		case "sslmode":
-			cfg.SSLMode = value
-		}
-	}
-	return cfg
-}
-
 // newEnabledTestRepo opens a repository against KMT_TEST_DATABASE_DSN, plus
 // the raw handle the assertions read the enabled column through.
 func newEnabledTestRepo(t *testing.T) (tenant.Repository, *gorm.DB) {
 	t.Helper()
 
-	dsn := os.Getenv("KMT_TEST_DATABASE_DSN")
-	if dsn == "" {
-		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
-	}
+	dsn := testdb.DSN(t, "KMT_TEST_DATABASE_DSN")
+	testdb.Lock(t, dsn)
 
-	testdb.ShareDatabase(t, dsn)
-
-	client, err := database.NewClient(dsnConfig(t, dsn), logger.NewNoop())
+	client, err := database.NewClient(testdb.DatabaseConfig(t, dsn), logger.NewNoop())
 	if err != nil {
 		t.Fatalf("failed to open test database: %v", err)
 	}

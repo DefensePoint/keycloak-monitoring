@@ -20,13 +20,19 @@ type Registry struct {
 
 	TenantMonitorUp      *prometheus.GaugeVec
 	TenantMonitorsActive prometheus.Gauge
+	SSOProviderUp        *prometheus.GaugeVec
 
 	PollCycleDuration *prometheus.HistogramVec
 	PollCycleErrors   *prometheus.CounterVec
 
 	EventsCollected   *prometheus.CounterVec
-	AlertsTotal       *prometheus.CounterVec
-	NotificationsSent *prometheus.CounterVec
+	EventWritesFailed *prometheus.CounterVec
+	// EventVisibilityDelay is how long Keycloak events took, at least, to
+	// become visible after their time. Its upper end is what
+	// late_commit_window has to cover.
+	EventVisibilityDelay *prometheus.HistogramVec
+	AlertsTotal          *prometheus.CounterVec
+	NotificationsSent    *prometheus.CounterVec
 
 	MCPRequests         *prometheus.CounterVec
 	MCPToolCalls        *prometheus.CounterVec
@@ -73,6 +79,14 @@ func New() *Registry {
 			Help:      "Number of active tenant monitors.",
 		}),
 
+		// A vector without labels, so the series is absent until SSO sets it
+		// instead of reading 0 on a server with SSO disabled.
+		SSOProviderUp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Name:      "sso_provider_up",
+			Help:      "Whether the OIDC provider for SSO login is connected (1) or not (0). Absent when SSO is disabled.",
+		}, nil),
+
 		PollCycleDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: Namespace,
 			Name:      "poll_cycle_duration_seconds",
@@ -90,6 +104,19 @@ func New() *Registry {
 			Namespace: Namespace,
 			Name:      "events_collected_total",
 			Help:      "Total number of Keycloak events collected.",
+		}, []string{"tenant_id", "realm"}),
+
+		EventWritesFailed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "event_writes_failed_total",
+			Help:      "Total number of polled Keycloak events that could not be stored, by tenant and table.",
+		}, []string{"tenant_id", "table"}),
+
+		EventVisibilityDelay: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Name:      "event_visibility_delay_seconds",
+			Help:      "Least time a Keycloak event took to become visible after its own time, by tenant and realm. Keep its upper end well within late_commit_window.",
+			Buckets:   []float64{1, 5, 15, 30, 60, 120, 180, 240, 300, 450, 600, 900},
 		}, []string{"tenant_id", "realm"}),
 
 		AlertsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -138,9 +165,12 @@ func New() *Registry {
 		m.HTTPRequestsInFlight,
 		m.TenantMonitorUp,
 		m.TenantMonitorsActive,
+		m.SSOProviderUp,
 		m.PollCycleDuration,
 		m.PollCycleErrors,
 		m.EventsCollected,
+		m.EventWritesFailed,
+		m.EventVisibilityDelay,
 		m.AlertsTotal,
 		m.NotificationsSent,
 		m.MCPRequests,

@@ -5,6 +5,7 @@ import (
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/apitoken"
 	apitokenpostgres "github.com/DefensePoint/keycloak-monitoring/internal/apitoken/postgres"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/users"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
@@ -24,8 +25,9 @@ func provideAPITokenRepository(db *database.Client) apitoken.Repository {
 }
 
 // provideAPITokenService creates an apitoken service.
-func provideAPITokenService(repo apitoken.Repository, userRepo users.Repository, log *logger.Logger) apitoken.Service {
-	return apitoken.NewService(repo, userRepo, &apitokenLoggerAdapter{log: log})
+func provideAPITokenService(repo apitoken.Repository, userRepo users.Repository, cfg *config.AppConfig, log *logger.Logger) apitoken.Service {
+	return apitoken.NewService(repo, userRepo, &apitokenLoggerAdapter{log: log},
+		apitoken.WithSSOSignInMaxAge(cfg.MCP.SSOSignInMaxAge))
 }
 
 // apitokenLoggerAdapter adapts *logger.Logger to apitoken.Logger.

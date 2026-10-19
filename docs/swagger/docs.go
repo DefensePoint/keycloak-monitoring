@@ -334,6 +334,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
+                    "409": {
+                        "description": "A role with this name already exists",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -412,7 +418,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Updates an existing role. System roles cannot be modified.",
+                "description": "Updates an existing role. System roles cannot be modified. Fields left out are unchanged; a permissions list replaces the role's permissions, so any not listed are removed.",
                 "consumes": [
                     "application/json"
                 ],
@@ -449,7 +455,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Invalid role ID or request",
+                        "description": "Invalid role ID or request, or an unknown permission",
                         "schema": {
                             "$ref": "#/definitions/dto.ErrorResponse"
                         }
@@ -2107,6 +2113,37 @@ const docTemplate = `{
                         "description": "End time filter",
                         "name": "end_time",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact event type, e.g. \\",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "info",
+                            "warning",
+                            "error",
+                            "critical"
+                        ],
+                        "type": "string",
+                        "description": "Filter by exact severity",
+                        "name": "severity",
+                        "in": "query"
+                    },
+                    {
+                        "minimum": 0,
+                        "type": "integer",
+                        "description": "Minimum AMFA risk level; events without a risk level never match",
+                        "name": "min_risk",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact Keycloak user id",
+                        "name": "user_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2117,6 +2154,12 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorResponse"
+                        }
+                    },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
@@ -2125,6 +2168,77 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenantID}/events/{eventID}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns one of the tenant's events by its event ID, within the caller's allowed realms",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get an event",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "tenantID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Event ID",
+                        "name": "eventID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/domain.Event"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid event ID",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Event not found",
                         "schema": {
                             "$ref": "#/definitions/dto.ErrorResponse"
                         }
@@ -2351,8 +2465,20 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Range start (RFC3339); with end, overrides hours",
+                        "name": "start",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Range end (RFC3339)",
+                        "name": "end",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
-                        "description": "Number of hours to look back (default 1)",
+                        "description": "Number of hours to look back (default 1, max 168)",
                         "name": "hours",
                         "in": "query"
                     }
@@ -2541,8 +2667,20 @@ const docTemplate = `{
                         "required": true
                     },
                     {
+                        "type": "string",
+                        "description": "Range start (RFC3339); with end, overrides hours. At most 7 days before end",
+                        "name": "start",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Range end (RFC3339)",
+                        "name": "end",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
-                        "description": "Number of hours to look back (default 24)",
+                        "description": "Number of hours to look back (default 24, max 168)",
                         "name": "hours",
                         "in": "query"
                     }
@@ -2553,6 +2691,12 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Range longer than 7 days",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
@@ -2719,8 +2863,20 @@ const docTemplate = `{
                         "required": true
                     },
                     {
+                        "type": "string",
+                        "description": "Range start (RFC3339); with end, overrides hours. At most 7 days before end",
+                        "name": "start",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Range end (RFC3339)",
+                        "name": "end",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
-                        "description": "Number of hours to look back (default 24)",
+                        "description": "Number of hours to look back (default 24, max 168)",
                         "name": "hours",
                         "in": "query"
                     }
@@ -2734,7 +2890,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Missing realm parameter",
+                        "description": "Missing realm parameter, or range longer than 7 days",
                         "schema": {
                             "$ref": "#/definitions/dto.ErrorResponse"
                         }
@@ -3470,7 +3626,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Generates a PDF report for a tenant within a date range",
+                "description": "Generates a PDF report for a tenant within a date range. Each section appears only for a caller holding the permission that guards its data elsewhere (alerts:read, metrics:read); the PDF lists any section left out.",
                 "produces": [
                     "application/pdf"
                 ],
@@ -3516,6 +3672,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Neither alerts:read nor metrics:read",
                         "schema": {
                             "$ref": "#/definitions/dto.ErrorResponse"
                         }
@@ -3581,6 +3743,37 @@ const docTemplate = `{
                         "description": "End time filter",
                         "name": "end_time",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact event type, e.g. \\",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "info",
+                            "warning",
+                            "error",
+                            "critical"
+                        ],
+                        "type": "string",
+                        "description": "Filter by exact severity",
+                        "name": "severity",
+                        "in": "query"
+                    },
+                    {
+                        "minimum": 0,
+                        "type": "integer",
+                        "description": "Minimum AMFA risk level; events without a risk level never match",
+                        "name": "min_risk",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact Keycloak user id",
+                        "name": "user_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -3589,6 +3782,12 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorResponse"
                         }
                     },
                     "401": {
@@ -4027,7 +4226,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Updates an existing user. OAuth users can only have their status changed.",
+                "description": "Updates an existing user. OAuth users can only have their status changed. Deactivating, blocking, reactivating or unblocking a user revokes their live API tokens: they stop working immediately, and a reactivated or unblocked user starts with none and issues new ones.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4076,7 +4275,7 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "OAuth users cannot be modified",
+                        "description": "OAuth users cannot be modified, or a non-admin targeted another user who holds a role",
                         "schema": {
                             "$ref": "#/definitions/dto.ErrorResponse"
                         }
@@ -4107,7 +4306,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Deactivates a user by their ID. The account, its roles and its history are kept, and the change is reversible. It takes effect at the next sign-in: an existing session stays valid until it expires (session max_age, 24h by default). API tokens stop working immediately.",
+                "description": "Deactivates a user by their ID. The account, its roles and its history are kept, and the change is reversible. It takes effect at the next sign-in: an existing session stays valid until it expires (session max_age, 24h by default). Deactivating an active user revokes their API tokens: they stop working immediately and are not restored by reactivation.",
                 "produces": [
                     "application/json"
                 ],
@@ -4144,7 +4343,7 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "Forbidden",
+                        "description": "A non-admin targeted another user who holds a role",
                         "schema": {
                             "$ref": "#/definitions/dto.ErrorResponse"
                         }
@@ -4347,14 +4546,41 @@ const docTemplate = `{
         },
         "/auth/logout": {
             "get": {
-                "description": "Clears the user session and logs out",
+                "description": "Logout is POST /auth/logout. GET answers 405 and leaves the session alone.",
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Logout with GET (refused)",
+                "responses": {
+                    "405": {
+                        "description": "Method Not Allowed",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Clears the user session and logs out. Refused when the request comes from a page on another origin (Sec-Fetch-Site, or Origin when the browser sends no Sec-Fetch-Site).",
                 "tags": [
                     "Auth"
                 ],
                 "summary": "Logout",
                 "responses": {
-                    "302": {
-                        "description": "Redirect to home page"
+                    "200": {
+                        "description": "Logged out",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Request from another site",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorResponse"
+                        }
                     },
                     "500": {
                         "description": "Internal Server Error",
@@ -4956,6 +5182,113 @@ const docTemplate = `{
                 "AuthMethodOAuth"
             ]
         },
+        "domain.Event": {
+            "type": "object",
+            "properties": {
+                "amfa_event_id": {
+                    "description": "AMFAEventID is the correlation id shared between a Keycloak login event\n(carried in its details as \"amfa_event_id\") and its AMFA counterpart\n(AMFA's auth_event.id). It is the merge key: the two writers use it to\nconverge a login onto one row regardless of arrival order.",
+                    "type": "string"
+                },
+                "browser": {
+                    "type": "string"
+                },
+                "category": {
+                    "type": "string"
+                },
+                "city": {
+                    "type": "string"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "country": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "device": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "event_id": {
+                    "type": "string"
+                },
+                "final_status": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_vpn": {
+                    "type": "boolean"
+                },
+                "lat": {
+                    "type": "number"
+                },
+                "location": {
+                    "type": "string"
+                },
+                "long": {
+                    "type": "number"
+                },
+                "operating_system": {
+                    "type": "string"
+                },
+                "raw_data": {
+                    "type": "string"
+                },
+                "risk_level": {
+                    "description": "AMFA-specific fields, set only for events that have an AMFA counterpart\n(mirrored or merged from a tenant's Adaptive MFA database); nil otherwise.",
+                    "type": "integer"
+                },
+                "screen_resolution": {
+                    "type": "string"
+                },
+                "severity": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "source_ip": {
+                    "type": "string"
+                },
+                "source_system": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "system_language": {
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "description": "TenantID identifies the monitored Keycloak instance this event came\nfrom. Set by whichever mirror wrote the row; both are per-tenant.",
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
         "domain.KeycloakTenant": {
             "type": "object",
             "properties": {
@@ -5069,6 +5402,10 @@ const docTemplate = `{
                         "type": "integer"
                     }
                 },
+                "OccurrenceStartedAt": {
+                    "description": "OccurrenceStartedAt is when the alert's occurrence this action belongs\nto began. Nil on actions recorded before it was stored.",
+                    "type": "string"
+                },
                 "OperatorEmail": {
                     "type": "string"
                 },
@@ -5170,10 +5507,10 @@ const docTemplate = `{
                     "description": "By severity",
                     "type": "integer"
                 },
-                "high_alerts_handled": {
+                "error_alerts_handled": {
                     "type": "integer"
                 },
-                "low_alerts_handled": {
+                "info_alerts_handled": {
                     "type": "integer"
                 },
                 "max_response_time": {
@@ -5184,9 +5521,6 @@ const docTemplate = `{
                 },
                 "median_response_time": {
                     "type": "number"
-                },
-                "medium_alerts_handled": {
-                    "type": "integer"
                 },
                 "min_response_time": {
                     "type": "integer"
@@ -5216,6 +5550,9 @@ const docTemplate = `{
                 },
                 "total_work_time_seconds": {
                     "description": "Performance indicators",
+                    "type": "integer"
+                },
+                "warning_alerts_handled": {
                     "type": "integer"
                 }
             }
@@ -5325,6 +5662,10 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "integer"
+                },
+                "realms_unrestricted": {
+                    "description": "RealmsUnrestricted reports an allowed_realms column holding no list at\nall, which grants every realm.",
+                    "type": "boolean"
                 },
                 "tenant_id": {
                     "type": "string"
@@ -5576,6 +5917,11 @@ const docTemplate = `{
                     "maxLength": 255,
                     "minLength": 1,
                     "example": "Security Analyst"
+                },
+                "is_active": {
+                    "description": "IsActive creates the role inactive when false; omitted means active.",
+                    "type": "boolean",
+                    "example": true
                 },
                 "name": {
                     "type": "string",
@@ -5847,7 +6193,13 @@ const docTemplate = `{
                 "display_name": {
                     "type": "string",
                     "maxLength": 255,
+                    "minLength": 1,
                     "example": "Updated Display Name"
+                },
+                "is_active": {
+                    "description": "IsActive deactivates or reactivates the role. An inactive role grants\nnothing to its users until it is reactivated.",
+                    "type": "boolean",
+                    "example": false
                 },
                 "permissions": {
                     "type": "array",

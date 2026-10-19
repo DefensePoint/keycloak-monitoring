@@ -122,3 +122,21 @@ func TestNopRecorderSatisfiesInterface(t *testing.T) {
 func TestRegistrySatisfiesRecorder(t *testing.T) {
 	var _ metrics.Recorder = metrics.New()
 }
+
+// A server with SSO disabled must not export sso_provider_up at all: a 0 there
+// would fire the SSO-down alert on every such server.
+func TestSSOProviderUpIsAbsentUntilSet(t *testing.T) {
+	m := metrics.New()
+	if got := testutil.CollectAndCount(m.SSOProviderUp); got != 0 {
+		t.Fatalf("sso_provider_up exported %d series before SSO set it, want 0", got)
+	}
+
+	m.SetSSOProviderUp(false)
+	if got := testutil.ToFloat64(m.SSOProviderUp.WithLabelValues()); got != 0 {
+		t.Fatalf("expected sso_provider_up=0, got %v", got)
+	}
+	m.SetSSOProviderUp(true)
+	if got := testutil.ToFloat64(m.SSOProviderUp.WithLabelValues()); got != 1 {
+		t.Fatalf("expected sso_provider_up=1, got %v", got)
+	}
+}

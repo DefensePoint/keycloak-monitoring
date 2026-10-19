@@ -3,11 +3,13 @@ package configcheck
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	alertspkg "github.com/DefensePoint/keycloak-monitoring/internal/alerts"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
@@ -57,6 +59,7 @@ func (m *mockAlertStore) SaveAlert(ctx context.Context, alert *domain.Alert) err
 	if m.saveError != nil {
 		return m.saveError
 	}
+	alert.UpdatedAt = time.Now()
 	m.alerts[alert.AlertID] = alert
 	return nil
 }
@@ -68,7 +71,28 @@ func (m *mockAlertStore) GetAlertByID(ctx context.Context, tenantID, alertID str
 	if alert, ok := m.alerts[alertID]; ok {
 		return alert, nil
 	}
-	return nil, errors.New("alert not found")
+	// Report a missing alert the way the alerts repository does.
+	return nil, fmt.Errorf("%w: %s", alertspkg.ErrNotFound, alertID)
+}
+
+func (m *mockAlertStore) ResolveAlert(ctx context.Context, tenantID, alertID string) error {
+	alert, ok := m.alerts[alertID]
+	if !ok {
+		return errors.New("alert not found")
+	}
+	alert.Status = domain.AlertStatusResolved
+	return nil
+}
+
+func (m *mockAlertStore) ListOpenAlertsByCheck(ctx context.Context, tenantID, checkType string) ([]*domain.Alert, error) {
+	var open []*domain.Alert
+	for _, alert := range m.alerts {
+		if alert.TenantID == tenantID && alert.CheckType == checkType &&
+			(alert.Status == domain.AlertStatusActive || alert.Status == domain.AlertStatusAcknowled) {
+			open = append(open, alert)
+		}
+	}
+	return open, nil
 }
 
 func TestNewService(t *testing.T) {

@@ -45,7 +45,7 @@ func (m *mockPermissionService) GetUserPolicies(ctx context.Context, userID uint
 	return nil, nil
 }
 
-func (m *mockPermissionService) GetUserRoles(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
+func (m *mockPermissionService) GetEffectiveUserRoles(ctx context.Context, userID uint) ([]*domain.UserRole, error) {
 	if m.getUserRolesFn != nil {
 		return m.getUserRolesFn(ctx, userID)
 	}

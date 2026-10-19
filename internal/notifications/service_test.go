@@ -16,6 +16,7 @@ type mockRepository struct {
 	logs          []*domain.NotificationLog
 	alreadySent   map[string]bool
 	loggedEntries []*domain.NotificationLog
+	alerts        map[string]*domain.Alert
 }
 
 func newMockRepository() *mockRepository {
@@ -23,12 +24,86 @@ func newMockRepository() *mockRepository {
 		logs:          make([]*domain.NotificationLog, 0),
 		alreadySent:   make(map[string]bool),
 		loggedEntries: make([]*domain.NotificationLog, 0),
+		alerts:        make(map[string]*domain.Alert),
 	}
 }
 
-func (m *mockRepository) CheckAlreadySent(ctx context.Context, alertID, channel string) (bool, error) {
+// track stores the alerts the sharing queries read, as the alerts table does
+// for the real repository.
+func (m *mockRepository) track(alerts ...*domain.Alert) {
+	for _, alert := range alerts {
+		m.alerts[alert.AlertID] = alert
+	}
+}
+
+// open returns the tracked alert when its problem still stands.
+func (m *mockRepository) open(alertID string) *domain.Alert {
+	alert := m.alerts[alertID]
+	if alert == nil || alert.Status == domain.AlertStatusResolved || alert.Status == domain.AlertStatusIgnored {
+		return nil
+	}
+	return alert
+}
+
+func (m *mockRepository) CheckAlreadySent(ctx context.Context, tenantID, alertID, channel string) (bool, error) {
 	key := alertID + ":" + channel
 	return m.alreadySent[key], nil
+}
+
+func (m *mockRepository) FindSharedExternalID(ctx context.Context, group notifications.AlertGroup, channel string) (string, error) {
+	for i := len(m.logs) - 1; i >= 0; i-- {
+		log := m.logs[i]
+		if log.Channel != channel || log.Status != "sent" || log.ExternalID == "" {
+			continue
+		}
+		if alert := m.open(log.AlertID); alert != nil && notifications.GroupOf(alert) == group {
+			return log.ExternalID, nil
+		}
+	}
+	return "", nil
+}
+
+func (m *mockRepository) FindHeldExternalID(ctx context.Context, tenantID, channel string, alertIDs []string) (string, string, error) {
+	held := make(map[string]bool, len(alertIDs))
+	for _, id := range alertIDs {
+		held[id] = true
+	}
+	for i := len(m.logs) - 1; i >= 0; i-- {
+		log := m.logs[i]
+		if log.Channel != channel || log.Status != "sent" || log.ExternalID == "" || !held[log.AlertID] {
+			continue
+		}
+		if alert := m.alerts[log.AlertID]; alert != nil && alert.TenantID == tenantID {
+			return log.ExternalID, alert.Title, nil
+		}
+	}
+	return "", "", nil
+}
+
+func (m *mockRepository) CountIgnoredSharingAlerts(ctx context.Context, tenantID, channel, externalID string) (int, error) {
+	ignored := make(map[string]bool)
+	for _, log := range m.logs {
+		if log.Channel != channel || log.Status != "sent" || log.ExternalID != externalID {
+			continue
+		}
+		if alert := m.alerts[log.AlertID]; alert != nil && alert.TenantID == tenantID && alert.Status == domain.AlertStatusIgnored {
+			ignored[log.AlertID] = true
+		}
+	}
+	return len(ignored), nil
+}
+
+func (m *mockRepository) CountSharingAlerts(ctx context.Context, tenantID, channel, externalID, excludeAlertID string) (int, error) {
+	sharing := make(map[string]bool)
+	for _, log := range m.logs {
+		if log.Channel != channel || log.Status != "sent" || log.ExternalID != externalID || log.AlertID == excludeAlertID {
+			continue
+		}
+		if alert := m.open(log.AlertID); alert != nil && alert.TenantID == tenantID {
+			sharing[log.AlertID] = true
+		}
+	}
+	return len(sharing), nil
 }
 
 func (m *mockRepository) GetByAlertAndChannel(ctx context.Context, alertID, channel, status string) (*domain.NotificationLog, error) {
@@ -48,6 +123,34 @@ func (m *mockRepository) GetLogsByAlertID(ctx context.Context, alertID string) (
 		}
 	}
 	return result, nil
+}
+
+// UndeliveredChannels follows the repository: a channel is undelivered while
+// the last send logged for the alert on it failed. It returned nothing, so
+// retries through the mock never resent anything.
+func (m *mockRepository) UndeliveredChannels(_ context.Context, _ string, alertID string) ([]string, error) {
+	last := map[string]string{}
+	var order []string
+	for _, log := range m.logs {
+		if log.AlertID != alertID {
+			continue
+		}
+		if _, seen := last[log.Channel]; !seen {
+			order = append(order, log.Channel)
+		}
+		last[log.Channel] = log.Status
+	}
+	var channels []string
+	for _, channel := range order {
+		if last[channel] == "failed" {
+			channels = append(channels, channel)
+		}
+	}
+	return channels, nil
+}
+
+func (m *mockRepository) ListUndelivered(context.Context, []string) ([]notifications.AlertKey, error) {
+	return nil, nil
 }
 
 func (m *mockRepository) GetFailedByAlertID(ctx context.Context, alertID string) ([]*domain.NotificationLog, error) {
@@ -152,7 +255,7 @@ func TestCheckAlreadySent(t *testing.T) {
 	svc := notifications.NewService(repo)
 
 	// Initially not sent
-	sent, err := svc.CheckAlreadySent(context.Background(), "alert-001", "slack")
+	sent, err := svc.CheckAlreadySent(context.Background(), "tenant-1", "alert-001", "slack")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -167,7 +270,7 @@ func TestCheckAlreadySent(t *testing.T) {
 	}
 
 	// Now should be marked as sent
-	sent, err = svc.CheckAlreadySent(context.Background(), "alert-001", "slack")
+	sent, err = svc.CheckAlreadySent(context.Background(), "tenant-1", "alert-001", "slack")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

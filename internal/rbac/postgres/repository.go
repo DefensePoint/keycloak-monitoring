@@ -4,10 +4,13 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
@@ -32,7 +35,22 @@ func (r *RoleRepository) CreateRole(ctx context.Context, role *domain.Role) erro
 		IsSystem:    role.IsSystem,
 		IsActive:    role.IsActive,
 	}
-	if err := r.db.DB().WithContext(ctx).Create(dbRole).Error; err != nil {
+	err := r.db.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(dbRole).Error; err != nil {
+			return err
+		}
+		if role.IsActive {
+			return nil
+		}
+		// GORM inserts the default:true tag in place of a false is_active.
+		dbRole.IsActive = false
+		return tx.Model(dbRole).UpdateColumn("is_active", false).Error
+	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return rbac.ErrRoleNameTaken
+	}
+	if err != nil {
 		return err
 	}
 	role.ID = dbRole.ID
@@ -83,8 +101,16 @@ func (r *RoleRepository) UpdateRole(ctx context.Context, role *domain.Role) erro
 	}).Error
 }
 
+// DeleteRole removes the role's user assignments and soft-deletes the role.
+// There is no restore path, so leaving the assignments would only show them
+// as blank roles on users.
 func (r *RoleRepository) DeleteRole(ctx context.Context, roleID uint) error {
-	return r.db.DB().WithContext(ctx).Delete(&database.Role{}, roleID).Error
+	return r.db.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("role_id = ?", roleID).Delete(&database.UserRole{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&database.Role{}, roleID).Error
+	})
 }
 
 func (r *RoleRepository) GetRoleWithPermissions(ctx context.Context, roleID uint) (*domain.Role, error) {
@@ -131,6 +157,36 @@ func (r *RoleRepository) RemovePermissionsFromRole(ctx context.Context, roleID u
 		return err
 	}
 	return r.db.DB().WithContext(ctx).Model(&dbRole).Association("Permissions").Delete(&permissions)
+}
+
+// SetRolePermissions replaces the role's permissions with permissionIDs. The
+// role row is locked so two concurrent replacements cannot interleave and
+// leave the union of both lists.
+func (r *RoleRepository) SetRolePermissions(ctx context.Context, roleID uint, permissionIDs []uint) error {
+	return r.db.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var dbRole database.Role
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&dbRole, roleID).Error; err != nil {
+			return err
+		}
+		drop := tx.Where("role_id = ?", roleID)
+		if len(permissionIDs) > 0 {
+			drop = drop.Where("permission_id NOT IN ?", permissionIDs)
+		}
+		if err := drop.Delete(&database.RolePermission{}).Error; err != nil {
+			return err
+		}
+		if len(permissionIDs) == 0 {
+			return nil
+		}
+		rows := make([]database.RolePermission, 0, len(permissionIDs))
+		for _, id := range permissionIDs {
+			rows = append(rows, database.RolePermission{RoleID: roleID, PermissionID: id})
+		}
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "role_id"}, {Name: "permission_id"}},
+			DoNothing: true,
+		}).Create(&rows).Error
+	})
 }
 
 // PermissionRepository implements rbac.PermissionRepository.
@@ -277,6 +333,7 @@ func (r *UserRoleRepository) GetUserPermissions(ctx context.Context, userID uint
 		SELECT DISTINCT p.name FROM permissions p
 		INNER JOIN role_permissions rp ON p.id = rp.permission_id
 		INNER JOIN user_roles ur ON rp.role_id = ur.role_id
+		INNER JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL AND r.is_active
 		WHERE ur.user_id = ? AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
 	`
 	args := []interface{}{userID}
@@ -302,6 +359,26 @@ func (r *UserRoleRepository) HasPermission(ctx context.Context, userID uint, per
 		}
 	}
 	return false, nil
+}
+
+// HasGlobalPermission counts only grants whose tenant_id is NULL. With a nil
+// tenant, GetUserPermissions drops the tenant filter, so a grant for one
+// tenant would otherwise satisfy a check on a platform-wide resource.
+func (r *UserRoleRepository) HasGlobalPermission(ctx context.Context, userID uint, permission string) (bool, error) {
+	var found bool
+	err := r.db.DB().WithContext(ctx).Raw(`
+		SELECT EXISTS (
+			SELECT 1 FROM permissions p
+			INNER JOIN role_permissions rp ON p.id = rp.permission_id
+			INNER JOIN user_roles ur ON rp.role_id = ur.role_id
+			INNER JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL AND r.is_active
+			WHERE ur.user_id = ? AND p.name = ? AND ur.tenant_id IS NULL
+			  AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+		)`, userID, permission).Scan(&found).Error
+	if err != nil {
+		return false, err
+	}
+	return found, nil
 }
 
 func (r *UserRoleRepository) GetUsersWithRole(ctx context.Context, roleID uint) ([]*domain.User, error) {

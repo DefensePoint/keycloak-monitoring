@@ -37,6 +37,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -46,15 +47,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog"
 	gormpg "gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/auth"
-	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/testdb"
+	"github.com/DefensePoint/keycloak-monitoring/internal/users"
 	userspg "github.com/DefensePoint/keycloak-monitoring/internal/users/postgres"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
@@ -278,7 +279,7 @@ func newBootedClient(t *testing.T, dsn string) (*database.Client, *gorm.DB) {
 	if err := raw.Exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public").Error; err != nil {
 		t.Fatalf("reset schema: %v", err)
 	}
-	c, err := database.NewClient(dsnConfig(t, dsn), logger.NewNoop())
+	c, err := database.NewClient(testdb.DatabaseConfig(t, dsn), logger.NewNoop())
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -287,23 +288,6 @@ func newBootedClient(t *testing.T, dsn string) (*database.Client, *gorm.DB) {
 		t.Fatalf("reconnect: %v", err)
 	}
 	return c, after
-}
-
-func dsnConfig(t *testing.T, dsn string) *config.DatabaseConfig {
-	t.Helper()
-	parsed, err := pgconn.ParseConfig(dsn)
-	if err != nil {
-		t.Fatalf("parse KMT_AUTH_E2E_DATABASE_DSN: %v", err)
-	}
-	sslMode := "require"
-	if parsed.TLSConfig == nil {
-		sslMode = "disable"
-	}
-	return &config.DatabaseConfig{
-		Host: parsed.Host, Port: int(parsed.Port), Database: parsed.Database,
-		User: parsed.User, Password: parsed.Password, SSLMode: sslMode,
-		MaxConns: 5, MinConns: 1, Timeout: 30 * time.Second,
-	}
 }
 
 func envOr(key, fallback string) string {
@@ -445,7 +429,7 @@ func TestAuthOIDCE2E_MigrationClearsStaleRowsOnBoot(t *testing.T) {
 	}
 
 	// Second boot against the same schema, which is what a restart does.
-	if _, err := database.NewClient(dsnConfig(t, dsn), logger.NewNoop()); err != nil {
+	if _, err := database.NewClient(testdb.DatabaseConfig(t, dsn), logger.NewNoop()); err != nil {
 		t.Fatalf("second NewClient: %v", err)
 	}
 
@@ -602,7 +586,7 @@ func TestAuthOIDCE2E_BootRefusesUnsafeUsernameIndex(t *testing.T) {
 		}
 	}
 
-	_, err := database.NewClient(dsnConfig(t, dsn), logger.NewNoop())
+	_, err := database.NewClient(testdb.DatabaseConfig(t, dsn), logger.NewNoop())
 	if err == nil {
 		t.Fatal("the platform started with nothing enforcing username uniqueness")
 	}
@@ -805,8 +789,10 @@ func TestAuthOIDCE2E_ARebuiltRealmKeepsTheSameAccount(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewOIDCProvider: %v", err)
 		}
+		// Linking by verified email is what an administrator switches on
+		// for a planned rebuild; it is off by default.
 		return auth.NewService(provider, auth.NewMemorySessionStore(time.Hour),
-			userspg.NewRepository(db), logger.NewNoop(), &auth.Config{})
+			userspg.NewRepository(db, userspg.WithLinkByVerifiedEmail(true)), logger.NewNoop(), &auth.Config{})
 	}
 
 	u := e2eUsers[0] // the verified one; an unverified address must never link
@@ -840,6 +826,124 @@ func TestAuthOIDCE2E_ARebuiltRealmKeepsTheSameAccount(t *testing.T) {
 	if n != 1 {
 		t.Errorf("expected one account for %s, found %d", u.email, n)
 	}
+}
+
+// signInWith signs username in through a service backed by repo.
+func signInWith(t *testing.T, ctx context.Context, kcURL string, repo users.Repository, username string) (*domain.User, error) {
+	t.Helper()
+	svc := auth.NewService(mustProvider(t, ctx, kcURL), auth.NewMemorySessionStore(time.Hour),
+		repo, logger.NewNoop(), &auth.Config{})
+	return svc.FindOrCreateUser(ctx, mustVerify(t, ctx, mustProvider(t, ctx, kcURL), idTokenFor(t, kcURL, username)))
+}
+
+// requireEmailInUseRefusal fails unless err is the 401 refusal for an address
+// another account holds.
+func requireEmailInUseRefusal(t *testing.T, err error) {
+	t.Helper()
+	var authErr *auth.AuthError
+	if !errors.As(err, &authErr) || authErr.Code != auth.ErrCodeUnauthorized {
+		t.Fatalf("want an unauthorized refusal, got %v", err)
+	}
+	if !errors.Is(err, users.ErrEmailInUse) {
+		t.Fatalf("refused, but not because the address is in use: %v", err)
+	}
+}
+
+// TestAuthOIDCE2E_ARebuiltRealmIsRefusedWhileLinkingIsOff is the default: a
+// rebuild issues new subjects, and without an administrator switching linking
+// on, the returning person is refused by name rather than given the account on
+// the strength of the address alone.
+func TestAuthOIDCE2E_ARebuiltRealmIsRefusedWhileLinkingIsOff(t *testing.T) {
+	kcURL, dsn := e2eEnv(t)
+	ctx := context.Background()
+
+	admin := newKCAdmin(t, kcURL)
+	admin.provisionRealm(t)
+	_, db := newBootedClient(t, dsn)
+	repo := userspg.NewRepository(db)
+
+	u := e2eUsers[0]
+	before, err := signInWith(t, ctx, kcURL, repo, u.username)
+	if err != nil {
+		t.Fatalf("first sign-in: %v", err)
+	}
+
+	admin.provisionRealm(t)
+	_, err = signInWith(t, ctx, kcURL, repo, u.username)
+	requireEmailInUseRefusal(t, err)
+
+	var stored database.User
+	if err := db.Where("id = ?", before.ID).First(&stored).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if stored.Subject != before.Subject {
+		t.Errorf("the account's subject changed from %q to %q with linking off", before.Subject, stored.Subject)
+	}
+}
+
+// TestAuthOIDCE2E_ASecondIdentityWithTheSameVerifiedEmail is the takeover
+// itself, with an identity Keycloak really issued: a realm allowing duplicate
+// emails holds two users with the same verified address, and the second must
+// not become the first one's account.
+func TestAuthOIDCE2E_ASecondIdentityWithTheSameVerifiedEmail(t *testing.T) {
+	kcURL, dsn := e2eEnv(t)
+	ctx := context.Background()
+
+	admin := newKCAdmin(t, kcURL)
+	admin.provisionRealm(t)
+	// Keycloak only accepts duplicate emails with email login switched off.
+	if code, body := admin.do(http.MethodPut, "/admin/realms/"+e2eRealm, map[string]interface{}{
+		"duplicateEmailsAllowed": true, "loginWithEmailAllowed": false, "registrationEmailAsUsername": false,
+	}); code >= 300 {
+		t.Fatalf("allow duplicate emails (HTTP %d): %s", code, string(body))
+	}
+	victim := e2eUsers[0]
+	const intruder = "e2e-intruder"
+	if code, body := admin.do(http.MethodPost, "/admin/realms/"+e2eRealm+"/users", map[string]interface{}{
+		"username": intruder, "email": victim.email, "emailVerified": true, "enabled": true,
+		"firstName": "E2E", "lastName": intruder, "requiredActions": []string{},
+		"credentials": []map[string]interface{}{
+			{"type": "password", "value": e2eUserPassword, "temporary": false},
+		},
+	}); code != http.StatusCreated {
+		t.Fatalf("create %s (HTTP %d): %s", intruder, code, string(body))
+	}
+
+	_, db := newBootedClient(t, dsn)
+
+	owner, err := signInWith(t, ctx, kcURL, userspg.NewRepository(db), victim.username)
+	if err != nil {
+		t.Fatalf("the account holder's sign-in: %v", err)
+	}
+	if claims := rawClaims(t, idTokenFor(t, kcURL, intruder)); claims["email"] != victim.email || claims["email_verified"] != true {
+		t.Fatalf("Keycloak did not issue the intruder the victim's verified address, so this test proves nothing: %v", claims)
+	}
+
+	t.Run("refused while linking is off", func(t *testing.T) {
+		_, err := signInWith(t, ctx, kcURL, userspg.NewRepository(db), intruder)
+		requireEmailInUseRefusal(t, err)
+
+		var stored database.User
+		if err := db.Where("id = ?", owner.ID).First(&stored).Error; err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+		if stored.Subject != owner.Subject {
+			t.Errorf("the account was taken over: subject %q is now %q", owner.Subject, stored.Subject)
+		}
+		if again, err := signInWith(t, ctx, kcURL, userspg.NewRepository(db), victim.username); err != nil || again.ID != owner.ID {
+			t.Errorf("the account holder could not sign in afterwards: %v, %v", again, err)
+		}
+	})
+
+	// Why it is off by default: with linking on, nothing in the login tells
+	// this apart from a rebuild, and the intruder is handed the account.
+	t.Run("taken over while linking is on", func(t *testing.T) {
+		got, err := signInWith(t, ctx, kcURL, userspg.NewRepository(db, userspg.WithLinkByVerifiedEmail(true)), intruder)
+		if err != nil || got.ID != owner.ID {
+			t.Fatalf("expected linking to hand the intruder account %d (the risk the setting documents), got %v, %v",
+				owner.ID, got, err)
+		}
+	})
 }
 
 func mustProvider(t *testing.T, ctx context.Context, kcURL string) *auth.OIDCProvider {

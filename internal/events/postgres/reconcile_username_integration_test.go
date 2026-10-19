@@ -30,7 +30,8 @@ func TestReconcileAMFAMerges_CopiesTheNameOntoAKeycloakTwinThatHasNone(t *testin
 	// A Keycloak row as the monitor writes one for a token event: a user id and
 	// nothing to call them.
 	if err := repo.Save(ctx, &domain.Event{
-		EventID: kcID, Type: "REFRESH_TOKEN", Category: "authentication",
+		TenantID: fixtureTenant,
+		EventID:  kcID, Type: "REFRESH_TOKEN", Category: "authentication",
 		Severity: "info", Source: "keycloak:test-realm", SourceSystem: "keycloak",
 		Status: "processed", Timestamp: now, AMFAEventID: &corr,
 		UserID: "11111111-2222-3333-4444-555555555555",
@@ -39,7 +40,8 @@ func TestReconcileAMFAMerges_CopiesTheNameOntoAKeycloakTwinThatHasNone(t *testin
 	}
 
 	if err := repo.Save(ctx, &domain.Event{
-		EventID: amfaID, Type: "LOGIN", Category: "authentication",
+		TenantID: fixtureTenant,
+		EventID:  amfaID, Type: "LOGIN", Category: "authentication",
 		Severity: "info", Source: "amfa:test-realm", SourceSystem: "amfa",
 		Status: "processed", Timestamp: now, AMFAEventID: &corr,
 		UserID:   "11111111-2222-3333-4444-555555555555",
@@ -80,7 +82,8 @@ func TestReconcileAMFAMerges_KeycloakNameWinsOverAmfa(t *testing.T) {
 	cleanupEventID(t, db, amfaID)
 
 	if err := repo.Save(ctx, &domain.Event{
-		EventID: kcID, Type: "LOGIN", Category: "authentication",
+		TenantID: fixtureTenant,
+		EventID:  kcID, Type: "LOGIN", Category: "authentication",
 		Severity: "info", Source: "keycloak:test-realm", SourceSystem: "keycloak",
 		Status: "processed", Timestamp: now, AMFAEventID: &corr,
 		UserID: "aaaa", Username: "from-keycloak", Email: "kc@example.invalid",
@@ -88,7 +91,8 @@ func TestReconcileAMFAMerges_KeycloakNameWinsOverAmfa(t *testing.T) {
 		t.Fatalf("save keycloak event: %v", err)
 	}
 	if err := repo.Save(ctx, &domain.Event{
-		EventID: amfaID, Type: "LOGIN", Category: "authentication",
+		TenantID: fixtureTenant,
+		EventID:  amfaID, Type: "LOGIN", Category: "authentication",
 		Severity: "info", Source: "amfa:test-realm", SourceSystem: "amfa",
 		Status: "processed", Timestamp: now, AMFAEventID: &corr,
 		UserID: "aaaa", Username: "from-amfa", Email: "amfa@example.invalid",

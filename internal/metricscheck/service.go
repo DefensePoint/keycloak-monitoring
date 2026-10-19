@@ -3,9 +3,11 @@ package metricscheck
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
+	alertspkg "github.com/DefensePoint/keycloak-monitoring/internal/alerts"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/lifecycle"
 )
@@ -138,12 +140,24 @@ func (s *service) executeCheck(ctx context.Context, check Checker) error {
 	// Process detected alerts
 	newAlerts := 0
 	updatedAlerts := 0
+	lookupFailed := 0
 
 	now := time.Now()
 	for _, alert := range alerts {
 		// Check if alert already exists
 		existing, err := s.alertStore.GetAlertByID(ctx, alert.TenantID, alert.AlertID)
-		isNewAlert := err != nil || existing == nil
+		if err != nil && !errors.Is(err, alertspkg.ErrNotFound) {
+			// A failed read says nothing about whether the alert exists.
+			// Treating it as new would save it as a fresh active alert, which
+			// reactivates an acknowledged or ignored one and clears its
+			// acknowledgment, so leave it alone this cycle; the next run looks
+			// it up again.
+			s.logger.Error("Failed to look up existing alert; skipping it this cycle",
+				"alert_id", alert.AlertID, "error", err.Error())
+			lookupFailed++
+			continue
+		}
+		isNewAlert := existing == nil
 
 		if isNewAlert {
 			alert.FirstDetected = now
@@ -165,6 +179,12 @@ func (s *service) executeCheck(ctx context.Context, check Checker) error {
 			shouldNotify = true
 			notificationReason = "new alert"
 		} else if existing.Status == domain.AlertStatusActive && existing.AcknowledgedAt == nil {
+			// While the alert stays active and unacknowledged, ask for a
+			// notification again each hour. The notification service sends
+			// each channel one notification per occurrence and counts only
+			// successful sends, so a channel that already received this one
+			// skips the request, and a channel whose delivery failed gets it
+			// now: this is the only retry a failed delivery has.
 			lastNotifiedAt := existing.UpdatedAt
 			if existing.Metadata != "" {
 				var meta map[string]interface{}
@@ -184,12 +204,18 @@ func (s *service) executeCheck(ctx context.Context, check Checker) error {
 		}
 
 		// Update metadata with last notification time
-		if shouldNotify && alert.Metadata != "" {
-			var meta map[string]interface{}
-			if err := json.Unmarshal([]byte(alert.Metadata), &meta); err == nil {
+		// Record the notification even on an alert with no metadata yet: the
+		// re-notification check reads last_notified_at, and without it falls
+		// back to updated_at, which every save of a re-detection moves.
+		if shouldNotify {
+			meta := map[string]interface{}{}
+			if alert.Metadata == "" || json.Unmarshal([]byte(alert.Metadata), &meta) == nil {
+				if meta == nil {
+					meta = map[string]interface{}{}
+				}
 				meta["last_notified_at"] = now.Format(time.RFC3339)
-				if metadataBytes, err := json.Marshal(meta); err == nil {
-					alert.Metadata = string(metadataBytes)
+				if b, merr := json.Marshal(meta); merr == nil {
+					alert.Metadata = string(b)
 				}
 			}
 		}
@@ -208,7 +234,7 @@ func (s *service) executeCheck(ctx context.Context, check Checker) error {
 					"reason", notificationReason,
 					"error", err)
 			} else {
-				s.logger.Debug("Sent notification",
+				s.logger.Debug("Requested notification; the notification service logs each channel's outcome",
 					"alert_id", alert.AlertID,
 					"reason", notificationReason)
 			}
@@ -220,6 +246,7 @@ func (s *service) executeCheck(ctx context.Context, check Checker) error {
 		"check_type", check.GetCheckType(),
 		"new_alerts", newAlerts,
 		"updated_alerts", updatedAlerts,
+		"lookup_failed_alerts", lookupFailed,
 		"duration_ms", duration.Milliseconds())
 
 	return nil

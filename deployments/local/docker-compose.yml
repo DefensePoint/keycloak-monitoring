@@ -1,7 +1,9 @@
 # Docker Compose for local development and testing
 # Includes TWO Keycloak instances to simulate multi-tenant monitoring
 #
-# Usage:
+# Usage (from the repository root; make docker-up checks both files first):
+#   cp config.yaml.example config.yaml
+#   cp .env.example .env    # then set MONITORING_AUTH_SIMPLE_DEFAULT_PASS
 #   docker compose -f deployments/local/docker-compose.yml up -d
 #   docker compose -f deployments/local/docker-compose.yml up -d --build
 #
@@ -23,7 +25,7 @@ services:
   # DATABASE - TimescaleDB for the monitoring platform
   # ==========================================================================
   postgres:
-    image: timescale/timescaledb:latest-pg16
+    image: timescale/timescaledb:2.30.2-pg16@sha256:6f139d56042989bd35f50ba5986e492cd32e35cc6778c50be2659add298dc09f
     container_name: kmt-postgres
     ports:
       - "5433:5432"
@@ -61,7 +63,7 @@ services:
   # KEYCLOAK 1 - First tenant (Production simulation)
   # ==========================================================================
   keycloak-db-1:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     container_name: kmt-keycloak-db-1
     profiles: ["bundled-kc"]
     environment:
@@ -80,7 +82,7 @@ services:
       retries: 5
 
   keycloak-1:
-    image: quay.io/keycloak/keycloak:26.7
+    image: quay.io/keycloak/keycloak:26.7.5@sha256:37dbaf6f0722c9ec246335f36e1ef8b2e6cb960f7c27e0d8c615121a3d475a85
     container_name: kmt-keycloak-1
     profiles: ["bundled-kc"]
     ports:
@@ -114,7 +116,7 @@ services:
   # KEYCLOAK 2 - Second tenant (Staging simulation)
   # ==========================================================================
   keycloak-db-2:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     container_name: kmt-keycloak-db-2
     profiles: ["bundled-kc"]
     environment:
@@ -133,7 +135,7 @@ services:
       retries: 5
 
   keycloak-2:
-    image: quay.io/keycloak/keycloak:26.7
+    image: quay.io/keycloak/keycloak:26.7.5@sha256:37dbaf6f0722c9ec246335f36e1ef8b2e6cb960f7c27e0d8c615121a3d475a85
     container_name: kmt-keycloak-2
     profiles: ["bundled-kc"]
     ports:
@@ -179,17 +181,25 @@ services:
     env_file:
       - ../../.env
     environment:
-      DATABASE_HOST: postgres
-      DATABASE_PORT: 5432
-      DATABASE_USER: monitoring
-      DATABASE_PASSWORD: monitoring_password
-      DATABASE_NAME: monitoring
+      # config.yaml has no database password; this stack's Postgres uses the
+      # development one, and has no TLS.
+      MONITORING_DATABASE_PASSWORD: monitoring_password
+      MONITORING_DATABASE_SSL_MODE: disable
       LOG_LEVEL: debug
     volumes:
       - ../../config.yaml:/app/config.yaml:ro
     networks:
       - kmt-network
     restart: unless-stopped
+    # Ready only once the server answers with its database reachable, so
+    # compose up --wait, which the demo uses, fails on a server that cannot
+    # start instead of reporting a restart loop as healthy.
+    healthcheck:
+      test: ["CMD", "/app/kmt", "-config", "/app/config.yaml", "-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
@@ -211,6 +221,9 @@ services:
       - "127.0.0.1:7889:7889"
     env_file:
       - ../../.env
+    environment:
+      MONITORING_DATABASE_SSL_MODE: disable
+      MONITORING_MCP_DATABASE_SSL_MODE: disable
     volumes:
       - ../../config.yaml:/app/config.yaml:ro
     networks:

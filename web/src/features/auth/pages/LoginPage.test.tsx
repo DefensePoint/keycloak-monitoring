@@ -61,6 +61,33 @@ describe("LoginPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("says the session expired when it did", () => {
+    vi.mocked(useAuth).mockReturnValue({
+      authConfig: {
+        simple_enabled: true,
+        oauth2_enabled: false,
+        auth_required: true,
+      },
+      sessionExpired: true,
+      loginSimple: mockLoginSimple,
+      loginOAuth2: mockLoginOAuth2,
+      user: null,
+      isAuthenticated: false,
+      isLoading: false,
+      logout: vi.fn(),
+      refreshUser: vi.fn(),
+      hasPermission: vi.fn().mockReturnValue(false),
+      hasAnyPermission: vi.fn().mockReturnValue(false),
+      hasRole: vi.fn().mockReturnValue(false),
+      isAdmin: vi.fn().mockReturnValue(false),
+      hasAccessToTenant: vi.fn().mockReturnValue(false),
+    });
+
+    render(<LoginPage />);
+
+    expect(screen.getByText(/your session has expired/i)).toBeInTheDocument();
+  });
+
   it("should render OAuth2 button when OAuth2 is enabled", () => {
     vi.mocked(useAuth).mockReturnValue({
       authConfig: {

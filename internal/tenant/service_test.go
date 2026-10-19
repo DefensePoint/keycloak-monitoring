@@ -3,6 +3,7 @@ package tenant
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -22,7 +23,6 @@ type mockRepository struct {
 	deleteFn        func(ctx context.Context, tenantID string) error
 	updateHealthFn  func(ctx context.Context, tenantID, status, message string) error
 	updateErrorFn   func(ctx context.Context, tenantID, errorMsg string) error
-	unsetDefaultFn  func(ctx context.Context) error
 }
 
 func (m *mockRepository) GetByID(ctx context.Context, id uint) (*domain.KeycloakTenant, error) {
@@ -91,13 +91,6 @@ func (m *mockRepository) UpdateHealth(ctx context.Context, tenantID, status, mes
 func (m *mockRepository) UpdateError(ctx context.Context, tenantID, errorMsg string) error {
 	if m.updateErrorFn != nil {
 		return m.updateErrorFn(ctx, tenantID, errorMsg)
-	}
-	return nil
-}
-
-func (m *mockRepository) UnsetDefault(ctx context.Context) error {
-	if m.unsetDefaultFn != nil {
-		return m.unsetDefaultFn(ctx)
 	}
 	return nil
 }
@@ -792,6 +785,335 @@ func TestUpdateTenant_AmfaLookbackAndTimeoutSurviveAnUnrelatedEdit(t *testing.T)
 	}
 }
 
+// cachedTenant is the tenant the update tests start from.
+func cachedTenant() *domain.KeycloakTenant {
+	return &domain.KeycloakTenant{
+		TenantID:     "tenant-1",
+		Name:         "Original Name",
+		Enabled:      true,
+		ClientID:     "monitoring-service",
+		ClientSecret: "stored-secret",
+	}
+}
+
+// newUpdateTestService wires a service whose repository answers Update with
+// updateFn and never finds a tenant of its own, so every read is served from
+// the cache the test populates.
+func newUpdateTestService(updateFn func(ctx context.Context, tenant *domain.KeycloakTenant) error, cached ...*domain.KeycloakTenant) (Service, <-chan Event) {
+	repo := &mockRepository{
+		updateFn: updateFn,
+		getByTenantIDFn: func(ctx context.Context, tenantID string) (*domain.KeycloakTenant, error) {
+			return nil, errors.New("not found")
+		},
+	}
+	svc := NewService(repo)
+	for _, t := range cached {
+		svc.(*service).cache.Store(t.TenantID, t)
+	}
+
+	events := make(chan Event, 8)
+	svc.RegisterCallback(func(event Event, _ *domain.KeycloakTenant) { events <- event })
+	return svc, events
+}
+
+// expectNoEvent fails if a tenant-changed event arrives: the monitors must not
+// be restarted for a change the database never took.
+func expectNoEvent(t *testing.T, events <-chan Event) {
+	t.Helper()
+
+	select {
+	case event := <-events:
+		t.Errorf("an update that did not happen fired a %q event", event)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestUpdateTenant_FailedSaveLeavesTheCachedTenantAsStored(t *testing.T) {
+	svc, events := newUpdateTestService(
+		func(ctx context.Context, tenant *domain.KeycloakTenant) error {
+			return errors.New("database save failed")
+		},
+		cachedTenant(),
+	)
+	ctx := context.Background()
+
+	if _, err := svc.UpdateTenant(ctx, "tenant-1", &UpdateRequest{
+		Name:    strPtr("Renamed"),
+		Enabled: boolPtr(false),
+	}); err == nil {
+		t.Fatal("UpdateTenant() returned no error although the save failed")
+	}
+
+	cached, err := svc.GetTenant(ctx, "tenant-1")
+	if err != nil {
+		t.Fatalf("GetTenant() error = %v", err)
+	}
+	if cached.Name != "Original Name" {
+		t.Errorf("cached name = %q after a failed save, want the stored %q", cached.Name, "Original Name")
+	}
+	if !cached.Enabled {
+		t.Error("the tenant is cached as disabled after a failed save; the database still has it enabled")
+	}
+
+	enabled, err := svc.ListEnabledTenants(ctx)
+	if err != nil {
+		t.Fatalf("ListEnabledTenants() error = %v", err)
+	}
+	if len(enabled) != 1 {
+		t.Errorf("enabled tenants = %d after a failed save, want 1", len(enabled))
+	}
+
+	expectNoEvent(t, events)
+}
+
+func TestUpdateTenant_RejectedUpdateLeavesTheCachedTenantAsStored(t *testing.T) {
+	saves := 0
+	svc, events := newUpdateTestService(
+		func(ctx context.Context, tenant *domain.KeycloakTenant) error {
+			saves++
+			return nil
+		},
+		cachedTenant(),
+	)
+	ctx := context.Background()
+
+	if _, err := svc.UpdateTenant(ctx, "tenant-1", &UpdateRequest{ClientID: strPtr("")}); err == nil {
+		t.Fatal("UpdateTenant() accepted an empty client_id")
+	}
+	if saves != 0 {
+		t.Errorf("rejected update reached the repository %d times, want 0", saves)
+	}
+
+	cached, err := svc.GetTenant(ctx, "tenant-1")
+	if err != nil {
+		t.Fatalf("GetTenant() error = %v", err)
+	}
+	if cached.ClientID != "monitoring-service" {
+		t.Errorf("cached client_id = %q after a rejected update, want the stored %q", cached.ClientID, "monitoring-service")
+	}
+
+	expectNoEvent(t, events)
+}
+
+func TestUpdateTenant_MakingATenantDefaultClearsTheOtherCachedDefault(t *testing.T) {
+	previous := cachedTenant()
+	previous.IsDefault = true
+	next := cachedTenant()
+	next.TenantID = "tenant-2"
+
+	svc, _ := newUpdateTestService(nil, previous, next)
+	ctx := context.Background()
+
+	updated, err := svc.UpdateTenant(ctx, "tenant-2", &UpdateRequest{IsDefault: boolPtr(true)})
+	if err != nil {
+		t.Fatalf("UpdateTenant() error = %v", err)
+	}
+	if !updated.IsDefault {
+		t.Error("the updated tenant is not the default")
+	}
+
+	cached, err := svc.GetTenant(ctx, "tenant-1")
+	if err != nil {
+		t.Fatalf("GetTenant() error = %v", err)
+	}
+	if cached.IsDefault {
+		t.Error("the previous default is still cached as default, so two tenants are default until the next restart")
+	}
+}
+
+func TestUpdateTenant_IsNotVisibleBeforeTheSaveReturns(t *testing.T) {
+	var svc Service
+	var duringSave *domain.KeycloakTenant
+
+	svc, _ = newUpdateTestService(
+		func(ctx context.Context, tenant *domain.KeycloakTenant) error {
+			duringSave, _ = svc.GetTenant(ctx, "tenant-1")
+			return nil
+		},
+		cachedTenant(),
+	)
+	ctx := context.Background()
+
+	held, err := svc.GetTenant(ctx, "tenant-1")
+	if err != nil {
+		t.Fatalf("GetTenant() error = %v", err)
+	}
+
+	if _, err := svc.UpdateTenant(ctx, "tenant-1", &UpdateRequest{Name: strPtr("Renamed")}); err != nil {
+		t.Fatalf("UpdateTenant() error = %v", err)
+	}
+
+	if duringSave == nil {
+		t.Fatal("the repository was never asked to save")
+	}
+	if duringSave.Name != "Original Name" {
+		t.Errorf("a reader saw name %q while the save was still in flight, want the stored %q", duringSave.Name, "Original Name")
+	}
+	if held.Name != "Original Name" {
+		t.Errorf("the tenant a reader already held changed under it to %q", held.Name)
+	}
+
+	cached, err := svc.GetTenant(ctx, "tenant-1")
+	if err != nil {
+		t.Fatalf("GetTenant() error = %v", err)
+	}
+	if cached.Name != "Renamed" {
+		t.Errorf("cached name = %q after a successful save, want %q", cached.Name, "Renamed")
+	}
+}
+
+// Run with -race: readers keep the pointer the cache handed them, so a write
+// into a cached tenant is a data race against every one of them.
+func TestServiceCacheSurvivesConcurrentReadersAndWriters(t *testing.T) {
+	svc, _ := newUpdateTestService(nil, cachedTenant())
+	ctx := context.Background()
+
+	var wg sync.WaitGroup
+	done := make(chan struct{})
+
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				cached, err := svc.GetTenant(ctx, "tenant-1")
+				if err == nil {
+					_ = cached.Name + cached.ClientID + cached.HealthStatus + cached.LastError
+				}
+				tenants, err := svc.ListTenants(ctx)
+				if err == nil {
+					for _, tenant := range tenants {
+						_ = tenant.Enabled && tenant.IsDefault
+					}
+				}
+			}
+		}()
+	}
+
+	for i := 0; i < 20; i++ {
+		if _, err := svc.UpdateTenant(ctx, "tenant-1", &UpdateRequest{Name: strPtr("Renamed")}); err != nil {
+			t.Errorf("UpdateTenant() error = %v", err)
+			break
+		}
+		if err := svc.UpdateHealth(ctx, "tenant-1", "healthy", "ok"); err != nil {
+			t.Errorf("UpdateHealth() error = %v", err)
+			break
+		}
+		if err := svc.UpdateError(ctx, "tenant-1", "transient"); err != nil {
+			t.Errorf("UpdateError() error = %v", err)
+			break
+		}
+	}
+
+	close(done)
+	wg.Wait()
+}
+
+// A health or error write that loaded the entry before a rename stored its copy
+// must not store its stale copy back over the rename.
+func TestServiceCacheKeepsEveryWriteUnderConcurrentWriters(t *testing.T) {
+	svc := NewService(&mockRepository{
+		updateFn: func(ctx context.Context, tenant *domain.KeycloakTenant) error { return nil },
+	}).(*service)
+	svc.cache.Store("tenant-1", cachedTenant())
+	ctx := context.Background()
+
+	for round := 0; round < 300; round++ {
+		var wg sync.WaitGroup
+		done := make(chan struct{})
+		for i := 0; i < 4; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				for {
+					select {
+					case <-done:
+						return
+					default:
+					}
+					var err error
+					if i%2 == 0 {
+						err = svc.UpdateHealth(ctx, "tenant-1", "healthy", "ok")
+					} else {
+						err = svc.UpdateError(ctx, "tenant-1", "transient")
+					}
+					if err != nil {
+						t.Errorf("health or error write: %v", err)
+						return
+					}
+				}
+			}(i)
+		}
+
+		name := fmt.Sprintf("Renamed %d", round)
+		_, err := svc.UpdateTenant(ctx, "tenant-1", &UpdateRequest{Name: strPtr(name)})
+		close(done)
+		wg.Wait()
+		if err != nil {
+			t.Fatalf("UpdateTenant() error = %v", err)
+		}
+
+		cached, err := svc.GetTenant(ctx, "tenant-1")
+		if err != nil {
+			t.Fatalf("GetTenant() error = %v", err)
+		}
+		if cached.Name != name {
+			t.Fatalf("round %d: cached name = %q after the rename was saved, want %q", round, cached.Name, name)
+		}
+	}
+}
+
+// A health write that loaded the entry before a delete removed it must not
+// store the deleted tenant back.
+func TestServiceCacheDropsATenantDeletedUnderConcurrentWriters(t *testing.T) {
+	svc := NewService(&mockRepository{
+		getByTenantIDFn: func(ctx context.Context, tenantID string) (*domain.KeycloakTenant, error) {
+			return nil, errors.New("not found")
+		},
+	}).(*service)
+	ctx := context.Background()
+
+	for round := 0; round < 300; round++ {
+		svc.cache.Store("tenant-1", cachedTenant())
+
+		var wg sync.WaitGroup
+		done := make(chan struct{})
+		for i := 0; i < 4; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for {
+					select {
+					case <-done:
+						return
+					default:
+					}
+					if err := svc.UpdateHealth(ctx, "tenant-1", "healthy", "ok"); err != nil {
+						t.Errorf("UpdateHealth() error = %v", err)
+						return
+					}
+				}
+			}()
+		}
+
+		err := svc.DeleteTenant(ctx, "tenant-1")
+		close(done)
+		wg.Wait()
+		if err != nil {
+			t.Fatalf("DeleteTenant() error = %v", err)
+		}
+
+		if _, ok := svc.cache.Load("tenant-1"); ok {
+			t.Fatalf("round %d: the deleted tenant is back in the cache", round)
+		}
+	}
+}
+
 func TestNotifyCallbacksDeliversEventsInOrderPerCallback(t *testing.T) {
 	// A callback that's slow to process one event must not let a later event,
 	// dispatched while the first is still in flight, be applied first. Firing
@@ -980,6 +1302,30 @@ func TestUpdateHealth(t *testing.T) {
 	}
 }
 
+// The tenant list is served from the cache, so a health poll must move the
+// cached last check, or the card keeps the time from before the server started.
+func TestUpdateHealth_RefreshesCachedLastHealthCheck(t *testing.T) {
+	ctx := context.Background()
+	bootTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	repo := &mockRepository{listFn: func(context.Context) ([]*domain.KeycloakTenant, error) {
+		return []*domain.KeycloakTenant{{TenantID: "tenant-1", LastHealthCheck: bootTime}}, nil
+	}}
+	svc := NewService(repo)
+	if err := svc.LoadTenants(ctx); err != nil {
+		t.Fatalf("LoadTenants() error = %v", err)
+	}
+	before := time.Now()
+	if err := svc.UpdateHealth(ctx, "tenant-1", "healthy", "Keycloak reachable"); err != nil {
+		t.Fatalf("UpdateHealth() error = %v", err)
+	}
+	tenants, err := svc.ListTenants(ctx)
+	if err != nil || len(tenants) != 1 {
+		t.Fatalf("ListTenants() = %v, %v; want one tenant", tenants, err)
+	}
+	if got := tenants[0].LastHealthCheck; got.Before(before) {
+		t.Errorf("LastHealthCheck = %v, want at or after %v", got, before)
+	}
+}
 func TestUpdateError(t *testing.T) {
 	tests := []struct {
 		name       string

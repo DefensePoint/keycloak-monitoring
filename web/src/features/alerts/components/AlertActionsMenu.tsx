@@ -50,7 +50,7 @@ export const AlertActionsMenu: React.FC<AlertActionsMenuProps> = ({
           {isActionPending ? "Processing..." : "Acknowledge"}
         </MenuItem>
       )}
-      {canAcknowledge && (
+      {canResolve && (
         <MenuItem onClick={onIgnore} disabled={isActionPending}>
           {isActionPending ? "Processing..." : "Ignore"}
         </MenuItem>

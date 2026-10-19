@@ -91,6 +91,13 @@ func (s *service) AggregateData(ctx context.Context, req *GenerateRequest) (*Dat
 		s.logger.Warn("Report scope names no realm; every section is left empty",
 			logger.Str("tenant_id", req.TenantID))
 	}
+	if !req.Access.Alerts {
+		data.AlertsOmitted = true
+		data.Omitted = append(data.Omitted, OmittedSection{Name: "Alert findings", Permission: "alerts:read"})
+	}
+	if !req.Access.Operators {
+		data.Omitted = append(data.Omitted, OmittedSection{Name: "Operator performance metrics", Permission: "metrics:read"})
+	}
 
 	alertsByType := make(map[string]int)
 	alertsByRealm := make(map[string]int)
@@ -99,7 +106,7 @@ func (s *service) AggregateData(ctx context.Context, req *GenerateRequest) (*Dat
 	realmAlertsBySeverity := make(map[string]map[string]int)
 
 	// Fetch alerts
-	if s.alertReader != nil && !req.Scope.empty() {
+	if s.alertReader != nil && req.Access.Alerts && !req.Scope.empty() {
 		opts := &AlertListOptions{
 			Limit:  1000,
 			Offset: 0,
@@ -167,7 +174,7 @@ func (s *service) AggregateData(ctx context.Context, req *GenerateRequest) (*Dat
 		s.logger.Error("Failed to resolve tenant event sources for report",
 			logger.Str("tenant_id", req.TenantID), logger.Err(srcErr))
 	}
-	if s.eventLister != nil && srcErr == nil && len(sources) > 0 {
+	if s.eventLister != nil && req.Access.Events && srcErr == nil && len(sources) > 0 {
 		startStr := req.StartDate.Format(time.RFC3339)
 		endStr := req.EndDate.Format(time.RFC3339)
 
@@ -232,7 +239,7 @@ func (s *service) AggregateData(ctx context.Context, req *GenerateRequest) (*Dat
 	data.TotalRealms = len(realmMap)
 
 	// Fetch operator metrics if reader is available
-	if s.operatorReader != nil && !req.Scope.empty() {
+	if s.operatorReader != nil && req.Access.Operators && !req.Scope.empty() {
 		var realmNames []string
 		if !req.Scope.All {
 			realmNames = req.Scope.Realms

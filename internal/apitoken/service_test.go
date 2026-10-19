@@ -97,7 +97,7 @@ func TestCreateStoresDigestNotPlaintext(t *testing.T) {
 	}
 	svc := newTestService(repo, users)
 
-	created, err := svc.Create(context.Background(), 1, "ci-token", []string{"tenant-1"}, nil)
+	created, err := svc.Create(context.Background(), testActorID, 1, "ci-token", []string{"tenant-1"}, nil)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -143,7 +143,7 @@ func TestCreateRequiresATenantAllowlist(t *testing.T) {
 	svc := newTestService(&mockRepository{}, users)
 
 	for name, tenantIDs := range map[string][]string{"nil": nil, "empty": {}} {
-		if _, err := svc.Create(context.Background(), 1, "token", tenantIDs, nil); !errors.Is(err, ErrNoTenantIDs) {
+		if _, err := svc.Create(context.Background(), testActorID, 1, "token", tenantIDs, nil); !errors.Is(err, ErrNoTenantIDs) {
 			t.Errorf("Create() with a %s allowlist = %v, want %v", name, err, ErrNoTenantIDs)
 		}
 	}
@@ -192,7 +192,7 @@ func TestCreateExpiry(t *testing.T) {
 			}
 			svc := newTestService(repo, users)
 
-			created, err := svc.Create(context.Background(), 1, "token", []string{"tenant-1"}, tt.expiresAt)
+			created, err := svc.Create(context.Background(), testActorID, 1, "token", []string{"tenant-1"}, tt.expiresAt)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Errorf("Create() error = %v, want %v", err, tt.wantErr)
@@ -250,7 +250,7 @@ func TestCreateErrors(t *testing.T) {
 			users := &mockUserStore{getByIDFn: tt.getByIDFn}
 			svc := newTestService(repo, users)
 
-			_, err := svc.Create(context.Background(), 1, "token", []string{"tenant-1"}, nil)
+			_, err := svc.Create(context.Background(), testActorID, 1, "token", []string{"tenant-1"}, nil)
 			if err == nil {
 				t.Fatal("Create() error = nil, want error")
 			}
@@ -396,7 +396,7 @@ func TestValidateRoundTrip(t *testing.T) {
 	}
 	svc := newTestService(repo, users)
 
-	created, err := svc.Create(context.Background(), 1, "token", []string{"tenant-1"}, nil)
+	created, err := svc.Create(context.Background(), testActorID, 1, "token", []string{"tenant-1"}, nil)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -455,7 +455,7 @@ func TestRevoke(t *testing.T) {
 			repo := &mockRepository{revokeFn: tt.revokeFn}
 			svc := newTestService(repo, &mockUserStore{})
 
-			err := svc.Revoke(context.Background(), tt.id)
+			err := svc.Revoke(context.Background(), testActorID, tt.id)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Errorf("Revoke() error = %v, want %v", err, tt.wantErr)
@@ -483,5 +483,90 @@ func TestList(t *testing.T) {
 	}
 	if len(tokens) != 2 {
 		t.Errorf("List() count = %d, want 2", len(tokens))
+	}
+}
+
+// testActorID is the administrator performing token changes in these tests.
+const testActorID uint = 42
+
+// recordingLogger keeps each Info line's fields so tests can assert on the
+// audit record.
+type recordingLogger struct {
+	noopLogger
+	lines map[string]map[string]any
+}
+
+func (l *recordingLogger) Info(msg string, fields ...any) {
+	if l.lines == nil {
+		l.lines = map[string]map[string]any{}
+	}
+	kv := map[string]any{}
+	for i := 0; i+1 < len(fields); i += 2 {
+		if key, ok := fields[i].(string); ok {
+			kv[key] = fields[i+1]
+		}
+	}
+	l.lines[msg] = kv
+}
+
+// An administrator can issue a token that acts as another user, so the
+// audit line for each change has to name who made it.
+func TestCreateAndRevokeRecordTheActingUser(t *testing.T) {
+	repo := &mockRepository{
+		createFn: func(ctx context.Context, token *Token, digest string) error {
+			token.ID = 9
+			return nil
+		},
+	}
+	users := &mockUserStore{
+		getByIDFn: func(ctx context.Context, userID uint) (*domain.User, error) {
+			return activeUser(userID), nil
+		},
+	}
+	log := &recordingLogger{}
+	svc := NewService(repo, users, log)
+
+	if _, err := svc.Create(context.Background(), testActorID, 7, "acts-as-7", []string{"tenant-1"}, nil); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	created := log.lines["API token created"]
+	if created["created_by"] != testActorID || created["user_id"] != uint(7) || created["token_id"] != uint(9) {
+		t.Errorf("created line = %v, want created_by=%d user_id=7 token_id=9", created, testActorID)
+	}
+
+	if err := svc.Revoke(context.Background(), testActorID, 9); err != nil {
+		t.Fatalf("Revoke() error = %v", err)
+	}
+	revoked := log.lines["API token revoked"]
+	if revoked["revoked_by"] != testActorID || revoked["token_id"] != uint(9) {
+		t.Errorf("revoked line = %v, want revoked_by=%d token_id=9", revoked, testActorID)
+	}
+}
+
+// A change without an acting user would write an audit line that names
+// nobody, so it is refused before anything is stored.
+func TestCreateAndRevokeRefuseAMissingActor(t *testing.T) {
+	repo := &mockRepository{
+		createFn: func(ctx context.Context, token *Token, digest string) error {
+			t.Error("Create() stored a token without an acting user")
+			return nil
+		},
+		revokeFn: func(ctx context.Context, id uint, revokedAt time.Time) error {
+			t.Error("Revoke() revoked a token without an acting user")
+			return nil
+		},
+	}
+	users := &mockUserStore{
+		getByIDFn: func(ctx context.Context, userID uint) (*domain.User, error) {
+			return activeUser(userID), nil
+		},
+	}
+	svc := newTestService(repo, users)
+
+	if _, err := svc.Create(context.Background(), 0, 7, "t", []string{"tenant-1"}, nil); !errors.Is(err, ErrNoActor) {
+		t.Errorf("Create() with no actor = %v, want %v", err, ErrNoActor)
+	}
+	if err := svc.Revoke(context.Background(), 0, 9); !errors.Is(err, ErrNoActor) {
+		t.Errorf("Revoke() with no actor = %v, want %v", err, ErrNoActor)
 	}
 }

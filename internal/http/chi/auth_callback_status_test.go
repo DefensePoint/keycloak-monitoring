@@ -24,11 +24,8 @@ import (
 
 type callbackStatusServiceStub struct{ findErr error }
 
-func (s *callbackStatusServiceStub) Login(_ context.Context) (string, string, error) {
-	return "", "", nil
-}
-func (s *callbackStatusServiceStub) Callback(_ context.Context, _, _, _ string) (*auth.Session, *domain.User, error) {
-	return nil, nil, nil
+func (s *callbackStatusServiceStub) Login(_ context.Context) (string, auth.LoginAttempt, error) {
+	return "", auth.LoginAttempt{}, nil
 }
 func (s *callbackStatusServiceStub) Logout(_ context.Context, _ string) error { return nil }
 func (s *callbackStatusServiceStub) ValidateSession(_ context.Context, _ string) (*auth.UserInfo, error) {
@@ -46,12 +43,17 @@ func (s *callbackStatusServiceStub) FindOrCreateUser(_ context.Context, _ *auth.
 
 type callbackStatusProviderStub struct{}
 
-func (p *callbackStatusProviderStub) GetAuthCodeURL(_ string) string { return "https://idp.invalid" }
-func (p *callbackStatusProviderStub) Exchange(_ context.Context, _ string) (*oauth2.Token, error) {
+func (p *callbackStatusProviderStub) GetAuthCodeURL(_ string, _ ...oauth2.AuthCodeOption) string {
+	return "https://idp.invalid"
+}
+func (p *callbackStatusProviderStub) Exchange(_ context.Context, _ string, _ ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
 	return (&oauth2.Token{AccessToken: "access", Expiry: time.Now().Add(time.Hour)}).
 		WithExtra(map[string]interface{}{"id_token": "id-token"}), nil
 }
 func (p *callbackStatusProviderStub) VerifyIDToken(_ context.Context, _ string) (*auth.UserInfo, error) {
+	return &auth.UserInfo{Subject: "idp-subject", Email: "person@example.com"}, nil
+}
+func (p *callbackStatusProviderStub) VerifyLoginIDToken(_ context.Context, _, _ string) (*auth.UserInfo, error) {
 	return &auth.UserInfo{Subject: "idp-subject", Email: "person@example.com"}, nil
 }
 func (p *callbackStatusProviderStub) RefreshToken(_ context.Context, _ string) (*oauth2.Token, error) {
@@ -63,20 +65,19 @@ func (p *callbackStatusProviderStub) RefreshToken(_ context.Context, _ string) (
 func callbackStatusFor(t *testing.T, findErr error) *httptest.ResponseRecorder {
 	t.Helper()
 
-	states := auth.NewStateStore(time.Minute)
 	const state = "test-state-value-long-enough"
-	if err := states.Save(state); err != nil {
-		t.Fatalf("seed state: %v", err)
-	}
 
 	h := &AuthHandlers{
-		service:    &callbackStatusServiceStub{findErr: findErr},
-		provider:   &callbackStatusProviderStub{},
-		stateStore: states,
-		log:        logger.NewNoop(),
+		service:      &callbackStatusServiceStub{findErr: findErr},
+		provider:     &callbackStatusProviderStub{},
+		loginCookie:  testLoginCookie(t),
+		sessionStore: testSessionStore(),
+		sessionName:  "kmt_test",
+		log:          logger.NewNoop(),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/callback?code=auth-code&state="+state, nil)
+	addLoginCookie(t, h, req, auth.LoginAttempt{State: state, Nonce: "n", CodeVerifier: "v"})
 	rec := httptest.NewRecorder()
 	h.handleCallback(rec, req)
 	return rec

@@ -197,13 +197,6 @@ func (sm *silenceManager) IsSilenced(tenantID, alertType, resourceType, resource
 func (sm *silenceManager) matchesSilence(alert *domain.Alert, silence *activeSilence) bool {
 	matchers := silence.Matchers
 
-	// Match alert type
-	if matchers.AlertType != "" {
-		if !matchPattern(string(alert.Type), matchers.AlertType) {
-			return false
-		}
-	}
-
 	// Match source
 	if matchers.Source != "" {
 		if string(alert.Source) != matchers.Source {
@@ -225,23 +218,29 @@ func (sm *silenceManager) matchesSilence(alert *domain.Alert, silence *activeSil
 		}
 	}
 
-	// Parse metadata for extended matching
-	var metadata map[string]string
-	if alert.Metadata != "" {
-		if err := json.Unmarshal([]byte(alert.Metadata), &metadata); err != nil {
-			sm.logger.Debug("Failed to parse alert metadata for matching",
-				logger.Str("silence_id", silence.ID),
-				logger.Err(err))
-			metadata = make(map[string]string)
+	metadata := sm.alertMetadata(alert, silence.ID)
+
+	// Match alert type. The threshold checks raise alerts of a broad type such
+	// as "security" and name the Keycloak event in their metadata, which is
+	// what a rule written as alert_type: "CLIENT_LOGIN_ERROR" means, so either
+	// one matching is enough.
+	if matchers.AlertType != "" {
+		eventType := metadata["event_type"]
+		typeMatches := matchPattern(string(alert.Type), matchers.AlertType) ||
+			(eventType != "" && matchPattern(eventType, matchers.AlertType))
+		if !typeMatches {
+			return false
 		}
-	} else {
-		metadata = make(map[string]string)
 	}
 
-	// Match client ID (from metadata or resource fields)
+	// Match client ID (from metadata or resource fields). The AMFA checks
+	// record the client as "client" and as an amfa_client resource.
 	if matchers.ClientID != "" {
 		clientID := metadata["client_id"]
-		if clientID == "" && alert.ResourceType == "client" {
+		if clientID == "" {
+			clientID = metadata["client"]
+		}
+		if clientID == "" && (alert.ResourceType == "client" || alert.ResourceType == "amfa_client") {
 			clientID = alert.ResourceID
 		}
 		if clientID == "" || !matchPattern(clientID, matchers.ClientID) {
@@ -268,6 +267,43 @@ func (sm *silenceManager) matchesSilence(alert *domain.Alert, silence *activeSil
 	}
 
 	return true
+}
+
+// alertMetadata returns the alert's metadata as strings for matching.
+//
+// Decoded leniently: the checks store counts, thresholds and flags alongside
+// the names a rule matches on, and decoding straight into map[string]string
+// fails on the first number, which left every metadata matcher looking at an
+// empty map and silently matching nothing. Scalars are kept in their JSON
+// spelling (12, true); nested values are skipped, since no matcher reads them.
+func (sm *silenceManager) alertMetadata(alert *domain.Alert, silenceID string) map[string]string {
+	out := make(map[string]string)
+	if alert.Metadata == "" {
+		return out
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(alert.Metadata), &raw); err != nil {
+		sm.logger.Debug("Failed to parse alert metadata for matching",
+			logger.Str("silence_id", silenceID),
+			logger.Err(err))
+		return out
+	}
+	for key, value := range raw {
+		var str string
+		if json.Unmarshal(value, &str) == nil {
+			out[key] = str
+			continue
+		}
+		var scalar any
+		if json.Unmarshal(value, &scalar) != nil {
+			continue
+		}
+		switch scalar.(type) {
+		case float64, bool:
+			out[key] = string(value)
+		}
+	}
+	return out
 }
 
 // matchPattern performs wildcard pattern matching.

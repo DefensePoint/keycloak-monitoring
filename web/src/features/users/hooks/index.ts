@@ -1,2 +1,2 @@
 export { useUserDetails } from "./useUserDetails";
-export { useUserEvents } from "./useUserEvents";
+export { useUserEvents, USER_EVENTS_LIMIT } from "./useUserEvents";

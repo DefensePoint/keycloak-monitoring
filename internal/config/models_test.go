@@ -459,6 +459,25 @@ func TestAmfaCheckerConfig_ApplyDefaults_PreservesExplicit(t *testing.T) {
 	}
 }
 
+func TestEventCheckerConfig_ApplyDefaults(t *testing.T) {
+	var c EventCheckerConfig
+	c.ApplyDefaults()
+	if c.Enabled {
+		t.Error("Enabled default = true, want false")
+	}
+	if c.PollInterval != 5*time.Minute {
+		t.Errorf("PollInterval default = %v, want 5m", c.PollInterval)
+	}
+}
+
+func TestEventCheckerConfig_ApplyDefaults_PreservesExplicit(t *testing.T) {
+	c := EventCheckerConfig{PollInterval: 30 * time.Second}
+	c.ApplyDefaults()
+	if c.PollInterval != 30*time.Second {
+		t.Errorf("PollInterval overwritten: got %v", c.PollInterval)
+	}
+}
+
 // --- AMFA API transport selection -----------------------------------------
 
 func TestAmfaAPIConfigValidateAppliesDefaults(t *testing.T) {

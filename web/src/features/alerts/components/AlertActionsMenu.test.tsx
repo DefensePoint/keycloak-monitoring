@@ -196,7 +196,7 @@ describe("AlertActionsMenu", () => {
       expect(screen.queryByText("Resolve")).not.toBeInTheDocument();
     });
 
-    it("should show only acknowledge/ignore when user has only canAcknowledge", () => {
+    it("should show only acknowledge when user has only canAcknowledge", () => {
       const anchorEl = document.createElement("div");
       render(
         <AlertActionsMenu
@@ -209,11 +209,12 @@ describe("AlertActionsMenu", () => {
       );
 
       expect(screen.getByText("Acknowledge")).toBeInTheDocument();
-      expect(screen.getByText("Ignore")).toBeInTheDocument();
+      // Ignoring needs alerts:resolve, as the server requires.
+      expect(screen.queryByText("Ignore")).not.toBeInTheDocument();
       expect(screen.queryByText("Resolve")).not.toBeInTheDocument();
     });
 
-    it("should show only resolve when user has only canResolve", () => {
+    it("should show ignore and resolve when user has only canResolve", () => {
       const anchorEl = document.createElement("div");
       render(
         <AlertActionsMenu
@@ -226,7 +227,7 @@ describe("AlertActionsMenu", () => {
       );
 
       expect(screen.queryByText("Acknowledge")).not.toBeInTheDocument();
-      expect(screen.queryByText("Ignore")).not.toBeInTheDocument();
+      expect(screen.getByText("Ignore")).toBeInTheDocument();
       expect(screen.getByText("Resolve")).toBeInTheDocument();
     });
 

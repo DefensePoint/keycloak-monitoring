@@ -327,6 +327,37 @@ mcp:
 	}
 }
 
+// mcp.sso_signin_max_age decides when a disabled SSO user's MCP tokens stop,
+// so its default, an explicit value, 0 and the env override must all reach
+// the config as the duration they say.
+func TestLoadConfig_MCPSSOSignInMaxAge(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		env  string
+		want time.Duration
+	}{
+		{"default is 14 days", "mcp:\n  enabled: true\n", "", 14 * 24 * time.Hour},
+		{"set in the file", "mcp:\n  sso_signin_max_age: 720h\n", "", 30 * 24 * time.Hour},
+		{"0 turns the check off", "mcp:\n  sso_signin_max_age: 0s\n", "", 0},
+		{"env override", "mcp:\n  enabled: true\n", "48h", 48 * time.Hour},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.env != "" {
+				t.Setenv("MONITORING_MCP_SSO_SIGNIN_MAX_AGE", tc.env)
+			}
+			cfg, err := LoadConfig(writeConfig(t, tc.body))
+			if err != nil {
+				t.Fatalf("LoadConfig() failed: %v", err)
+			}
+			if cfg.MCP.SSOSignInMaxAge != tc.want {
+				t.Errorf("SSOSignInMaxAge = %v, want %v", cfg.MCP.SSOSignInMaxAge, tc.want)
+			}
+		})
+	}
+}
+
 func TestAppConfig_NewLogger(t *testing.T) {
 	tests := []struct {
 		name           string

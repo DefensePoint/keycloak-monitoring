@@ -16,6 +16,7 @@ import {
   usePermissions,
   useCreateRole,
   useDeleteRole,
+  useSetRoleActive,
 } from "../hooks";
 import type { Role, CreateRoleRequest } from "../types";
 
@@ -32,11 +33,33 @@ export function AdminRolesPage() {
   } | null>(null);
 
   // React Query hooks
-  const { data: roles = [], isLoading } = useRoles();
+  const { data: roles = [], isLoading } = useRoles(true);
   const { data: permissions = [] } = usePermissions();
   const { data: selectedRole } = useRole(selectedRoleId ?? undefined);
   const { mutate: createRole, isPending: isCreating } = useCreateRole();
   const { mutate: deleteRole, isPending: isDeleting } = useDeleteRole();
+  const { mutate: setRoleActive } = useSetRoleActive();
+
+  const handleToggleActive = (role: Role) => {
+    const isActive = !role.is_active;
+    setRoleActive(
+      { roleId: role.id, isActive },
+      {
+        onSuccess: () =>
+          showToast({
+            message: isActive
+              ? `Role "${role.display_name}" activated`
+              : `Role "${role.display_name}" deactivated: its users lose its permissions`,
+            type: "success",
+          }),
+        onError: (err: unknown) =>
+          showToast({
+            message: getErrorMessage(err, "Failed to update role"),
+            type: "error",
+          }),
+      },
+    );
+  };
 
   const handleCreateRole = (data: CreateRoleRequest) => {
     createRole(data, {
@@ -130,6 +153,7 @@ export function AdminRolesPage() {
         roles={roles}
         onView={handleViewRole}
         onDelete={handleDeleteClick}
+        onToggleActive={handleToggleActive}
       />
 
       <CreateRoleModal

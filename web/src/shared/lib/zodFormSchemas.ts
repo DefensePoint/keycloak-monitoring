@@ -33,6 +33,7 @@ export const createRoleSchema = z.object({
   display_name: requiredString,
   description: requiredString,
   permission_ids: nonEmptyArray(z.number()),
+  is_active: z.boolean(),
 });
 
 export const updateRoleSchema = z.object({

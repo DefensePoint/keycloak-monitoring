@@ -19,7 +19,11 @@ func (c *Client) GetUsersCount(ctx context.Context, realmName string) (int, erro
 // scope the count. Keycloak resolves this as a DB COUNT query, so no user
 // objects are serialized or transferred.
 func (c *Client) getUsersCount(ctx context.Context, realmName, query string) (int, error) {
-	path := fmt.Sprintf("/admin/realms/%s/users/count%s", realmName, query)
+	realmSeg, err := pathSegment(realmName)
+	if err != nil {
+		return 0, err
+	}
+	path := fmt.Sprintf("/admin/realms/%s/users/count%s", realmSeg, query)
 
 	resp, err := c.get(ctx, path)
 	if err != nil {
@@ -33,7 +37,7 @@ func (c *Client) getUsersCount(ctx context.Context, realmName, query string) (in
 	}
 
 	if resp.StatusCode != 200 {
-		return 0, fmt.Errorf("failed to get users count, status: %d, body: %s", resp.StatusCode, string(body))
+		return 0, fmt.Errorf("failed to get users count, status: %d%s", resp.StatusCode, c.replyDetail("get users count", resp.StatusCode, body))
 	}
 
 	var count int
@@ -114,7 +118,11 @@ type clientSessionStat struct {
 // Only clients with sessions are included in the response; the sum over the
 // array is the realm total.
 func (c *Client) GetSessionsCount(ctx context.Context, realmName string) (activeSessions int, offlineSessions int, err error) {
-	path := fmt.Sprintf("/admin/realms/%s/client-session-stats", realmName)
+	realmSeg, err := pathSegment(realmName)
+	if err != nil {
+		return 0, 0, err
+	}
+	path := fmt.Sprintf("/admin/realms/%s/client-session-stats", realmSeg)
 
 	resp, err := c.get(ctx, path)
 	if err != nil {
@@ -128,7 +136,7 @@ func (c *Client) GetSessionsCount(ctx context.Context, realmName string) (active
 	}
 
 	if resp.StatusCode != 200 {
-		return 0, 0, fmt.Errorf("failed to get client session stats, status: %d, body: %s", resp.StatusCode, string(body))
+		return 0, 0, fmt.Errorf("failed to get client session stats, status: %d%s", resp.StatusCode, c.replyDetail("get client session stats", resp.StatusCode, body))
 	}
 
 	var stats []clientSessionStat

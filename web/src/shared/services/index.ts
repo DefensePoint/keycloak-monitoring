@@ -12,6 +12,7 @@ export {
   eventsService,
   type Event,
   type EventsResponse,
+  type EventFilters,
   type Stats,
 } from "./eventsService";
 export { healthService } from "./healthService";

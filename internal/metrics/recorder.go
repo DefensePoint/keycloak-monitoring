@@ -11,6 +11,8 @@ type Recorder interface {
 	ObservePollCycle(tenantID, pollType string, d time.Duration)
 	IncPollCycleError(tenantID, pollType string)
 	AddEventsCollected(tenantID, realm string, n int)
+	AddEventWritesFailed(tenantID, table string, n int)
+	ObserveEventVisibilityDelay(tenantID, realm string, d time.Duration)
 	IncAlert(severity, checkType string)
 	IncNotification(channel, result string)
 	IncMCPRequest(method string)
@@ -25,6 +27,15 @@ func (m *Registry) SetTenantMonitorUp(tenantID, tenantName string, up bool) {
 		v = 1
 	}
 	m.TenantMonitorUp.WithLabelValues(tenantID, tenantName).Set(v)
+}
+
+// SetSSOProviderUp records whether the OIDC provider for SSO login is connected.
+func (m *Registry) SetSSOProviderUp(up bool) {
+	v := 0.0
+	if up {
+		v = 1
+	}
+	m.SSOProviderUp.WithLabelValues().Set(v)
 }
 
 // SetTenantMonitorsActive records the number of running monitors.
@@ -48,6 +59,21 @@ func (m *Registry) AddEventsCollected(tenantID, realm string, n int) {
 		return
 	}
 	m.EventsCollected.WithLabelValues(tenantID, realm).Add(float64(n))
+}
+
+// AddEventWritesFailed records how many polled events could not be stored in
+// a table.
+func (m *Registry) AddEventWritesFailed(tenantID, table string, n int) {
+	if n <= 0 {
+		return
+	}
+	m.EventWritesFailed.WithLabelValues(tenantID, table).Add(float64(n))
+}
+
+// ObserveEventVisibilityDelay records the least time a Keycloak event took to
+// become visible after its own time.
+func (m *Registry) ObserveEventVisibilityDelay(tenantID, realm string, d time.Duration) {
+	m.EventVisibilityDelay.WithLabelValues(tenantID, realm).Observe(d.Seconds())
 }
 
 // IncAlert records an alert by severity and check type.
@@ -79,13 +105,15 @@ func (m *Registry) ObserveMCPToolCall(tool string, d time.Duration) {
 // tests, so call sites never need a nil check.
 type NopRecorder struct{}
 
-func (NopRecorder) SetTenantMonitorUp(string, string, bool)        {}
-func (NopRecorder) SetTenantMonitorsActive(int)                    {}
-func (NopRecorder) ObservePollCycle(string, string, time.Duration) {}
-func (NopRecorder) IncPollCycleError(string, string)               {}
-func (NopRecorder) AddEventsCollected(string, string, int)         {}
-func (NopRecorder) IncAlert(string, string)                        {}
-func (NopRecorder) IncNotification(string, string)                 {}
-func (NopRecorder) IncMCPRequest(string)                           {}
-func (NopRecorder) IncMCPToolCall(string, string)                  {}
-func (NopRecorder) ObserveMCPToolCall(string, time.Duration)       {}
+func (NopRecorder) SetTenantMonitorUp(string, string, bool)                   {}
+func (NopRecorder) SetTenantMonitorsActive(int)                               {}
+func (NopRecorder) ObservePollCycle(string, string, time.Duration)            {}
+func (NopRecorder) IncPollCycleError(string, string)                          {}
+func (NopRecorder) AddEventsCollected(string, string, int)                    {}
+func (NopRecorder) AddEventWritesFailed(string, string, int)                  {}
+func (NopRecorder) ObserveEventVisibilityDelay(string, string, time.Duration) {}
+func (NopRecorder) IncAlert(string, string)                                   {}
+func (NopRecorder) IncNotification(string, string)                            {}
+func (NopRecorder) IncMCPRequest(string)                                      {}
+func (NopRecorder) IncMCPToolCall(string, string)                             {}
+func (NopRecorder) ObserveMCPToolCall(string, time.Duration)                  {}

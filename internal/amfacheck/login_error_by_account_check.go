@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/DefensePoint/keycloak-monitoring/internal/alerts/clearing"
 	"github.com/DefensePoint/keycloak-monitoring/internal/amfa"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
@@ -16,7 +17,8 @@ import (
 // pattern that isn't covered by risk-level-based rules (a brute-forced
 // account's failed attempts don't necessarily score as risky) or by the
 // realm-wide login-error rule (diluted by every other user's traffic).
-// Deduped per (realm, user, UTC day), the same shape as rule 2
+// One alert per (realm, user) that resolves once the account's failures age out
+// of the window and reopens on the next burst, the same shape as rule 2
 // (RepeatedRiskyCheck).
 type LoginErrorByAccountCheck struct {
 	tenantID  string
@@ -45,28 +47,34 @@ func (c *LoginErrorByAccountCheck) GetDescription() string {
 }
 
 func (c *LoginErrorByAccountCheck) Execute(ctx context.Context) ([]*domain.Alert, error) {
+	ev, err := c.Evaluate(ctx)
+	return ev.Alerts, err
+}
+
+// Evaluate runs the check and reports every realm it counted; see
+// RepeatedRiskyCheck.Evaluate.
+func (c *LoginErrorByAccountCheck) Evaluate(ctx context.Context) (clearing.Evaluation, error) {
 	realms, err := c.realmsFn(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("amfa-login-error-by-account: load realms: %w", err)
+		return clearing.Evaluation{}, fmt.Errorf("amfa-login-error-by-account: load realms: %w", err)
 	}
-	now := time.Now().UTC()
-	since := now.Add(-c.window)
-	day := now.Format("2006-01-02")
+	since := time.Now().UTC().Add(-c.window)
 
-	var alerts []*domain.Alert
+	ev := clearing.Evaluation{TenantID: c.tenantID}
 	for _, realm := range realms {
 		counts, err := c.repo.CountByEventTypeByUser(ctx, realm, "LOGIN_ERROR", since, c.threshold)
 		if err != nil {
-			return nil, fmt.Errorf("amfa-login-error-by-account: realm=%s: %w", realm, err)
+			return clearing.Evaluation{}, fmt.Errorf("amfa-login-error-by-account: realm=%s: %w", realm, err)
 		}
+		ev.MarkRealmEvaluated(realm)
 		for _, uc := range counts {
-			alerts = append(alerts, c.toAlert(realm, day, uc))
+			ev.Alerts = append(ev.Alerts, c.toAlert(realm, uc))
 		}
 	}
-	return alerts, nil
+	return ev, nil
 }
 
-func (c *LoginErrorByAccountCheck) toAlert(realm, day string, uc amfa.UserRiskyCount) *domain.Alert {
+func (c *LoginErrorByAccountCheck) toAlert(realm string, uc amfa.UserRiskyCount) *domain.Alert {
 	md, _ := json.Marshal(map[string]any{
 		"event_type": "LOGIN_ERROR",
 		"user_id":    uc.UserID,
@@ -74,11 +82,10 @@ func (c *LoginErrorByAccountCheck) toAlert(realm, day string, uc amfa.UserRiskyC
 		"threshold":  c.threshold,
 		"window":     c.window.String(),
 		"realm_name": realm,
-		"utc_date":   day,
 	})
 	return &domain.Alert{
 		TenantID:       c.tenantID,
-		AlertID:        alertID("amfa-login-error-by-account", c.tenantID, realm, uc.UserID, day),
+		AlertID:        alertID("amfa-login-error-by-account", c.tenantID, realm, uc.UserID),
 		Source:         domain.AlertSourceEvent,
 		Type:           domain.AlertTypeSecurity,
 		Severity:       domain.AlertSeverityWarning,

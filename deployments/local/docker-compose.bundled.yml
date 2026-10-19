@@ -1,0 +1,110 @@
+services:
+  postgres:
+    image: timescale/timescaledb:2.30.2-pg16@sha256:6f139d56042989bd35f50ba5986e492cd32e35cc6778c50be2659add298dc09f
+    container_name: ${COMPOSE_PROJECT_NAME:-kmt-demo}-postgres
+    ports: !override
+      - "127.0.0.1:${BUNDLED_DB_PORT:-15433}:5432"
+    environment:
+      POSTGRES_PASSWORD: ${BUNDLED_DB_PASSWORD:?Set BUNDLED_DB_PASSWORD in .env}
+
+  keycloak-db-1:
+    image: postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    container_name: ${COMPOSE_PROJECT_NAME:-kmt-demo}-keycloak-db-1
+    environment:
+      POSTGRES_PASSWORD: ${BUNDLED_DB_PASSWORD:?Set BUNDLED_DB_PASSWORD in .env}
+
+  keycloak-db-2:
+    image: postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    container_name: ${COMPOSE_PROJECT_NAME:-kmt-demo}-keycloak-db-2
+    environment:
+      POSTGRES_PASSWORD: ${BUNDLED_DB_PASSWORD:?Set BUNDLED_DB_PASSWORD in .env}
+
+  keycloak-1:
+    image: quay.io/keycloak/keycloak:26.7.5@sha256:37dbaf6f0722c9ec246335f36e1ef8b2e6cb960f7c27e0d8c615121a3d475a85
+    container_name: ${COMPOSE_PROJECT_NAME:-kmt-demo}-keycloak-1
+    ports: !override
+      - "127.0.0.1:${BUNDLED_KC1_PORT:-18080}:8080"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${BUNDLED_KC_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${BUNDLED_KC_ADMIN_PASSWORD:?Set BUNDLED_KC_ADMIN_PASSWORD in .env}
+      KC_DB_PASSWORD: ${BUNDLED_DB_PASSWORD:?Set BUNDLED_DB_PASSWORD in .env}
+      JAVA_OPTS_KC_HEAP: -Xms128m -Xmx512m
+      KEYCLOAK_ADMIN: !reset null
+      KEYCLOAK_ADMIN_PASSWORD: !reset null
+    mem_limit: 768m
+    healthcheck:
+      start_period: 120s
+      retries: 36
+
+  keycloak-2:
+    image: quay.io/keycloak/keycloak:26.7.5@sha256:37dbaf6f0722c9ec246335f36e1ef8b2e6cb960f7c27e0d8c615121a3d475a85
+    container_name: ${COMPOSE_PROJECT_NAME:-kmt-demo}-keycloak-2
+    ports: !override
+      - "127.0.0.1:${BUNDLED_KC2_PORT:-18081}:8080"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${BUNDLED_KC_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${BUNDLED_KC_ADMIN_PASSWORD:?Set BUNDLED_KC_ADMIN_PASSWORD in .env}
+      KC_DB_PASSWORD: ${BUNDLED_DB_PASSWORD:?Set BUNDLED_DB_PASSWORD in .env}
+      JAVA_OPTS_KC_HEAP: -Xms128m -Xmx512m
+      KEYCLOAK_ADMIN: !reset null
+      KEYCLOAK_ADMIN_PASSWORD: !reset null
+    mem_limit: 768m
+    healthcheck:
+      start_period: 120s
+      retries: 36
+
+  keycloak-setup:
+    image: python:3.12.13-slim@sha256:646fb0bca3dd3ea1bcc6feb72c17ed16eed6e10cffc732fcc1478bd3e7f02d7b
+    profiles: [bundled-kc]
+    command: [python, /setup/setup-keycloak.py]
+    environment:
+      BUNDLED_KC_ADMIN_USER: ${BUNDLED_KC_ADMIN_USER:-admin}
+      BUNDLED_KC_ADMIN_PASSWORD: ${BUNDLED_KC_ADMIN_PASSWORD:?Set BUNDLED_KC_ADMIN_PASSWORD in .env}
+      BUNDLED_KC1_CLIENT_SECRET: ${BUNDLED_KC1_CLIENT_SECRET:?Set BUNDLED_KC1_CLIENT_SECRET in .env}
+      BUNDLED_KC2_CLIENT_SECRET: ${BUNDLED_KC2_CLIENT_SECRET:?Set BUNDLED_KC2_CLIENT_SECRET in .env}
+    volumes:
+      - ./setup-keycloak.py:/setup/setup-keycloak.py:ro
+    networks:
+      - kmt-network
+    depends_on:
+      keycloak-1:
+        condition: service_healthy
+      keycloak-2:
+        condition: service_healthy
+
+  api-server:
+    image: kmt-demo-server:local
+    container_name: ${COMPOSE_PROJECT_NAME:-kmt-demo}-server
+    ports: !override
+      - "127.0.0.1:${BUNDLED_API_PORT:-17888}:7888"
+    volumes:
+      - ./config.bundled.yaml:/app/config.yaml:ro
+    environment:
+      BUNDLED_SESSION_SECRET: ${BUNDLED_SESSION_SECRET:?Set BUNDLED_SESSION_SECRET in .env}
+      # The base stack gives the API server the development database password,
+      # and environment entries are merged, not replaced. The demo's Postgres
+      # uses its own password, so override it here.
+      MONITORING_DATABASE_PASSWORD: ${BUNDLED_DB_PASSWORD:?Set BUNDLED_DB_PASSWORD in .env}
+    depends_on:
+      keycloak-setup:
+        condition: service_completed_successfully
+
+  mcp-server:
+    profiles: [mcp]
+    image: kmt-demo-mcp-server:local
+    container_name: ${COMPOSE_PROJECT_NAME:-kmt-demo}-mcp-server
+    ports: !override
+      - "127.0.0.1:${BUNDLED_MCP_PORT:-17889}:7889"
+    volumes:
+      - ./config.bundled.yaml:/app/config.yaml:ro
+    depends_on:
+      keycloak-setup:
+        condition: service_completed_successfully
+
+  web:
+    image: kmt-demo-web:local
+    container_name: ${COMPOSE_PROJECT_NAME:-kmt-demo}-web
+    ports: !override
+      - "127.0.0.1:${BUNDLED_WEB_PORT:-17880}:7880"
+    volumes:
+      - ./config.bundled.yaml:/app/config.yaml:ro

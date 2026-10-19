@@ -36,7 +36,10 @@ func TestLoginErrorByAccountCheck_OneAlertPerUserAtThreshold(t *testing.T) {
 	}
 }
 
-func TestLoginErrorByAccountCheck_AlertIDIncludesUTCDate(t *testing.T) {
+// The ID names the condition and nothing else. A date in it made every
+// burst after the first on the same day map onto the first one's alert, which
+// stayed resolved or acknowledged and so never announced the new burst.
+func TestLoginErrorByAccountCheck_AlertIDIsOnePerConditionNotPerDay(t *testing.T) {
 	repo := &checkRepoStub{byUserCounts: []amfa.UserRiskyCount{{UserID: "user-brute", Count: 7}}}
 	c := NewLoginErrorByAccountCheck("tenant-1", singleRealm("master"), repo, 5, 5*time.Minute, testLogger{})
 
@@ -44,8 +47,7 @@ func TestLoginErrorByAccountCheck_AlertIDIncludesUTCDate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	day := time.Now().UTC().Format("2006-01-02")
-	want := alertID("amfa-login-error-by-account", "tenant-1", "master", "user-brute", day)
+	want := alertID("amfa-login-error-by-account", "tenant-1", "master", "user-brute")
 	if alerts[0].AlertID != want {
 		t.Errorf("AlertID = %q, want %q", alerts[0].AlertID, want)
 	}

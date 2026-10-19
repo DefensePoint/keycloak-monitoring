@@ -56,8 +56,7 @@ func newParityFixture(t *testing.T) parityFixture {
 	if dsn == "" || apiURL == "" || realm == "" || token == "" {
 		t.Skip("parity test needs AMFA_TEST_DSN, AMFA_TEST_API_URL, AMFA_TEST_REALM and AMFA_TEST_TOKEN")
 	}
-
-	testdb.ShareDatabase(t, dsn)
+	testdb.Lock(t, dsn)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {

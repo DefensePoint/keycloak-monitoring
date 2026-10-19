@@ -13,7 +13,6 @@ package postgres
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -28,12 +27,8 @@ import (
 func newEventStatsDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	dsn := os.Getenv("KMT_TEST_DATABASE_DSN")
-	if dsn == "" {
-		t.Skip("KMT_TEST_DATABASE_DSN not set; skipping integration test")
-	}
-
-	testdb.ShareDatabase(t, dsn)
+	dsn := testdb.DSN(t, "KMT_TEST_DATABASE_DSN")
+	testdb.Lock(t, dsn)
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
 	})

@@ -3,7 +3,6 @@ package database
 import (
 	"fmt"
 	"io"
-	"os"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -26,11 +25,9 @@ func newUniqueIndexTestClient(t *testing.T) (*Client, *gorm.DB) {
 	if testing.Short() {
 		t.Skip("skipping database test in short mode")
 	}
-	dsn := os.Getenv("KMT_DESTRUCTIVE_TEST_DATABASE_DSN")
-	if dsn == "" {
-		t.Skip("KMT_DESTRUCTIVE_TEST_DATABASE_DSN not set; skipping destructive integration test")
-	}
+	dsn := testdb.DSN(t, "KMT_DESTRUCTIVE_TEST_DATABASE_DSN")
 	testdb.RequireDisposable(t, dsn)
+	testdb.Lock(t, dsn)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
@@ -38,6 +35,7 @@ func newUniqueIndexTestClient(t *testing.T) (*Client, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
+	closeOnCleanup(t, db)
 	if err := db.AutoMigrate(&User{}); err != nil {
 		t.Fatalf("auto-migrate users: %v", err)
 	}
