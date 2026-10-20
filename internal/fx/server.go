@@ -2,6 +2,7 @@ package fx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -75,6 +76,9 @@ type userLookupAdapter struct {
 
 func (a *userLookupAdapter) GetUserBySubject(ctx context.Context, subject string) (*chihttp.UserDetails, error) {
 	user, err := a.repo.GetBySubject(ctx, subject)
+	if errors.Is(err, users.ErrUserNotFound) {
+		return nil, chihttp.ErrUnknownAccount
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -91,6 +95,8 @@ func (a *userLookupAdapter) GetUserBySubject(ctx context.Context, subject string
 		UpdatedAt:          user.UpdatedAt,
 		MustChangePassword: user.MustChangePassword,
 		SessionEpoch:       user.SessionEpoch,
+		IsActive:           user.IsActive,
+		IsBlocked:          user.IsBlocked,
 	}, nil
 }
 

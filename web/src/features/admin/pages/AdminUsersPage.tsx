@@ -330,7 +330,7 @@ export function AdminUsersPage() {
       <ConfirmDialog
         open={deleteDialogOpen}
         title="Deactivate user"
-        message="They will be signed out of the platform and cannot sign in again until they are reactivated. Their account, roles and history are kept. Their API tokens are revoked, and reactivating them does not restore the tokens. Any session they already have stays valid until it expires, for up to 24 hours."
+        message="They will be signed out of the platform and cannot sign in again until they are reactivated. Their account, roles and history are kept. Their API tokens are revoked and any session they have ends at once; reactivating them restores neither."
         onConfirm={handleDeleteConfirm}
         onCancel={handleDeleteCancel}
         isLoading={isDeleting}

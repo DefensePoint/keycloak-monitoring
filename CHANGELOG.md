@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-10-20
+
+Everyone signs in once more after upgrading: sessions from 2.0.0 carry no account ID and are refused.
+
+### Fixed
+
+- Deactivating, blocking or reactivating a user, or changing their password, ends their existing web sessions at once, on every server instance; before, a session stayed valid until it expired
+- The session of an inactive or blocked account, or of a username no account holds any more, is refused
+- Renaming a simple-auth user no longer fails with "Failed to check username availability"
+- A session from before a rename can no longer act as a new account that took the old username
+
 ## [2.0.0] - 2026-10-19
 
 ### Changed
@@ -62,5 +73,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker Compose deployment with multi-stage builds
 - SECURITY.md, CODE_OF_CONDUCT.md, and CONTRIBUTING.md
 
+[2.0.1]: https://github.com/DefensePoint/keycloak-monitoring/releases/tag/v2.0.1
 [2.0.0]: https://github.com/DefensePoint/keycloak-monitoring/releases/tag/v2.0.0
 [1.0.1]: https://github.com/DefensePoint/keycloak-monitoring/releases/tag/v1.0.1

@@ -7,7 +7,7 @@ import (
 
 var (
 	// Version is the current version of the Keycloak Monitoring Tool
-	Version = "2.0.0"
+	Version = "2.0.1"
 
 	// GitCommit is the git commit hash (set during build)
 	GitCommit = "unknown"

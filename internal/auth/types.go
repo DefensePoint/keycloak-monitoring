@@ -19,6 +19,11 @@ type UserInfo struct {
 	Locale             string    `json:"locale"`
 	UpdatedAt          time.Time `json:"updated_at"`
 	MustChangePassword bool      `json:"must_change_password"`
+	// SessionEpoch is the account's session epoch read from the same row as
+	// the password that was checked, for the session a login opens. A
+	// password changed after that read moves the stored epoch past it, so
+	// the session is refused. Nil when the authenticator does not provide it.
+	SessionEpoch *int64 `json:"-"`
 }
 
 // Session represents an authenticated user session.

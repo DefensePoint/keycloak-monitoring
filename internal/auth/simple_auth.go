@@ -87,6 +87,7 @@ func (s *simpleAuthService) Authenticate(ctx context.Context, username, password
 		Locale:             user.Locale,
 		UpdatedAt:          user.UpdatedAt,
 		MustChangePassword: user.MustChangePassword,
+		SessionEpoch:       &user.SessionEpoch,
 	}
 
 	s.logger.Info("User authenticated successfully",
