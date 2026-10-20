@@ -23,6 +23,7 @@ A hosted demo is available so you can try the tool without standing it up from s
 - **User & Client Management**: Browse users, clients, and sessions across all realms and tenants
 - **TimescaleDB Integration**: Efficient time-series data storage for high-volume event data
 - **RESTful API**: Full-featured API for integration, automation, and programmatic access
+- **Adaptive MFA (AMFA) Integration**: Optional. Shows each tenant's risk-scored logins and statistics next to Keycloak's own events, and can alert on risky logins and login-error bursts; see [Adaptive MFA (optional)](#adaptive-mfa-optional)
 
 ### Security & Compliance Features
 
@@ -45,6 +46,16 @@ A hosted demo is available so you can try the tool without standing it up from s
 - **Production Ready**: Built-in logging, error handling, graceful shutdown, and connection pooling
 - **PostgreSQL Storage**: Reliable data persistence with TimescaleDB extensions for time-series data
 - **Session Management**: Secure session handling with configurable cookies and CSRF protection
+
+## Adaptive MFA (optional)
+
+KMT works on its own. With the optional Adaptive MFA (AMFA) add-on, Keycloak asks a risk engine to score every login and requires a second factor only when a login looks risky. KMT then shows those risk-scored logins and statistics, and can alert on them. AMFA is three projects:
+
+- **[keycloak-adaptive-mfa-engine](https://github.com/DefensePoint/keycloak-adaptive-mfa-engine)**: The risk engine. Scores each login against the user's history with local ML inference and returns a risk level; it runs next to Keycloak and sends no data anywhere
+- **[keycloak-adaptive-mfa](https://github.com/DefensePoint/keycloak-adaptive-mfa)**: The Keycloak plugin that calls the engine at login and steps up to MFA when the risk is high
+- **[keycloak-adaptive-mfa-admin-ui](https://github.com/DefensePoint/keycloak-adaptive-mfa-admin-ui)**: A Keycloak Admin Console extension for configuring AMFA
+
+To connect AMFA to KMT, see the [AMFA Integration Guide](docs/amfa-integration.md).
 
 ## Architecture
 
@@ -148,6 +159,7 @@ Comprehensive documentation is available in the `docs/` directory:
 - **[Configuration Guide](docs/configuration.md)** - Detailed configuration reference
 - **[RBAC Guide](docs/rbac.md)** - Role-Based Access Control configuration and management
 - **[Deployment Guide](docs/deployment.md)** - Production deployment instructions
+- **[AMFA Integration Guide](docs/amfa-integration.md)** - Connect each tenant's Adaptive MFA engine to KMT
 - **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
 
 ### Development & Architecture
