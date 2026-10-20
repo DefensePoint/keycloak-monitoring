@@ -13,8 +13,8 @@ import (
 	"testing"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
-	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 	"github.com/DefensePoint/keycloak-monitoring/internal/users"
+	"github.com/DefensePoint/keycloak-monitoring/pkg/database"
 )
 
 func TestRenameFreesTheUsernameForAnotherAccount(t *testing.T) {
