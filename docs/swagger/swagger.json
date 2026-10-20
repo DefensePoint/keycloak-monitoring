@@ -4303,7 +4303,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Deactivates a user by their ID. The account, its roles and its history are kept, and the change is reversible. It takes effect at the next sign-in: an existing session stays valid until it expires (session max_age, 24h by default). Deactivating an active user revokes their API tokens: they stop working immediately and are not restored by reactivation.",
+                "description": "Deactivates a user by their ID. The account, its roles and its history are kept, and the change is reversible. It takes effect at once: deactivating an active user ends their web sessions and revokes their API tokens, and reactivation restores neither.",
                 "produces": [
                     "application/json"
                 ],
