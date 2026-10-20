@@ -9,7 +9,6 @@ import {
   Popup,
   Tooltip,
 } from "react-leaflet";
-import MarkerClusterGroup from "react-leaflet-cluster";
 import { Box, Typography } from "@mui/material";
 import type { AmfaGeoBucket } from "@/shared/types";
 import {
@@ -21,6 +20,7 @@ import {
 import { configureLeafletDefaultIcons } from "@/shared/lib/leafletIcons";
 import { useWorldGeo } from "@/shared/hooks";
 import { CityLabels } from "@/shared/components/CityLabels";
+import { MarkerClusterGroup } from "./markerClusterGroup";
 
 configureLeafletDefaultIcons();
 
