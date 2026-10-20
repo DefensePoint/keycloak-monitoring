@@ -13,7 +13,7 @@ import (
 type epochLookup struct{ epoch int64 }
 
 func (l epochLookup) GetUserBySubject(ctx context.Context, subject string) (*UserDetails, error) {
-	return &UserDetails{ID: 7, Subject: subject, SessionEpoch: l.epoch}, nil
+	return &UserDetails{ID: 7, Subject: subject, SessionEpoch: l.epoch, IsActive: true}, nil
 }
 
 // signedSessionRequest returns a request carrying a session cookie signed the
@@ -27,6 +27,7 @@ func signedSessionRequest(t *testing.T, mgr *auth.CookieSessionManager, fill fun
 	}
 	s.Values["authenticated"] = true
 	s.Values["subject"] = "alice"
+	s.Values["user_id"] = uint(7) // the account every lookup double returns
 	fill(s.Values)
 	rec := httptest.NewRecorder()
 	if err := s.Save(req, rec); err != nil {

@@ -265,6 +265,10 @@ type UserLookupService interface {
 	GetUserBySubject(ctx context.Context, subject string) (*UserDetails, error)
 }
 
+// ErrUnknownAccount is what a UserLookupService returns when no account has
+// the subject, as opposed to a failure to look it up.
+var ErrUnknownAccount = errors.New("no account has this subject")
+
 // TenantLookupService provides tenant lookup functionality.
 type TenantLookupService interface {
 	GetDefaultTenantID(ctx context.Context) (string, error)
@@ -283,9 +287,14 @@ type UserDetails struct {
 	Locale             string    `json:"Locale"`
 	UpdatedAt          time.Time `json:"UpdatedAt"`
 	MustChangePassword bool      `json:"MustChangePassword"`
-	// SessionEpoch counts the user's logouts; a session cookie carrying an
-	// older value is rejected.
+	// SessionEpoch counts the user's logouts, and every deactivation, block
+	// and password change; a session cookie carrying an older value is
+	// rejected.
 	SessionEpoch int64 `json:"-"`
+	// IsActive and IsBlocked are the account's status: a session of an
+	// account that is inactive or blocked is rejected.
+	IsActive  bool `json:"-"`
+	IsBlocked bool `json:"-"`
 }
 
 // AuthMiddleware provides authentication middleware for HTTP handlers.
@@ -421,11 +430,35 @@ func (m *AuthMiddleware) authenticateFromSession(r *http.Request) (*UserDetails,
 	// Fetch full user details from database (including ID for RBAC)
 	if m.userLookup != nil && subject != "" {
 		fullDetails, err := m.userLookup.GetUserBySubject(r.Context(), subject)
+		// No account has the session's subject any more, as after an admin
+		// renames a simple-auth user (the subject is the username): the
+		// session is refused rather than accepted with none of the checks
+		// below. Only a failure to look the account up falls back to the
+		// cookie.
+		if errors.Is(err, ErrUnknownAccount) || (err == nil && fullDetails == nil) {
+			return nil, &authError{message: "session account no longer exists"}
+		}
 		if err == nil && fullDetails != nil {
+			// The subject must still name the account the session was
+			// issued for. A simple-auth user's subject is their username,
+			// which a rename frees for another account to take, and a
+			// session from before the rename would otherwise act as that
+			// account. A session without an account ID, issued before
+			// sessions carried one, cannot show which account it belongs to
+			// and is refused too: its user signs in again once.
+			if id, ok := sessionUserID(session); !ok || id != fullDetails.ID {
+				return nil, &authError{message: "session was issued for another account"}
+			}
 			// The epoch lives in the database, so a logout made through any
 			// server instance, or before a restart, is honored here.
 			if sessionEpoch(session) < fullDetails.SessionEpoch {
 				return nil, &authError{message: "session has been revoked"}
+			}
+			// Deactivating and blocking also move the epoch, but an account
+			// cut off before they did, or by a path that does not, is
+			// refused here all the same.
+			if !fullDetails.IsActive || fullDetails.IsBlocked {
+				return nil, &authError{message: "account is inactive or blocked"}
 			}
 			userDetails = fullDetails
 		}
@@ -871,6 +904,13 @@ func TenantIDMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// sessionUserID is the ID of the account the session was issued for, and
+// false for a session issued before sessions carried one.
+func sessionUserID(session *sessions.Session) (uint, bool) {
+	id, ok := session.Values["user_id"].(uint)
+	return id, ok && id != 0
 }
 
 // sessionEpoch returns the session epoch the login stored in the cookie.

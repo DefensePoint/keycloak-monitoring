@@ -231,11 +231,18 @@ func (h *AuthHandlers) handleSimpleLogin(w http.ResponseWriter, r *http.Request)
 		session.Values["auth_method"] = "simple"
 		session.Values["session_id"] = sessionID
 		session.Values["subject"] = userInfo.Subject
+		session.Values["user_id"] = userInfo.ID
 		session.Values["email"] = userInfo.Email
 		session.Values["name"] = userInfo.Name
 		session.Values["created_at"] = time.Now().Unix()
-		epoch, err := h.currentSessionEpoch(r.Context(), userInfo.Subject)
-		if err != nil {
+		// The epoch read with the password that was checked: a password
+		// changed (or the account cut off) since then has moved the stored
+		// epoch past it, so the middleware refuses this session rather than
+		// keep one opened with the old password.
+		var epoch int64
+		if userInfo.SessionEpoch != nil {
+			epoch = *userInfo.SessionEpoch
+		} else if epoch, err = h.currentSessionEpoch(r.Context(), userInfo.Subject); err != nil {
 			h.log.Error("Failed to read the session epoch", logger.Err(err))
 			httputil.RespondInternalError(w, h.log, "Failed to create session")
 			return
@@ -421,6 +428,9 @@ func (h *AuthHandlers) handleCallback(w http.ResponseWriter, r *http.Request) {
 		cookieSession.Values["auth_method"] = "oauth2"
 		cookieSession.Values["session_id"] = sessionID
 		cookieSession.Values["subject"] = userInfo.Subject
+		if user != nil {
+			cookieSession.Values["user_id"] = user.ID
+		}
 		cookieSession.Values["email"] = userInfo.Email
 		cookieSession.Values["name"] = userInfo.Name
 		cookieSession.Values["created_at"] = time.Now().Unix()

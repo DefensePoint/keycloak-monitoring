@@ -27,6 +27,10 @@ import (
 // it.
 var ErrUserDeleted = errors.New("account has been deleted")
 
+// ErrUserNotFound is returned when no account matches the subject, email or
+// username looked up, as opposed to a failure to look.
+var ErrUserNotFound = errors.New("user not found")
+
 // DeletedAccountError carries the id of the deleted account a login matched.
 //
 // The refusal is logged, and a line saying only that an account was deleted

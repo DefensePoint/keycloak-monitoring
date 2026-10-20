@@ -18,7 +18,6 @@ import (
 
 const (
 	sqlWhereSubject  = "subject = ?"
-	errUserNotFound  = "user not found: %s"
 	errFailedGetUser = "failed to get user: %w"
 )
 
@@ -291,7 +290,7 @@ func (r *Repository) GetBySubject(ctx context.Context, subject string) (*domain.
 	result := r.db.WithContext(ctx).Where(sqlWhereSubject, subject).First(&user)
 
 	if result.Error == gorm.ErrRecordNotFound {
-		return nil, fmt.Errorf(errUserNotFound, subject)
+		return nil, fmt.Errorf("%w: %s", users.ErrUserNotFound, subject)
 	}
 	if result.Error != nil {
 		return nil, fmt.Errorf(errFailedGetUser, result.Error)
@@ -306,7 +305,7 @@ func (r *Repository) GetByEmail(ctx context.Context, email string) (*domain.User
 	result := r.db.WithContext(ctx).Where("email = ?", email).First(&user)
 
 	if result.Error == gorm.ErrRecordNotFound {
-		return nil, fmt.Errorf(errUserNotFound, email)
+		return nil, fmt.Errorf("%w: %s", users.ErrUserNotFound, email)
 	}
 	if result.Error != nil {
 		return nil, fmt.Errorf(errFailedGetUser, result.Error)
@@ -321,7 +320,7 @@ func (r *Repository) GetByUsername(ctx context.Context, username string) (*domai
 	result := r.db.WithContext(ctx).Where("username = ?", username).First(&user)
 
 	if result.Error == gorm.ErrRecordNotFound {
-		return nil, fmt.Errorf("user not found: %s", username)
+		return nil, fmt.Errorf("%w: %s", users.ErrUserNotFound, username)
 	}
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to get user: %w", result.Error)
@@ -441,7 +440,10 @@ func (r *Repository) Update(ctx context.Context, user *domain.User) error {
 		}
 
 		if before.IsActive != user.IsActive || before.IsBlocked != user.IsBlocked {
-			return revokeAPITokens(tx, user.ID)
+			return endAccess(tx, user.ID)
+		}
+		if user.PasswordHash != "" && user.PasswordHash != before.PasswordHash {
+			return endSessions(tx, user.ID)
 		}
 		return nil
 	})
@@ -453,9 +455,10 @@ var errNoSuchUser = errors.New("user not found")
 // userStatus is the part of a user row that decides whether a change to it
 // revokes the user's API tokens.
 type userStatus struct {
-	ID        uint
-	IsActive  bool
-	IsBlocked bool
+	ID           uint
+	IsActive     bool
+	IsBlocked    bool
+	PasswordHash string
 }
 
 // lockStatus reads the matching user's status and locks the row until the
@@ -465,7 +468,7 @@ func lockStatus(tx *gorm.DB, query string, arg any) (userStatus, error) {
 	var row userStatus
 	err := tx.Model(&database.User{}).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("id", "is_active", "is_blocked").
+		Select("id", "is_active", "is_blocked", "password_hash").
 		Where(query, arg).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -475,6 +478,33 @@ func lockStatus(tx *gorm.DB, query string, arg any) (userStatus, error) {
 		return userStatus{}, fmt.Errorf("failed to read user: %w", err)
 	}
 	return row, nil
+}
+
+// endAccess ends what a user holds when their account is cut off or
+// restored: their API tokens (see revokeAPITokens) and their web sessions
+// (see endSessions).
+func endAccess(tx *gorm.DB, userID uint) error {
+	if err := revokeAPITokens(tx, userID); err != nil {
+		return err
+	}
+	return endSessions(tx, userID)
+}
+
+// endSessions ends every web session the user holds: a session cookie carries
+// the user's session epoch from its sign-in, and the auth middleware refuses
+// one older than the epoch stored here, on the next request.
+//
+// Deactivating, blocking and changing the password are how an account is cut
+// off or taken back, for offboarding, misuse or a suspected compromise, and
+// a session left open would keep the access they meant to end until it
+// expired, up to session max_age, 24 hours by default. It runs in the same
+// transaction as the change, so neither can commit without the other.
+func endSessions(tx *gorm.DB, userID uint) error {
+	if err := tx.Model(&database.User{}).Where("id = ?", userID).
+		Update("session_epoch", gorm.Expr("session_epoch + 1")).Error; err != nil {
+		return fmt.Errorf("failed to end the user's sessions: %w", err)
+	}
+	return nil
 }
 
 // revokeAPITokens revokes every live API token of a user who is being
@@ -517,15 +547,8 @@ func revokeAPITokens(tx *gorm.DB, userID uint) error {
 // the platform sets deleted_at on a user, so an account is only ever
 // deactivated, and reactivating it restores everything but its API tokens.
 //
-// Deactivating an active account revokes its API tokens in the same
-// transaction; see revokeAPITokens.
-//
-// It does not end a session that already exists. The middleware re-reads the
-// account on every request but only to recover the ID that RBAC needs, and the
-// struct it fills in carries no status field, so is_active is never consulted
-// once somebody holds a session: access continues until that session expires,
-// up to session max_age, 24 hours by default. API tokens are revoked, and stop
-// working immediately.
+// Deactivating an active account revokes its API tokens and ends its web
+// sessions in the same transaction; see endAccess.
 func (r *Repository) Delete(ctx context.Context, userID uint) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		before, err := lockStatus(tx, "id = ?", userID)
@@ -543,7 +566,7 @@ func (r *Repository) Delete(ctx context.Context, userID uint) error {
 		}
 
 		if before.IsActive {
-			return revokeAPITokens(tx, userID)
+			return endAccess(tx, userID)
 		}
 		return nil
 	})
@@ -565,10 +588,14 @@ func (r *Repository) UpdateLastAccessed(ctx context.Context, subject string) err
 
 // UpdatePassword updates a user's password hash.
 func (r *Repository) UpdatePassword(ctx context.Context, userID uint, passwordHash string) error {
+	// A new password ends the sessions the old one opened (see endSessions).
 	result := r.db.WithContext(ctx).
 		Model(&database.User{}).
 		Where("id = ?", userID).
-		Update("password_hash", passwordHash)
+		Updates(map[string]any{
+			"password_hash": passwordHash,
+			"session_epoch": gorm.Expr("session_epoch + 1"),
+		})
 
 	if result.Error != nil {
 		return fmt.Errorf("failed to update password: %w", result.Error)
@@ -579,10 +606,12 @@ func (r *Repository) UpdatePassword(ctx context.Context, userID uint, passwordHa
 
 // UpdatePasswordWithFlags updates a user's password hash, timestamp, and must change password flag.
 func (r *Repository) UpdatePasswordWithFlags(ctx context.Context, userID uint, passwordHash string, passwordChangedAt *time.Time, mustChangePassword bool) error {
+	// A new password ends the sessions the old one opened (see endSessions).
 	updates := map[string]interface{}{
 		"password_hash":        passwordHash,
 		"password_changed_at":  passwordChangedAt,
 		"must_change_password": mustChangePassword,
+		"session_epoch":        gorm.Expr("session_epoch + 1"),
 	}
 
 	result := r.db.WithContext(ctx).
@@ -626,7 +655,7 @@ func (r *Repository) BlockUser(ctx context.Context, subject string, reason strin
 		}
 
 		if !before.IsBlocked {
-			return revokeAPITokens(tx, before.ID)
+			return endAccess(tx, before.ID)
 		}
 		return nil
 	})
@@ -658,7 +687,7 @@ func (r *Repository) UnblockUser(ctx context.Context, subject string) error {
 		}
 
 		if before.IsBlocked {
-			return revokeAPITokens(tx, before.ID)
+			return endAccess(tx, before.ID)
 		}
 		return nil
 	})

@@ -408,38 +408,48 @@ soft-deleted — only deactivated. The route keeps the `DELETE` verb because tha
 is the REST spelling of "remove this", and changing it would break existing
 clients.
 
-### It does not take effect immediately
+### It takes effect at once
 
-Deactivation is checked when somebody signs in, not on every request, so **a
-session created before the deactivation stays valid until it expires**: up to
-`auth.session.max_age`, 24 hours by default.
+Deactivating an account ends its web sessions and revokes its API tokens, in
+the same transaction as the change. Blocking an account, unblocking or
+reactivating it, and changing its password (by the user or by an
+administrator) end its sessions too.
 
-The middleware does re-read the account on each request — `middleware.go:304`
-calls `GetUserBySubject` — but only to recover the user ID that RBAC needs. It
-never looks at `is_active` or `is_blocked`, and it cannot: `UserDetails`, the
-struct that lookup fills in, carries no status field at all
-(`internal/fx/server.go:78`). A failed lookup is ignored too, falling back to
-whatever the cookie said. So the account is read on every request and its state
-is never consulted.
-
-That makes the fix smaller than it looks, if it is ever wanted: add the two
-status fields to `UserDetails`, populate them in the adapter, and refuse in the
-middleware, which is what API-token authentication already does.
+A session cookie carries the account's session epoch from its sign-in, and the
+auth middleware re-reads the account on every request: it refuses a cookie
+whose epoch is older than the account's, and any session of an account that is
+inactive or blocked. So the next request after the change is refused, whichever
+server instance it reaches.
 
 | Access route | When deactivation takes effect |
 |---|---|
-| A session that already exists | When it expires, up to `max_age` (default 24h) |
+| A session that already exists | At its next request |
 | A new sign-in | Immediately — refused as inactive |
-| API tokens | Immediately — the owner is re-checked on every call |
+| API tokens | Immediately — revoked, and the owner is re-checked on every call |
 
-The only thing that ends a live session early is the user logging out, which
-adds their session to an in-memory blacklist. That blacklist is per-process, so
-it does not carry across replicas, and no administrator action reaches it.
+Reactivating or unblocking restores the account, not its sessions or tokens:
+the user signs in again and issues new tokens.
 
-**If you are cutting off access urgently**, deactivating is not enough on its
-own. Shorten `auth.session.max_age`, or revoke at the identity provider and end
-the session there, or restart the platform — an in-memory blacklist and its
-sessions do not survive that.
+Changing your own password ends your own session as well, so you sign in again
+with the new password.
+
+Renaming a simple-auth user ends their sessions too: their username is the
+subject the session is tied to, and a session whose subject no account holds
+is refused. They sign in again with the new name.
+
+The freed username can be given to a new account, which then holds the old
+subject. A session cookie also carries the ID of the account it was issued
+for, and the middleware refuses a session whose subject now names a different
+account, so a session of the renamed user never acts as the new one.
+
+Sessions issued before cookies carried the account ID cannot show which
+account they belong to and are refused: after the upgrade that adds it,
+everyone signed in signs in once more.
+
+One gap remains: if the account cannot be read on a request because of a
+database error, the middleware falls back to what the session cookie says
+rather than refusing. A deactivation still ends that session on the first
+request where the account can be read.
 
 ### Deactivating is not deleting
 

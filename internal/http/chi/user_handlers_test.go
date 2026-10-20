@@ -3,6 +3,7 @@ package chi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,13 +15,16 @@ import (
 	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/users"
 )
 
 // fakeUserService keeps users in memory and records the writes it receives.
 type fakeUserService struct {
-	users   map[uint]*domain.User
-	updated []uint
-	deleted []uint
+	users       map[uint]*domain.User
+	updated     []uint
+	deleted     []uint
+	lastUpdate  *domain.User
+	usernameErr error // a failure to look a username up
 }
 
 func (f *fakeUserService) ListUsers(ctx context.Context, opts *httputil.ListOptions) ([]*domain.User, error) {
@@ -40,14 +44,27 @@ func (f *fakeUserService) GetByID(ctx context.Context, userID uint) (*domain.Use
 	return &cp, nil
 }
 
+// GetByUsername answers as the real repository does: an error wrapping
+// users.ErrUserNotFound when no user has the name.
 func (f *fakeUserService) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
-	return nil, nil
+	if f.usernameErr != nil {
+		return nil, f.usernameErr
+	}
+	for _, u := range f.users {
+		if u.Username == username {
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: %s", users.ErrUserNotFound, username)
 }
 
 func (f *fakeUserService) CreateUser(ctx context.Context, user *domain.User) error { return nil }
 
 func (f *fakeUserService) UpdateUser(ctx context.Context, user *domain.User) error {
 	f.updated = append(f.updated, user.ID)
+	cp := *user
+	f.lastUpdate = &cp
 	return nil
 }
 

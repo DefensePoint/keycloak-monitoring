@@ -2,6 +2,7 @@ package chi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/http/dto/requests"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/rbac"
+	"github.com/DefensePoint/keycloak-monitoring/internal/users"
 )
 
 var _ = dto.ErrorResponse{} // ensure dto import for swagger
@@ -319,8 +321,9 @@ func (h *UserHandlers) updateUser(w http.ResponseWriter, r *http.Request) {
 			user.Name = *req.Name
 		}
 		if req.Username != nil && *req.Username != "" && *req.Username != user.Username {
+			// No account with the name is the answer we hope for, not a fault.
 			existingUser, err := h.service.GetByUsername(ctx, *req.Username)
-			if err != nil {
+			if err != nil && !errors.Is(err, users.ErrUserNotFound) {
 				h.log.Error("Failed to check username availability", logger.Err(err))
 				httputil.RespondInternalError(w, h.log, "Failed to check username availability")
 				return
@@ -380,17 +383,14 @@ func (h *UserHandlers) updateUser(w http.ResponseWriter, r *http.Request) {
 // kept, the change is reversible by setting the account active again, and
 // nothing is erased. Everything a person reads now says deactivate.
 //
-// One consequence worth knowing before using this to cut off access: it takes
-// effect at the next sign-in, not immediately. A session created before the
-// change stays valid until it expires — up to the configured session max_age,
-// 24 hours by default. The middleware does re-read the account on every
-// request, but only to recover the ID that RBAC needs: UserDetails carries no
-// status field, so is_active is never consulted once a session exists. API
-// tokens are different: deactivating an active account revokes them, so they
-// stop working at once and do not come back if the account is reactivated.
+// It takes effect at once: deactivating an active account ends its web
+// sessions and revokes its API tokens in the same transaction, and neither
+// comes back if the account is reactivated (see the users repository's
+// endAccess). The auth middleware also refuses any session of an inactive or
+// blocked account on its next request.
 //
 //	@Summary		Deactivate user
-//	@Description	Deactivates a user by their ID. The account, its roles and its history are kept, and the change is reversible. It takes effect at the next sign-in: an existing session stays valid until it expires (session max_age, 24h by default). Deactivating an active user revokes their API tokens: they stop working immediately and are not restored by reactivation.
+//	@Description	Deactivates a user by their ID. The account, its roles and its history are kept, and the change is reversible. It takes effect at once: deactivating an active user ends their web sessions and revokes their API tokens, and reactivation restores neither.
 //	@Tags			users
 //	@Produce		json
 //	@Param			userID	path		int	true	"User ID"
