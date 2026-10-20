@@ -44,12 +44,13 @@ keycloak:
     prod-keycloak:
       enabled: true
       server_url: "https://kc-prod.example.com"
-      admin_username: "admin"
-      admin_password: "${KC_PROD_ADMIN_PASSWORD}"
+      admin_realm: "master"
+      client_id: "monitoring-service"
+      client_secret: "${PROD_KEYCLOAK_CLIENT_SECRET}"
       amfa:
         enabled: true
         events_lookback_days: 30                # default 30; capped at 90 (drives normalizeTimeWindow)
-        expected_schema_version: c00d6d7d197c   # alembic_version this AMFA was tested against; empty = skip check
+        expected_schema_version: ""             # alembic_version this AMFA was tested against; empty = skip check
         database:
           host: amfa-prod.internal
           port: 5432
@@ -64,7 +65,9 @@ keycloak:
     legacy-tenant:
       enabled: true
       server_url: "https://kc-legacy.example.com"
-      admin_password: "${KC_LEGACY_ADMIN_PASSWORD}"
+      admin_realm: "master"
+      client_id: "monitoring-service"
+      client_secret: "${LEGACY_KEYCLOAK_CLIENT_SECRET}"
       # No amfa: block → AMFA Events page returns "not configured" for this tenant
 ```
 
@@ -99,7 +102,7 @@ In Keycloak, on the admin-realm client named in `client_id`:
 - An audience mapper that adds `amfa` to the access token, or the value of AMFA's `OIDC_EXPECTED_AUDIENCE` if it was changed.
 - Standard flow (browser login) and direct access grants turned off, so the client is used only as a service account.
 
-In AMFA (needs an AMFA release that supports `MONITORING_TRUSTED_READERS`):
+In AMFA (needs [AMFA engine](https://github.com/DefensePoint/keycloak-adaptive-mfa-engine) 1.1.0 or later, the first release with `MONITORING_TRUSTED_READERS`):
 
 - `OIDC_TRUSTED_BASE_URLS` includes the tenant's Keycloak base URL.
 - `MONITORING_TRUSTED_READERS` lists the client as `{issuer}|{client_id}`, for example `https://kc-prod.example.com/realms/master|monitoring-service`. The issuer must match the token's `iss` exactly. That is normally `{server_url}/realms/{admin_realm}`, but follows Keycloak's configured hostname when one is set.
