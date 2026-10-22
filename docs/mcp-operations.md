@@ -69,7 +69,7 @@ This affects MCP access, not the main application. Disabling the service does
 not revoke its tokens: revoke unused tokens separately with
 `DELETE /api/tokens/<id>` on the main API.
 
-## Customer connectivity and screenshot check
+## Connect to the MCP server
 
 Use an approved private route or a TLS endpoint supplied by your operator.
 For a local binary or local Compose service:
@@ -99,30 +99,10 @@ unset MCP_TOKEN
 These Bash examples require curl, sed and jq. The final example assumes a
 single-tenant token. For a multi-tenant token, supply `tenant` in tenant-scoped
 tool arguments. For a single-tenant token, omit it; the server injects it.
-Capture `whoami`, the discovered tool names and a successful scoped read.
-Keep the token, login response, cookies and secret values out of screenshots.
+A successful `whoami` response confirms authentication. The tenant and realm
+responses show which monitoring data the token can access.
 HTTP 200 alone is insufficient: JSON-RPC `error` or `result.isError: true`
 means the tool failed. Empty result arrays can be valid.
-
-## Retest checklist
-
-Record application version, image digest/source SHA, environment, UTC time and
-each actual result. Repeat after releases or MCP configuration/auth changes.
-
-- Enable: process/pod is ready; `/health` and `/ready` return 200.
-- Authenticate: missing, invalid and revoked tokens return 401.
-- Protocol: initialization and `tools/list` succeed; check the advertised tools.
-- Data: `whoami`, tenant/realm reads, alerts, events and configured AMFA reads
-  succeed without JSON-RPC/tool errors. Compare representative results with
-  the UI/API for the same scope. Test ID-based tools with real returned IDs.
-- Scope: a restricted token cannot read outside its tenant/realm permissions.
-  Include a multi-tenant token when checking cross-tenant denial; single-tenant
-  tokens reject an explicitly supplied tenant argument at validation time.
-- Database: confirm the MCP role can SELECT required tables and cannot write.
-- Disable: stop/scale down MCP, confirm endpoint requests fail and the main
-  application remains healthy.
-- Re-enable: establish a new connection and repeat authenticated discovery
-  and representative data calls. Revoke temporary test tokens afterward.
 
 ## Troubleshooting
 
