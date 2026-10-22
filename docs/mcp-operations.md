@@ -1,10 +1,13 @@
-# MCP operations and customer readiness
+# Keycloak Monitoring Tool MCP user guide
 
-KMT includes a separate, read-only MCP server (`cmd/mcp-server`). It exposes
-tenants, realm listings and tenant health, alerts, events and AMFA statistics using Streamable HTTP.
-PMT also ships this capability. Neither service is enabled just by starting the
-main web/API process. MCP clients authenticate with a personal access token;
-the token's tenant allowlist and the user's RBAC permissions both apply.
+Keycloak Monitoring Tool (KMT) is the monitoring application for Keycloak
+customers. It includes a separate, read-only Model Context Protocol (MCP)
+server (`cmd/mcp-server`). The server exposes tenants, realm listings, tenant
+health, alerts, events and Adaptive Multi-Factor Authentication (AMFA)
+statistics using Streamable HTTP. Starting the main web/API process does not
+start the MCP server. Clients authenticate with a personal access token; the
+token's tenant allowlist and the user's role-based access control (RBAC)
+permissions both apply.
 
 See the [server reference](../cmd/mcp-server/README.md) for complete prerequisites,
 token administration, client configuration and tool parameters.
