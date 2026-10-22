@@ -69,7 +69,107 @@ This affects MCP access, not the main application. Disabling the service does
 not revoke its tokens: revoke unused tokens separately with
 `DELETE /api/tokens/<id>` on the main API.
 
-## Connect to the MCP server
+## Add the server to an AI client
+
+Install your chosen client and sign in to its AI provider account. Create a
+KMT personal access token as described above; it is separate from your
+AI provider credentials. The examples use the command-line clients Claude
+Code, Codex CLI and Grok Build.
+
+In Bash, set the endpoint and enter the token without displaying it:
+
+```bash
+export KMT_MCP_URL=http://127.0.0.1:7889/mcp
+read -r -s -p 'KMT MCP token: ' KMT_MCP_TOKEN; echo
+export KMT_MCP_TOKEN
+```
+
+Replace the URL with your operator-provided endpoint, including `/mcp`. Keep
+any required VPN or port-forward running. The client process must be able to
+reach this address. A hosted client cannot use your workstation's loopback
+address. For a remote connection, use HTTPS or an encrypted private tunnel.
+
+Choose the instructions for your client below. Start a new client session
+from the terminal where these variables are exported. A desktop application
+opened separately does not automatically inherit that terminal's environment.
+
+### Claude Code
+
+Add the server to your user configuration:
+
+```bash
+claude mcp add --transport http --scope user kmt "$KMT_MCP_URL" \
+  --header 'Authorization: Bearer ${KMT_MCP_TOKEN}'
+claude
+```
+
+Keep the header in single quotes so the saved configuration refers to the
+environment variable instead of storing its current token value. Inside
+Claude Code, use `/mcp` to check the connection and approve the server if asked.
+See [Claude Code MCP setup](https://code.claude.com/docs/en/mcp).
+
+### Codex CLI
+
+```bash
+codex mcp add kmt --url "$KMT_MCP_URL" \
+  --bearer-token-env-var KMT_MCP_TOKEN
+codex
+```
+
+The option takes the environment variable's name, without `$`. Codex reads
+its value when connecting. Use `/mcp` in the new session to inspect the tools.
+`codex mcp list` confirms registration; an actual tool call confirms access.
+See [Codex MCP setup](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+
+### Grok Build
+
+```bash
+grok mcp add --transport http --scope user kmt "$KMT_MCP_URL" \
+  --header 'Authorization: Bearer ${KMT_MCP_TOKEN}'
+grok mcp doctor kmt
+grok
+```
+
+The single-quoted header preserves the environment reference; Grok expands
+it when loading the configuration. Inside Grok, use `/mcps` to inspect the
+server and refresh its connection. These instructions are for Grok Build's
+CLI, not the Grok website. See [Grok MCP setup](https://docs.x.ai/build/features/mcp-servers).
+
+### Claude Desktop
+
+Follow the [Claude Desktop configuration](../cmd/mcp-server/README.md#claude-desktop)
+to connect through the local `mcp-remote` bridge. It requires Node.js with
+`npx`. Keep the token in your private client configuration and restart Desktop
+after changing it. The bridge connects to the same HTTP endpoint.
+
+### First request
+
+In your chosen client, ask:
+
+> Use the kmt MCP server to call whoami, then list my available tenants
+> and realms. Use actual MCP tools and report any connection or tool errors.
+
+For a single-tenant token, omit the `tenant` argument in tenant-scoped calls;
+the server supplies it. A multi-tenant token must specify an allowed tenant.
+If a token expires or is revoked, obtain a replacement, update the environment
+variable and restart the client. Do not paste the token into the conversation
+or commit it to a repository.
+
+### Remove a client connection
+
+Run the removal command for the client you configured:
+
+```bash
+claude mcp remove --scope user kmt
+codex mcp remove kmt
+grok mcp remove --scope user kmt
+unset KMT_MCP_TOKEN KMT_MCP_URL
+```
+
+Removing client configuration or unsetting a variable does not revoke the
+token. Revoke unused tokens through the main API as described above.
+
+## Connect using curl
 
 Use an approved private route or a TLS endpoint supplied by your operator.
 For a local binary or local Compose service:
