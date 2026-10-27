@@ -88,6 +88,8 @@ For detailed architecture information, see the [architecture docs](docs/architec
 
 ### MCP Server
 
+For enable/disable procedures and a repeatable customer connectivity check, see the [MCP operations guide](docs/mcp-operations.md).
+
 `cmd/mcp-server` exposes tenants, Keycloak realms, alerts, events and Adaptive Multi-Factor Authentication (AMFA) statistics to MCP clients such as Claude Code and Claude Desktop. Every tool is read-only, it runs as its own process alongside the API server, and it is disabled by default: set `mcp.enabled` in `config.yaml` to turn it on. Clients authenticate with personal access tokens and see only what the token and the acting user's RBAC roles allow. See [cmd/mcp-server/README.md](cmd/mcp-server/README.md) for the token lifecycle, client setup and tool reference.
 
 ## Quick Start
