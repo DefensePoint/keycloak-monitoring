@@ -9,6 +9,13 @@ start the MCP server. Clients authenticate with a personal access token; the
 token's tenant allowlist and the user's role-based access control (RBAC)
 permissions both apply.
 
+AMFA statistics require AMFA to be configured for the tenant. If your tenant
+does not use AMFA, `get_amfa_stats` returns the tool error
+`AMFA not available for this tenant`. This is expected and does not indicate
+a broken MCP connection. You can still use the other monitoring tools within
+your permissions. To retrieve AMFA statistics, ask your administrator to
+configure AMFA for the tenant.
+
 See the [server reference](../cmd/mcp-server/README.md) for complete prerequisites,
 token administration, client configuration and tool parameters.
 
@@ -213,6 +220,7 @@ means the tool failed. Empty result arrays can be valid.
 | Ready but requests return 401 | Token expiry/revocation, nonempty allowlist, user state, SSO sign-in age; API schema and DB grants |
 | HTTP 400 | Include both Accept media types; inspect request parameters |
 | Browser request rejected | Exact Origin must be in `mcp.origin_allowlist`; keep empty for non-browser private clients |
+| `AMFA not available for this tenant` | Expected for a tenant without AMFA configured. Configure AMFA for the tenant to use `get_amfa_stats`; other tools remain available within your permissions. |
 | HTTP 200 but tool error | Inspect JSON-RPC error/isError, tenant/realm scope and permissions |
 | jq parse error | Strip SSE `data:` framing as shown above |
 
