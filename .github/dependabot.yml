@@ -1,36 +1,42 @@
 version: 2
+
+# Dependabot reads this file from the default branch. Promote through the
+# normal release process after review; merging to development alone is not active.
+# Security updates still use the default branch independently of this group.
+multi-ecosystem-groups:
+  dependencies:
+    schedule:
+      interval: "weekly"
+    target-branch: "development"
+    assignees: ["john-defpt"]
+
 updates:
   # Go modules (go.mod / go.sum at repo root)
   - package-ecosystem: "gomod"
     directory: "/"
-    target-branch: "main"
-    schedule:
-      interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "dependencies"
 
   # Root package.json (commitlint/husky tooling)
   - package-ecosystem: "npm"
     directory: "/"
-    target-branch: "main"
-    schedule:
-      interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "dependencies"
 
   # Web frontend
   - package-ecosystem: "npm"
     directory: "/web"
-    target-branch: "main"
-    schedule:
-      interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "dependencies"
 
   # Base images in build/Dockerfile
   - package-ecosystem: "docker"
     directory: "/build"
-    target-branch: "main"
-    schedule:
-      interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "dependencies"
 
   # Keeps GitHub Actions up to date once you add workflows
   - package-ecosystem: "github-actions"
     directory: "/"
-    target-branch: "main"
-    schedule:
-      interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "dependencies"
