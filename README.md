@@ -13,7 +13,7 @@ A hosted demo is available so you can try the tool without standing it up from s
 
 Want to explore the Adaptive MFA configuration in the Keycloak admin console, or see how it would fit your setup? Contact us at [support@defensepoint.com](mailto:support@defensepoint.com).
 
-Other visitors can see your test user in KMT, including its username, name, email address and the location of its logins. Use a username and name that don't identify you, an email address you're comfortable sharing, and a password you don't use anywhere else. Test users are deleted regularly.
+Other visitors can see your test user in KMT, including its username, name, email address and the location of its logins. Use a username and name that don't identify you, an email address you're comfortable sharing, and a password you don't use anywhere else.
 
 ### Things to try
 
