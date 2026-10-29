@@ -3,7 +3,7 @@
 ARG SERVICE=server
 
 # -------- Frontend Builder: Node.js for web assets --------
-FROM --platform=$BUILDPLATFORM node:26.11.1-alpine@sha256:143494b1da2945f061539253adc65e4f1569ddf07da2d384c022c791a9d90a4a AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:26.12.1-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS frontend-builder
 
 # Re-declare ARG to use it in this stage
 ARG SERVICE
@@ -30,7 +30,7 @@ else \
 fi
 
 # -------- Backend Builder: pinned Go toolchain, no network after mod download --------
-FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS backend-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS backend-builder
 
 # Re-declare ARG to use it in this stage
 ARG SERVICE
@@ -79,7 +79,7 @@ RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
 # For web: use distroless for minimal size
 
 # Server runtime with Chrome
-FROM debian:13.7-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS runtime-server
+FROM debian:13.7-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4 AS runtime-server
 
 # Install Chrome and dependencies for PDF generation
 RUN apt-get update && apt-get install -y \
