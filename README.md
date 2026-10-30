@@ -6,9 +6,30 @@ A comprehensive monitoring and security compliance platform for Keycloak identit
 
 ## Hosted demo
 
-A hosted demo is available so you can try the tool without standing it up from scratch:
+A hosted demo is available so you can try the tool without standing it up from scratch. It pairs KMT with a Keycloak realm protected by risk-based authentication from [Adaptive MFA](https://github.com/DefensePoint/keycloak-adaptive-mfa-engine), so you can produce logins and follow them in KMT.
 
-- [https://keycloak-monitoring-demo.defensepoint.com/](https://keycloak-monitoring-demo.defensepoint.com/)
+- **Create your own test user:** open the [demo login page](https://login.keycloak-monitoring-demo.defensepoint.com/realms/customerDemo/account/), click Register, and verify your email address.
+- **KMT (shared demo account):** [https://keycloak-monitoring-demo.defensepoint.com/](https://keycloak-monitoring-demo.defensepoint.com/), username `operator-user`, password `Psw123456@`.
+
+Want to explore the Adaptive MFA configuration in the Keycloak admin console, or see how it would fit your setup? Contact us at [support@defensepoint.com](mailto:support@defensepoint.com).
+
+Other visitors can see your test user in KMT, including its username, name, email address and the location of its logins. Use a username and name that don't identify you, an email address you're comfortable sharing, and a password you don't use anywhere else.
+
+### Things to try
+
+1. **Log in as your test user.** While a user has little login history, logins are treated as higher risk and ask for an authenticator app code; the first time, you'll be shown a QR code to set it up. Some logins send a one-time code to your email address instead.
+2. **Watch the risk change.** After a few normal logins from the same device, the user builds a profile and the risk drops. Then log in from a different device, for example your phone, and see the extra verification come back.
+3. **Follow it in KMT.** Open Events and filter by event type Login. Adaptive MFA logins show the risk level, and their details show the location, device and browser. Alerts shows what KMT flagged, with a recommendation for each.
+
+In the demo realm, risk level 1 (low) logs in with just the password, level 2 (medium) asks for a code sent by email, level 3 (high) asks for an authenticator app code, and level 4 (very high) blocks the login. In your own setup you decide what each level does: no extra step, MFA, a block, or just an alert in the background.
+
+### How Adaptive MFA is configured in the demo
+
+Adaptive MFA is configured per realm in the Keycloak admin console, under Realm Settings and then Adaptive MFA. Each risk signal (device, operating system, IP address, location, impossible travel, login failures, time of day, inactive accounts and more) can be turned on or off and given its own weight, with allow and deny lists for networks, countries and operating systems.
+
+![Adaptive MFA settings in the Keycloak admin console](assets/amfa-settings.png)
+
+To try different settings yourself, run Adaptive MFA locally with the Docker Compose stack in [keycloak-adaptive-mfa-engine](https://github.com/DefensePoint/keycloak-adaptive-mfa-engine). Notifications to Slack or email and configuration scanning aren't enabled in the hosted demo.
 
 ## Features
 
