@@ -1,0 +1,52 @@
+name: Container dependency validation
+
+on:
+  pull_request:
+    branches: [development]
+    paths:
+      - build/Dockerfile
+      - package.json
+      - package-lock.json
+      - .github/workflows/container-ci.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check commitlint with the updated Node image
+        run: |
+          node_image=$(awk '$1 == "FROM" && / AS frontend-builder$/ {print $3}' build/Dockerfile)
+          test -n "$node_image"
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            "$node_image" \
+            sh -euc 'npm ci --ignore-scripts --no-audit --no-fund
+              printf ":wrench: chore(deps): update dependencies\n" | npx --no-install commitlint
+              if printf ":wrench: notatype: invalid message\n" | npx --no-install commitlint; then
+                exit 1
+              fi'
+      - name: Test with the Dockerfile Go toolchain
+        run: |
+          docker build -f build/Dockerfile --target backend-builder \
+            --build-arg SERVICE=server -t kmt-ci-builder .
+          docker run --rm -e CGO_ENABLED=1 kmt-ci-builder go test -short -race ./...
+      - name: Build and smoke-test all service images
+        run: |
+          for service in server web mcp-server; do
+            docker build -f build/Dockerfile --build-arg SERVICE="$service" \
+              -t "kmt-ci:$service" .
+            docker run --rm --network none "kmt-ci:$service" -h
+          done
+      - name: Check Chromium in the updated server runtime
+        run: |
+          docker run --rm --network none --read-only --tmpfs /tmp \
+            --entrypoint /usr/bin/chromium kmt-ci:server \
+            --headless --no-sandbox --disable-gpu --disable-dev-shm-usage \
+            --user-data-dir=/tmp/chromium \
+            --dump-dom 'data:text/html,<html><body>kmt-runtime-smoke</body></html>' \
+            > /tmp/kmt-chromium.html
+          grep -q kmt-runtime-smoke /tmp/kmt-chromium.html
