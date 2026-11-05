@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Check commitlint with the updated Node image
         run: |
           node_image=$(awk '$1 == "FROM" && / AS frontend-builder$/ {print $3}' build/Dockerfile)
