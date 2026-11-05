@@ -35,7 +35,7 @@ updates:
     patterns: ["*"]
     multi-ecosystem-group: "dependencies"
 
-  # Keeps GitHub Actions up to date once you add workflows
+  # GitHub Actions in .github/workflows
   - package-ecosystem: "github-actions"
     directory: "/"
     patterns: ["*"]
