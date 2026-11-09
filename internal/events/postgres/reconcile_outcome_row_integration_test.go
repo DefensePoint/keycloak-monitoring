@@ -60,7 +60,7 @@ func saveAMFA(t *testing.T, repo *Repository, db *gorm.DB, corr, typ string, age
 func enriched(t *testing.T, db *gorm.DB, eventID string) bool {
 	t.Helper()
 	var country *string
-	if err := db.Raw(`SELECT country FROM events WHERE event_id = ?`, eventID).Scan(&country).Error; err != nil {
+	if err := db.Raw(`SELECT country FROM events WHERE event_id = ? AND deleted_at IS NULL`, eventID).Scan(&country).Error; err != nil {
 		t.Fatalf("read %s: %v", eventID, err)
 	}
 	return country != nil && *country == "DE"
@@ -69,7 +69,7 @@ func enriched(t *testing.T, db *gorm.DB, eventID string) bool {
 func rowExists(t *testing.T, db *gorm.DB, eventID string) bool {
 	t.Helper()
 	var n int64
-	if err := db.Raw(`SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&n).Error; err != nil {
+	if err := db.Raw(`SELECT COUNT(*) FROM events WHERE event_id = ? AND deleted_at IS NULL`, eventID).Scan(&n).Error; err != nil {
 		t.Fatalf("count %s: %v", eventID, err)
 	}
 	return n > 0
@@ -107,7 +107,7 @@ func TestReconcileAMFAMerges_ARightCodeAfterAWrongOneKeepsTheDataOnTheLogin(t *t
 	corr := testEventID(t, "corr")
 	wrongCode := saveKC(t, repo, db, corr, "kc-login-error", "LOGIN_ERROR")
 	login := saveKC(t, repo, db, corr, "kc-login", "LOGIN")
-	saveAMFA(t, repo, db, corr, "LOGIN", 0)
+	amfa := saveAMFA(t, repo, db, corr, "LOGIN", 0)
 
 	reconcile(t, repo)
 
@@ -116,6 +116,9 @@ func TestReconcileAMFAMerges_ARightCodeAfterAWrongOneKeepsTheDataOnTheLogin(t *t
 	}
 	if enriched(t, db, wrongCode) {
 		t.Errorf("the wrong code's LOGIN_ERROR got the data of the successful login")
+	}
+	if rowExists(t, db, amfa) {
+		t.Errorf("the absorbed AMFA row is still there")
 	}
 }
 
@@ -165,5 +168,32 @@ func TestReconcileAMFAMerges_FallsBackToTheOtherRowsWhenNoneOfItsTypeArrives(t *
 	}
 	if rowExists(t, db, amfa) {
 		t.Errorf("the absorbed AMFA row is still there")
+	}
+}
+
+func TestReconcileAMFAMerges_ALoginThatArrivesAfterTheFallbackGetsNone(t *testing.T) {
+	repo, db := newReconcileTestRepo(t)
+	corr := testEventID(t, "corr")
+	postBroker := saveKC(t, repo, db, corr, "kc-post-broker", "IDENTITY_PROVIDER_POST_LOGIN")
+	amfa := saveAMFA(t, repo, db, corr, "LOGIN", amfaMergeFallbackAfter+time.Minute)
+
+	// No LOGIN within the wait: the fallback merges onto the post broker row.
+	reconcile(t, repo)
+	if !enriched(t, db, postBroker) {
+		t.Fatalf("after the wait the post broker row should get the AMFA data")
+	}
+	if rowExists(t, db, amfa) {
+		t.Fatalf("the absorbed AMFA row is still there")
+	}
+
+	// The LOGIN arrives later. The AMFA row is gone, so the data stays on the
+	// post broker row and the LOGIN gets none.
+	login := saveKC(t, repo, db, corr, "kc-login", "LOGIN")
+	reconcile(t, repo)
+	if enriched(t, db, login) {
+		t.Errorf("the late LOGIN got AMFA data after the fallback had already merged it")
+	}
+	if !enriched(t, db, postBroker) {
+		t.Errorf("the post broker row lost the AMFA data")
 	}
 }
