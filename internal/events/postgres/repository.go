@@ -371,6 +371,11 @@ func (r *Repository) MergeAmfaEvent(ctx context.Context, event *domain.Event) er
 // order-independent, so safe to run every poll cycle. Returns the number of AMFA
 // rows absorbed. AMFA-only events (no Keycloak twin) are left untouched.
 //
+// The twin is the Keycloak row of the AMFA row's own type. A login can leave
+// other Keycloak rows with the same amfa_event_id (an SSO login's post broker
+// events, a wrong code's LOGIN_ERROR), and those are only merged onto when no
+// row of that type has arrived within amfaMergeFallbackAfter.
+//
 // The copy and the delete are one statement. They used to be two, and the
 // delete ran its own join, so a Keycloak row saved between them was joined by
 // the delete but not by the copy: its AMFA twin was deleted without ever being
@@ -433,6 +438,26 @@ func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 			  AND k.source_system = 'keycloak' AND k.deleted_at IS NULL
 			  AND k.tenant_id = a.tenant_id
 			  AND k.amfa_event_id = a.amfa_event_id
+			  -- One login can leave several Keycloak rows with the same
+			  -- amfa_event_id: an SSO login's IDENTITY_PROVIDER_POST_LOGIN
+			  -- events as well as its LOGIN, or a wrong code's LOGIN_ERROR
+			  -- before the right code's LOGIN. The AMFA row belongs to the row
+			  -- of its own type. Only if none arrives in time is it merged onto
+			  -- the others, which keeps the data for a realm whose LOGIN carries
+			  -- no amfa_event_id.
+			  AND (
+			    k.type = a.type
+			    OR (
+			      a.created_at < now() - make_interval(secs => ?)
+			      AND NOT EXISTS (
+			        SELECT 1 FROM events AS o
+			        WHERE o.source_system = 'keycloak' AND o.deleted_at IS NULL
+			          AND o.tenant_id = a.tenant_id
+			          AND o.amfa_event_id = a.amfa_event_id
+			          AND o.type = a.type
+			      )
+			    )
+			  )
 			RETURNING a.id
 		)
 		DELETE FROM events
@@ -447,7 +472,7 @@ func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 		if !acquired {
 			return nil
 		}
-		res := tx.Exec(reconcile)
+		res := tx.Exec(reconcile, amfaMergeFallbackAfter.Seconds())
 		if res.Error != nil {
 			return res.Error
 		}
@@ -463,6 +488,13 @@ func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 // amfaReconcileLockKey names the advisory lock that lets one reconcile sweep
 // run at a time across every mirror and every server instance.
 const amfaReconcileLockKey = "events:amfa-reconcile"
+
+// amfaMergeFallbackAfter is how long an AMFA row waits for the Keycloak row of
+// its own type before it is merged onto the other Keycloak rows carrying its
+// amfa_event_id. The two mirrors poll independently (every 30s by default), so
+// a login's LOGIN can reach the table a poll after its AMFA row; this is ten
+// such polls.
+const amfaMergeFallbackAfter = 5 * time.Minute
 
 // toDomainEvent converts a database Event to a domain Event.
 func toDomainEvent(event *database.Event) *domain.Event {
