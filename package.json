@@ -24,8 +24,8 @@
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
     "husky": "^9.1.7",
-    "lint-staged": "^17.5.1",
-    "prettier": "^3.7.4"
+    "lint-staged": "^17.6.0",
+    "prettier": "^3.9.10"
   },
   "lint-staged": {
     "web/**/*.{ts,tsx}": [
