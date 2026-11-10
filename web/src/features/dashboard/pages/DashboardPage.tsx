@@ -52,6 +52,10 @@ import {
   isTenantConnectionBroken,
 } from "@/shared/utils";
 import type { KeycloakEvent } from "@/shared/types";
+import {
+  getHealthAvailability,
+  getHealthMetricsHint,
+} from "@/shared/utils/healthAvailability";
 
 type EventWithFormattedTime = KeycloakEvent & {
   formattedTime: string;
@@ -302,9 +306,21 @@ export function DashboardPage() {
     };
   }, [filteredRealms, loginStats]);
 
+  const healthAvailability = getHealthAvailability(keycloakDashboard?.health);
+  const healthMetricsHint = getHealthMetricsHint(
+    keycloakFailed ? null : keycloakDashboard?.health,
+    !healthAvailability.memory ||
+      !healthAvailability.uptime ||
+      !healthAvailability.version,
+  );
+
   // Memoize memory calculations
   const memoryMetrics = useMemo(() => {
-    if (!keycloakDashboard?.health) return null;
+    if (
+      !keycloakDashboard?.health ||
+      !getHealthAvailability(keycloakDashboard.health).memory
+    )
+      return null;
 
     const { memory_used_bytes, memory_max_bytes } = keycloakDashboard.health;
     const memoryRatio = memory_used_bytes / memory_max_bytes;
@@ -739,7 +755,7 @@ export function DashboardPage() {
                         : `${keycloakDashboard.health.response_time_ms}ms response`}
                     </Typography>
                   </Box>
-                  {memoryMetrics && (
+                  {memoryMetrics ? (
                     <Box>
                       <Typography
                         variant="caption"
@@ -765,6 +781,13 @@ export function DashboardPage() {
                         sx={{ mt: 1, height: 8, borderRadius: 4 }}
                       />
                     </Box>
+                  ) : (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Memory
+                      </Typography>
+                      <Typography variant="h5">Not available</Typography>
+                    </Box>
                   )}
                   <Box>
                     <Typography
@@ -775,18 +798,30 @@ export function DashboardPage() {
                       Uptime
                     </Typography>
                     <Typography variant="h5" sx={{ fontWeight: 700 }}>
-                      {formatUptime(keycloakDashboard.health.uptime_millis)}
+                      {healthAvailability.uptime
+                        ? formatUptime(keycloakDashboard.health.uptime_millis)
+                        : "Not available"}
                     </Typography>
                     <Typography
                       variant="caption"
                       color="text.secondary"
                       sx={{ mt: 0.5 }}
                     >
-                      {keycloakDashboard.health.server_version ||
-                        "Unknown version"}
+                      {healthAvailability.version
+                        ? keycloakDashboard.health.server_version
+                        : "Version not available"}
                     </Typography>
                   </Box>
                 </Box>
+                {healthMetricsHint && (
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ mt: 2 }}
+                  >
+                    {healthMetricsHint}
+                  </Typography>
+                )}
               </CardContent>
             </Card>
           </FeatureErrorBoundary>

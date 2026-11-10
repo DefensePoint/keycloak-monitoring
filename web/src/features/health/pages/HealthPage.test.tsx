@@ -216,6 +216,102 @@ describe("HealthPage", () => {
     });
   });
 
+  it.each([0, undefined])(
+    "shows unavailable system details for missing metrics (%s)",
+    (missing) => {
+      mockUseKeycloakDashboard.mockReturnValue({
+        data: {
+          health: {
+            ...mockKeycloakDashboard.health,
+            server_version: "",
+            uptime_millis: missing,
+            memory_used_bytes: missing,
+            memory_max_bytes: missing,
+            memory_free_bytes: missing,
+          },
+        },
+        isLoading: false,
+        isError: false,
+      });
+      render(<HealthPage />);
+
+      expect(screen.getAllByText("Not available")).toHaveLength(3);
+      expect(screen.getAllByText(/Keycloak 26.7\+/)).toHaveLength(1);
+      expect(screen.queryByText(/NaN|Infinity/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      expect(screen.queryByText("Days")).not.toBeInTheDocument();
+      expect(screen.queryByText("0B")).not.toBeInTheDocument();
+      expect(screen.getByText("UP")).toBeInTheDocument();
+      expect(screen.getByText("15ms")).toBeInTheDocument();
+    },
+  );
+
+  it.each(["DOWN", "DEGRADED", "UNKNOWN"])(
+    "does not blame missing metrics on roles when status is %s",
+    (status) => {
+      mockUseKeycloakDashboard.mockReturnValue({
+        data: {
+          health: {
+            ...mockKeycloakDashboard.health,
+            status,
+            server_version: "",
+            uptime_millis: 0,
+            memory_used_bytes: 0,
+            memory_max_bytes: 0,
+          },
+        },
+        isLoading: false,
+        isError: false,
+      });
+      render(<HealthPage />);
+      expect(screen.getAllByText("Not available")).toHaveLength(3);
+      expect(screen.queryByText(/master admin role/)).not.toBeInTheDocument();
+      expect(screen.queryByTitle(/master admin role/)).not.toBeInTheDocument();
+      expect(screen.getByText(status)).toBeInTheDocument();
+      expect(screen.getByText("15ms")).toBeInTheDocument();
+    },
+  );
+
+  it("does not show role advice for stale UP data after a refresh fails", () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        health: {
+          ...mockKeycloakDashboard.health,
+          server_version: "",
+          uptime_millis: 0,
+          memory_max_bytes: 0,
+        },
+      },
+      isLoading: false,
+      isError: true,
+      error: new Error("refresh failed"),
+    });
+    render(<HealthPage />);
+    expect(screen.queryByText(/master admin role/)).not.toBeInTheDocument();
+  });
+
+  it("preserves real zero used and free memory when the maximum is available", () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        health: {
+          ...mockKeycloakDashboard.health,
+          memory_used_bytes: 0,
+          memory_free_bytes: 0,
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+    render(<HealthPage />);
+    expect(screen.getByText("0.0%")).toBeInTheDocument();
+    expect(screen.getAllByText("0B")).toHaveLength(2);
+    expect(screen.queryByText(/master admin role/)).not.toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute(
+      "aria-valuenow",
+      "0",
+    );
+  });
+
   it("should display uptime", async () => {
     render(<HealthPage />);
 

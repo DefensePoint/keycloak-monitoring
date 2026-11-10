@@ -256,6 +256,50 @@ describe("RealmPage", () => {
     });
   });
 
+  it("does not present unavailable realm health numbers as measurements", () => {
+    mockUseRealmDashboard.mockReturnValue({
+      data: {
+        ...mockRealmDashboard,
+        health: {
+          ...mockRealmDashboard.health,
+          memory_used_bytes: 0,
+          memory_max_bytes: 0,
+          uptime_millis: 0,
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+    render(<RealmPage />);
+    expect(screen.getAllByText("Not available")).toHaveLength(2);
+    expect(screen.getByText(/Keycloak 26.7\+/)).toBeVisible();
+    expect(screen.queryByText("0h")).not.toBeInTheDocument();
+  });
+
+  it.each(["DOWN", "DEGRADED", "UNKNOWN"])(
+    "does not suggest a role change when realm health is %s",
+    (status) => {
+      mockUseRealmDashboard.mockReturnValue({
+        data: {
+          ...mockRealmDashboard,
+          health: {
+            ...mockRealmDashboard.health,
+            status,
+            memory_used_bytes: 0,
+            memory_max_bytes: 0,
+            uptime_millis: 0,
+          },
+        },
+        isLoading: false,
+        isError: false,
+      });
+      render(<RealmPage />);
+      expect(screen.getAllByText("Not available")).toHaveLength(2);
+      expect(screen.queryByText(/master admin role/)).not.toBeInTheDocument();
+      expect(screen.queryByTitle(/master admin role/)).not.toBeInTheDocument();
+    },
+  );
+
   it("should render loading state initially", () => {
     mockUseRealmDashboard.mockReturnValue({
       data: null,
