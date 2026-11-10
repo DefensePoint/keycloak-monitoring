@@ -155,6 +155,65 @@ describe("SettingsPage", () => {
     expect(screen.getByText("linux/amd64")).toBeInTheDocument();
   });
 
+  it.each(["unknown", "Unknown", "", " ", undefined, null])(
+    "should display Unknown for git commit %s",
+    (git_commit) => {
+      mockUseVersion.mockReturnValue({
+        data: { ...mockVersionInfo, git_commit },
+        isLoading: false,
+        isError: false,
+      });
+
+      render(<SettingsPage />);
+
+      expect(screen.getByText("Git Commit")).toBeInTheDocument();
+      expect(screen.getByText("Unknown")).toBeInTheDocument();
+      expect(screen.queryByText("unknown")).not.toBeInTheDocument();
+    },
+  );
+
+  it("uses the same fallback for missing commit and build date", () => {
+    mockUseVersion.mockReturnValue({
+      data: {
+        ...mockVersionInfo,
+        git_commit: "unknown",
+        build_date: "unknown",
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<SettingsPage />);
+
+    expect(screen.getAllByText("Unknown")).toHaveLength(2);
+    expect(screen.queryByText("Invalid Date")).not.toBeInTheDocument();
+  });
+
+  it("should display a valid build date in local time", () => {
+    render(<SettingsPage />);
+
+    expect(
+      screen.getByText(new Date(mockVersionInfo.build_date).toLocaleString()),
+    ).toBeInTheDocument();
+  });
+
+  it.each(["unknown", "not-a-date", "", undefined, null])(
+    "should display Unknown for build date %s",
+    (build_date) => {
+      mockUseVersion.mockReturnValue({
+        data: { ...mockVersionInfo, build_date },
+        isLoading: false,
+        isError: false,
+      });
+
+      render(<SettingsPage />);
+
+      expect(screen.getByText("Build Date")).toBeInTheDocument();
+      expect(screen.getByText("Unknown")).toBeInTheDocument();
+      expect(screen.queryByText("Invalid Date")).not.toBeInTheDocument();
+    },
+  );
+
   it("should display default version when version info not available", () => {
     mockUseVersion.mockReturnValue({
       data: null,

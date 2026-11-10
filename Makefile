@@ -144,6 +144,9 @@ docker-build-server: ## Build server Docker image
 	@echo "Building server Docker image..."
 	@docker build \
 		--build-arg SERVICE=server \
+		--build-arg VERSION="$(VERSION)" \
+		--build-arg VCS_REF="$(GIT_COMMIT)" \
+		--build-arg BUILD_DATE="$(BUILD_DATE)" \
 		-t kmt-server:$(VERSION) \
 		-t kmt-server:latest \
 		-f build/Dockerfile .
@@ -154,6 +157,9 @@ docker-build-web: ## Build web Docker image
 	@echo "Building web Docker image..."
 	@docker build \
 		--build-arg SERVICE=web \
+		--build-arg VERSION="$(VERSION)" \
+		--build-arg VCS_REF="$(GIT_COMMIT)" \
+		--build-arg BUILD_DATE="$(BUILD_DATE)" \
 		-t kmt-web:$(VERSION) \
 		-t kmt-web:latest \
 		-f build/Dockerfile .
@@ -164,6 +170,9 @@ docker-build-mcp-server: ## Build MCP server Docker image
 	@echo "Building MCP server Docker image..."
 	@docker build \
 		--build-arg SERVICE=mcp-server \
+		--build-arg VERSION="$(VERSION)" \
+		--build-arg VCS_REF="$(GIT_COMMIT)" \
+		--build-arg BUILD_DATE="$(BUILD_DATE)" \
 		-t kmt-mcp-server:$(VERSION) \
 		-t kmt-mcp-server:latest \
 		-f build/Dockerfile .
