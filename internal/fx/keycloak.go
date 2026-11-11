@@ -77,6 +77,7 @@ func newVersionChecker(c config.VersionCheckerConfig, log *logger.Logger) *keycl
 	}
 	vc := keycloak.DefaultVersionCheckerConfig()
 	vc.Enabled = true
+	vc.Logger = log
 	if c.CacheTTL > 0 {
 		vc.CacheTTL = c.CacheTTL
 	}

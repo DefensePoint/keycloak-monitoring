@@ -1,15 +1,21 @@
 package keycloak
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
 
 func TestCompareVersions(t *testing.T) {
@@ -448,5 +454,43 @@ func TestGetLatestVersions_ACanceledCallerDoesNotFailOthers(t *testing.T) {
 	}
 	if err := <-first; err == nil {
 		t.Error("the canceled caller got no error")
+	}
+}
+
+// A failed fetch is logged once however many callers it answers, every error
+// is an ErrVersionLookupFailed, and recovering is logged once.
+func TestGetLatestVersions_LogsEachFailedFetchOnce(t *testing.T) {
+	var fail atomic.Bool
+	fail.Store(true)
+	stub, hits := releaseStub(t, 0, &fail)
+	var buf bytes.Buffer
+	cfg := DefaultVersionCheckerConfig()
+	cfg.Enabled = true
+	cfg.GitHubAPIBaseURL = stub.URL
+	cfg.CacheTTL = 50 * time.Millisecond
+	cfg.Logger = logger.New(zerolog.New(&buf))
+	vc := NewVersionChecker(cfg)
+
+	for i := 0; i < 5; i++ {
+		if _, err := vc.GetLatestVersions(context.Background()); !errors.Is(err, ErrVersionLookupFailed) {
+			t.Fatalf("call %d: %v, want an ErrVersionLookupFailed", i, err)
+		}
+	}
+	if n := strings.Count(buf.String(), "could not fetch the latest Keycloak release"); n != 1 {
+		t.Errorf("5 calls answered by 1 failed fetch logged %d warnings, want 1: %s", n, buf.String())
+	}
+
+	fail.Store(false)
+	time.Sleep(80 * time.Millisecond)
+	for i := 0; i < 3; i++ {
+		if _, err := vc.GetLatestVersions(context.Background()); err != nil {
+			t.Fatalf("after recovery: %v", err)
+		}
+	}
+	if n := strings.Count(buf.String(), "fetched the latest Keycloak release again"); n != 1 {
+		t.Errorf("recovery logged %d times, want 1: %s", n, buf.String())
+	}
+	if n := atomic.LoadInt64(hits); n != 2 {
+		t.Errorf("GitHub was asked %d times, want 2", n)
 	}
 }

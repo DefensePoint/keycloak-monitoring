@@ -3,6 +3,7 @@ package keycloak
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,7 +11,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
+
+// ErrVersionLookupFailed wraps every error GetLatestVersions returns for a
+// failed fetch from GitHub, including a remembered one. The checker logs each
+// failed fetch once, so callers need not log it again.
+var ErrVersionLookupFailed = errors.New("failed to fetch latest Keycloak version")
 
 // GitHubRelease represents a GitHub release
 type GitHubRelease struct {
@@ -32,6 +40,7 @@ type VersionInfo struct {
 // VersionChecker handles checking for latest Keycloak versions
 type VersionChecker struct {
 	httpClient *http.Client
+	log        *logger.Logger
 
 	// mu guards the fields below it. Page loads call GetLatestVersions
 	// concurrently: one of them fetches while the others wait for that fetch
@@ -72,6 +81,9 @@ type VersionCheckerConfig struct {
 	GitHubAPIBaseURL string
 	KeycloakOwner    string
 	KeycloakRepo     string
+	// Logger receives one line per failed fetch and one when fetching
+	// recovers. Nil discards them.
+	Logger *logger.Logger
 }
 
 // DefaultVersionCheckerConfig returns default configuration.
@@ -105,10 +117,15 @@ func NewVersionChecker(cfg VersionCheckerConfig) *VersionChecker {
 		return nil
 	}
 
+	log := cfg.Logger
+	if log == nil {
+		log = logger.NewNoop()
+	}
 	return &VersionChecker{
 		httpClient: &http.Client{
 			Timeout: cfg.HTTPTimeout,
 		},
+		log:              log,
 		cacheTTL:         cfg.CacheTTL,
 		githubAPIBaseURL: cfg.GitHubAPIBaseURL,
 		keycloakOwner:    cfg.KeycloakOwner,
@@ -155,22 +172,34 @@ func (vc *VersionChecker) fetch(ctx context.Context, f *versionFetch) {
 	info, err := vc.fetchLatestVersions(ctx)
 
 	vc.mu.Lock()
+	recovered := err == nil && vc.failure != nil
 	if err != nil {
 		vc.failure, vc.failedAt = err, time.Now()
 	} else {
 		vc.cache, vc.cacheTime = info, time.Now()
 		vc.failure = nil
 	}
+	retry := vc.retryAfter()
 	vc.inflight = nil
 	f.info, f.err = info, err
 	vc.mu.Unlock()
+
+	// Logged before the waiting callers are released, so the line is
+	// written by the time any of them returns.
+	if err != nil {
+		vc.log.Warn("Version check: could not fetch the latest Keycloak release; no update notice is shown until a later attempt succeeds",
+			logger.Err(err), logger.Dur("retry_after", retry))
+	} else if recovered {
+		vc.log.Info("Version check: fetched the latest Keycloak release again",
+			logger.Str("latest_keycloak_version", info.LatestKeycloakVersion))
+	}
 	close(f.done)
 }
 
 func (vc *VersionChecker) fetchLatestVersions(ctx context.Context) (*VersionInfo, error) {
 	release, err := vc.fetchLatestGitHubReleaseWithBody(ctx, vc.keycloakOwner, vc.keycloakRepo)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch latest Keycloak version: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrVersionLookupFailed, err)
 	}
 	return &VersionInfo{
 		LatestKeycloakVersion: strings.TrimPrefix(release.TagName, "v"),
