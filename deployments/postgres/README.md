@@ -14,6 +14,10 @@ migration or pipeline.
 - `alerts-status-index.sql` builds `idx_alerts_tenant_status_first_detected_id`
   on `(tenant_id, status, first_detected DESC, id DESC)` for the Alerts page,
   which defaults to `status=active`, with `CONCURRENTLY` for the same reason.
+- `users-index-preflight.sql` is a read-only check to run before upgrading a
+  database from an older release, whose unique indexes on `users` may not yet
+  cover live, non-empty rows only. See
+  [Before upgrading an older database](#before-upgrading-an-older-database).
 
 ## Running the scripts
 
@@ -93,6 +97,36 @@ docker compose exec -T -e MCP_PASSWORD='<strong-password>' postgres \
 5. Start `mcp-server`. It refuses to start until `mcp.database` names a role,
    and fails to connect until that role exists, so the read-only split cannot
    be lost by omission.
+
+## Before upgrading an older database
+
+The server keeps `idx_users_email`, `idx_users_subject` and
+`idx_users_username` to live, non-empty rows only. On start it narrows an
+index that covers the whole column, which can never fail. An index that is
+missing is the risk: `AutoMigrate` creates it over the whole column first, so
+rows the final index allows, such as several users with an empty email or
+username, or a soft-deleted account's value reused, make it fail with
+`could not create unique index "idx_users_email" (SQLSTATE 23505)`, and the
+server does not start. A database created by an older release can be in that
+state.
+
+Run the read-only pre-flight on the database before the first start of the
+new release:
+
+```bash
+psql -U "${POSTGRES_USER}" -d monitoring -f users-index-preflight.sql
+```
+
+The first result lists each index as `live-only`, `plain` or `missing`; the
+second counts duplicated values among live, non-empty rows, without printing
+them.
+
+- No index `missing`: nothing to do.
+- An index `missing`: create it before starting, with the `CREATE UNIQUE
+  INDEX` statement for that index from the top of the script. The server then
+  finds it and leaves it alone. The statement fails only when that column's
+  count is above 0: resolve those duplicate accounts first, for example by
+  soft-deleting or correcting the extras, then create the index.
 
 ## Limitations
 
