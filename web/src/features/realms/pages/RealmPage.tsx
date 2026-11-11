@@ -38,6 +38,7 @@ import {
   PageHeader,
   FeatureErrorBoundary,
 } from "@/shared/components";
+import { requestFailed } from "@/shared/lib";
 import { formatBytes } from "@/shared/utils";
 import {
   getHealthAvailability,
@@ -77,13 +78,14 @@ export function RealmPage() {
   const [eventsPage, setEventsPage] = useState(1);
   const eventsPerPage = 10;
 
-  const { data: realmDashboard, isLoading } = useRealmDashboard({
+  const realmDashboardQuery = useRealmDashboard({
     tenantId: selectedTenant?.tenant_id,
     realm: realmName,
   });
+  const { data: realmDashboard, isLoading } = realmDashboardQuery;
   const healthAvailability = getHealthAvailability(realmDashboard?.health);
   const healthMetricsHint = getHealthMetricsHint(
-    realmDashboard?.health,
+    requestFailed(realmDashboardQuery) ? null : realmDashboard?.health,
     !healthAvailability.memory || !healthAvailability.uptime,
   );
 

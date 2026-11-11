@@ -316,11 +316,7 @@ export function DashboardPage() {
 
   // Memoize memory calculations
   const memoryMetrics = useMemo(() => {
-    if (
-      !keycloakDashboard?.health ||
-      !getHealthAvailability(keycloakDashboard.health).memory
-    )
-      return null;
+    if (!keycloakDashboard?.health || !healthAvailability.memory) return null;
 
     const { memory_used_bytes, memory_max_bytes } = keycloakDashboard.health;
     const memoryRatio = memory_used_bytes / memory_max_bytes;
@@ -333,7 +329,7 @@ export function DashboardPage() {
       max: formatBytes(memory_max_bytes),
       color: getMemoryBarColor(memoryRatio),
     };
-  }, [keycloakDashboard?.health, getMemoryBarColor]);
+  }, [keycloakDashboard?.health, healthAvailability.memory, getMemoryBarColor]);
 
   return (
     <Box sx={{ p: { xs: 2, sm: 4 } }}>

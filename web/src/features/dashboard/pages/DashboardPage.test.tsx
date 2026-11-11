@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { DashboardPage } from "./DashboardPage";
 import { theme } from "@/theme";
 import { useTenant } from "@/shared/context";
+import { HEALTH_METRICS_HINT } from "@/shared/utils/healthAvailability";
 
 const mockUseNavigate = vi.fn();
 const mockUseKeycloakDashboard = vi.fn();
@@ -278,7 +279,7 @@ describe("DashboardPage", () => {
 
       expect(screen.getAllByText("Not available")).toHaveLength(2);
       expect(screen.getByText("Version not available")).toBeInTheDocument();
-      expect(screen.getAllByText(/Keycloak 26.7\+/)).toHaveLength(1);
+      expect(screen.getAllByText(HEALTH_METRICS_HINT)).toHaveLength(1);
       expect(screen.queryByText(/NaN|Infinity/)).not.toBeInTheDocument();
       expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
       expect(screen.getByText("UP")).toBeInTheDocument();
@@ -306,8 +307,8 @@ describe("DashboardPage", () => {
       });
       render(<DashboardPage />);
       expect(screen.getAllByText("Not available")).toHaveLength(2);
-      expect(screen.queryByText(/master admin role/)).not.toBeInTheDocument();
-      expect(screen.queryByTitle(/master admin role/)).not.toBeInTheDocument();
+      expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
+      expect(screen.queryByTitle(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
       expect(screen.getByText(status)).toBeInTheDocument();
       expect(screen.getByText("10ms response")).toBeInTheDocument();
     },
@@ -329,7 +330,7 @@ describe("DashboardPage", () => {
       error: new Error("refresh failed"),
     });
     render(<DashboardPage />);
-    expect(screen.queryByText(/master admin role/)).not.toBeInTheDocument();
+    expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
   });
 
   it("preserves real zero used memory when the maximum is available", () => {
@@ -348,7 +349,7 @@ describe("DashboardPage", () => {
       "0",
     );
     expect(screen.queryByText("Not available")).not.toBeInTheDocument();
-    expect(screen.queryByText(/master admin role/)).not.toBeInTheDocument();
+    expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
   });
 
   it("should display system health status", async () => {

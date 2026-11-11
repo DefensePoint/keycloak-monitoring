@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@/test-utils";
 import userEvent from "@testing-library/user-event";
 import { HealthPage } from "./HealthPage";
 import { useTenant } from "@/shared/context";
+import { HEALTH_METRICS_HINT } from "@/shared/utils/healthAvailability";
 
 const mockUseKeycloakDashboard = vi.fn();
 
@@ -236,7 +237,7 @@ describe("HealthPage", () => {
       render(<HealthPage />);
 
       expect(screen.getAllByText("Not available")).toHaveLength(3);
-      expect(screen.getAllByText(/Keycloak 26.7\+/)).toHaveLength(1);
+      expect(screen.getAllByText(HEALTH_METRICS_HINT)).toHaveLength(1);
       expect(screen.queryByText(/NaN|Infinity/)).not.toBeInTheDocument();
       expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
       expect(screen.queryByText("Days")).not.toBeInTheDocument();
@@ -265,8 +266,8 @@ describe("HealthPage", () => {
       });
       render(<HealthPage />);
       expect(screen.getAllByText("Not available")).toHaveLength(3);
-      expect(screen.queryByText(/master admin role/)).not.toBeInTheDocument();
-      expect(screen.queryByTitle(/master admin role/)).not.toBeInTheDocument();
+      expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
+      expect(screen.queryByTitle(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
       expect(screen.getByText(status)).toBeInTheDocument();
       expect(screen.getByText("15ms")).toBeInTheDocument();
     },
@@ -287,7 +288,7 @@ describe("HealthPage", () => {
       error: new Error("refresh failed"),
     });
     render(<HealthPage />);
-    expect(screen.queryByText(/master admin role/)).not.toBeInTheDocument();
+    expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
   });
 
   it("preserves real zero used and free memory when the maximum is available", () => {
@@ -305,7 +306,7 @@ describe("HealthPage", () => {
     render(<HealthPage />);
     expect(screen.getByText("0.0%")).toBeInTheDocument();
     expect(screen.getAllByText("0B")).toHaveLength(2);
-    expect(screen.queryByText(/master admin role/)).not.toBeInTheDocument();
+    expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toHaveAttribute(
       "aria-valuenow",
       "0",
