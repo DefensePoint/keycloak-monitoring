@@ -16,7 +16,7 @@ type whoamiOutput struct {
 	Subject         string   `json:"subject" jsonschema:"the authenticated caller's subject"`
 	TenantAllowlist []string `json:"tenant_allowlist" jsonschema:"tenant IDs the token is restricted to; when it holds exactly one, tools take that tenant from the token and reject a tenant argument"`
 	Admin           bool     `json:"admin" jsonschema:"whether the caller is a platform administrator"`
-	ServerVersion   string   `json:"server_version" jsonschema:"version of the Keycloak Monitoring Tool MCP server"`
+	ServerVersion   string   `json:"server_version" jsonschema:"version of this MCP server"`
 }
 
 // registerWhoami adds the whoami connectivity-check tool. It reads no

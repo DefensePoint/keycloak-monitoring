@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
 	_ "github.com/DefensePoint/keycloak-monitoring/internal/http/dto" // swagger
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
@@ -27,6 +28,12 @@ type ReportHandlers struct {
 	log            *logger.Logger
 	authMiddleware func(http.Handler) http.Handler
 	rbacMiddleware *RBACMiddleware
+	branding       config.BrandingConfig
+}
+
+// SetBranding sets the product name and file name prefix reports carry.
+func (h *ReportHandlers) SetBranding(b config.BrandingConfig) {
+	h.branding = b
 }
 
 // NewReportHandlers creates a new ReportHandlers.
@@ -192,6 +199,8 @@ func (h *ReportHandlers) handleGenerateReport(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	data.ProductName = h.branding.WithDefaults().Name
+
 	// Generate PDF
 	pdfBytes, err := h.service.GeneratePDF(data)
 	if err != nil {
@@ -203,7 +212,7 @@ func (h *ReportHandlers) handleGenerateReport(w http.ResponseWriter, r *http.Req
 	}
 
 	// Set response headers
-	filename := "kmt-report-" + tenantName + "-" + startDateStr + "-to-" + endDateStr + ".pdf"
+	filename := h.branding.FilePrefix() + "-report-" + tenantName + "-" + startDateStr + "-to-" + endDateStr + ".pdf"
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
 

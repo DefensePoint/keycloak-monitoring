@@ -11,12 +11,15 @@ import { VpnKey as KeyIcon } from "@mui/icons-material";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useAuth } from "@/shared/context";
+import { useBranding } from "@/shared/hooks/useBranding";
+import { brandingSubtitle } from "@/shared/lib/branding";
 import { useLoginSimple } from "../hooks";
 import { FormTextField } from "@/shared/components";
 import { loginSchema, type LoginFormData } from "../schemas";
 
 export function LoginPage() {
   const { authConfig, loginOAuth2, sessionExpired } = useAuth();
+  const branding = useBranding();
   const { mutate: login, isPending: isLoading, error } = useLoginSimple();
 
   const { control, handleSubmit } = useForm<LoginFormData>({
@@ -78,11 +81,11 @@ export function LoginPage() {
                   color: "text.primary",
                 }}
               >
-                Keycloak
+                {branding.logo_text}
               </Typography>
             </Box>
             <Typography variant="body2" sx={{ color: "text.secondary" }}>
-              MONITORING TOOL
+              {brandingSubtitle(branding).toUpperCase()}
             </Typography>
           </Box>
 

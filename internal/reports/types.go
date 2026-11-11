@@ -36,6 +36,8 @@ func (s RealmScope) empty() bool {
 
 // Data contains all data needed for a report.
 type Data struct {
+	// ProductName is the product the report names itself after.
+	ProductName string
 	TenantID    string
 	TenantName  string
 	StartDate   time.Time

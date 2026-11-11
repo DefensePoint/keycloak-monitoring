@@ -704,7 +704,8 @@ notifications:
     channel: "#security-alerts"
 
     # Optional: Custom bot username
-    username: "Keycloak Monitoring Tool"
+    # Default: branding.name
+    username: "Security Alerts"
 
     # Optional: Bot icon emoji
     icon_emoji: ":shield:"
@@ -747,8 +748,9 @@ notifications:
     skip_verify: false
 
     # Optional: Custom email subject template
-    # Default: "[Keycloak Monitoring Tool] {severity} Alert: {check_name}"
-    subject: "[Keycloak Security] {severity}: {check_name}"
+    # Placeholders: {{product}} (branding.name), {{severity}}, {{title}}, {{resource}}
+    # Default: "[{{severity}}] {{product}} Alert: {{title}}"
+    subject: "[Keycloak Security] {{severity}}: {{title}}"
 
     # Minimum severity level to send emails
     # Options: info, warning, error, critical
@@ -1359,6 +1361,41 @@ export MONITORING_MCP_RATE_BURST=30
 export MONITORING_MCP_MAX_RESPONSE_BYTES=1048576
 ```
 
+### Branding
+
+The product name in everything a user sees: the web UI (sign-in page, header, page title, settings page), alert emails, Slack messages, GitLab issues and notes, PDF reports and their file names, and the name the MCP server gives clients. A deployment that runs KMT under its own name sets it here; with nothing set, KMT looks as it always has.
+
+```yaml
+branding:
+  # Full product name
+  # Default: "Keycloak Monitoring Tool"
+  name: "Keycloak Monitoring Tool"
+
+  # Short name, used where the full name is too long ("Can't reach the KMT
+  # server.", the realm page link) and, in lower case with dashes, at the
+  # start of report file names: kmt-report-<tenant>-<from>-to-<to>.pdf
+  # Default: "KMT"
+  short_name: "KMT"
+
+  # Word shown next to the logo. When the full name starts with it, the rest
+  # of the name is shown under it ("Monitoring Tool").
+  # Default: "Keycloak"
+  logo_text: "Keycloak"
+```
+
+- The MCP server identifies itself as the full name in lower case with dashes (`keycloak-monitoring-tool`), with the full name as its title.
+- `notifications.slack.username` and the `{{product}}` placeholder in `notifications.email.subject` follow `branding.name` unless set.
+- A value left empty falls back to its default, and line breaks are removed.
+- The web UI remembers the last names the server sent, so the page shown while the server cannot be reached carries them too.
+
+**Environment Variables:**
+
+```bash
+export MONITORING_BRANDING_NAME="Keycloak Monitoring Tool"
+export MONITORING_BRANDING_SHORT_NAME=KMT
+export MONITORING_BRANDING_LOGO_TEXT=Keycloak
+```
+
 ## Configuration Examples
 
 ### Development Configuration
@@ -1550,7 +1587,6 @@ notifications:
     enabled: true
     # Use environment variable: MONITORING_NOTIFICATIONS_SLACK_WEBHOOK_URL
     channel: "#security-alerts"
-    username: "Keycloak Monitoring Tool"
     min_severity: "warning"
 
   email:

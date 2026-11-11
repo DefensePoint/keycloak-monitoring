@@ -24,6 +24,7 @@ import {
   ArrowForward,
 } from "@mui/icons-material";
 import { unreadableRealmText } from "../utils/unreadable";
+import { useBranding } from "@/shared/hooks/useBranding";
 import { useTenant } from "@/shared/context";
 import {
   useAlerts,
@@ -53,6 +54,7 @@ type EventWithFormattedDate = Event & {
 };
 
 export function RealmPage() {
+  const branding = useBranding();
   const { realmName, tenantId } = useParams<{
     realmName: string;
     tenantId: string;
@@ -256,6 +258,7 @@ export function RealmPage() {
           {unreadableRealmText(
             realmDashboard.realm_info.unreadable_since,
             realmDashboard.realm_info.last_checked,
+            branding.short_name,
           )}
         </Alert>
       )}
