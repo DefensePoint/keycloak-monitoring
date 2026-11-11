@@ -2,11 +2,14 @@ package keycloak
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 )
 
 func TestCompareVersions(t *testing.T) {
@@ -201,4 +204,249 @@ func TestE2EVersionCheckerNetwork(t *testing.T) {
 		}
 		t.Logf("enabled: version=%q after %d request(s)", info.LatestKeycloakVersion, atomic.LoadInt64(&hits))
 	})
+}
+
+func TestIsUpstreamRelease(t *testing.T) {
+	tests := []struct {
+		version string
+		want    bool
+	}{
+		{"26.4.2", true},
+		{"v26.4.2", true},
+		{"9.0.3", true},
+		{"26.0.6.vendor-00001", false},
+		{"26.4.2-build.7", false},
+		{"26.4.2.1", false},
+		{"999.0.0-SNAPSHOT", false},
+		{"26.4", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isUpstreamRelease(tt.version); got != tt.want {
+			t.Errorf("isUpstreamRelease(%q) = %v, want %v", tt.version, got, tt.want)
+		}
+	}
+}
+
+// fixedHealthRepo answers GetLatestHealth with one server version. Every other
+// HealthRepository method is left to the embedded nil interface.
+type fixedHealthRepo struct {
+	HealthRepository
+	version string
+}
+
+func (r fixedHealthRepo) GetLatestHealth(context.Context, string) (*domain.KeycloakHealth, error) {
+	return &domain.KeycloakHealth{ServerVersion: r.version}, nil
+}
+
+// A vendor build is never reported as behind upstream, however far its
+// release number trails; a plain release still is.
+func TestGetVersionInfo_ComparesOnlyUpstreamReleases(t *testing.T) {
+	checker := &VersionChecker{
+		cache:     &VersionInfo{LatestKeycloakVersion: "26.8.2", KeycloakReleaseURL: "https://example.invalid/26.8.2"},
+		cacheTime: time.Now(),
+		cacheTTL:  time.Hour,
+	}
+	tests := []struct {
+		version      string
+		wantOutdated bool
+	}{
+		{"26.4.2", true},
+		{"26.8.2", false},
+		{"26.0.6.vendor-00001", false},
+		{"999.0.0-SNAPSHOT", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		svc := NewService(nil, nil, fixedHealthRepo{version: tt.version}, nil, nil, checker)
+		info, err := svc.GetVersionInfo(context.Background(), "t1")
+		if err != nil {
+			t.Fatalf("GetVersionInfo(%q): %v", tt.version, err)
+		}
+		if info.IsKeycloakOutdated != tt.wantOutdated {
+			t.Errorf("server %q: outdated = %v, want %v", tt.version, info.IsKeycloakOutdated, tt.wantOutdated)
+		}
+		if info.CurrentVersion != tt.version || info.LatestKeycloakVersion != "26.8.2" {
+			t.Errorf("server %q: got current %q, latest %q", tt.version, info.CurrentVersion, info.LatestKeycloakVersion)
+		}
+	}
+}
+
+// Page loads ask for version info concurrently, and every call may refresh the
+// cache, so GetLatestVersions must be safe to call from many goroutines. Run
+// with -race.
+func TestGetLatestVersions_ConcurrentCalls(t *testing.T) {
+	var hits int64
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt64(&hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tag_name":"26.8.2","html_url":"https://example.invalid/26.8.2","body":""}`))
+	}))
+	defer stub.Close()
+
+	cfg := DefaultVersionCheckerConfig()
+	cfg.Enabled = true
+	cfg.GitHubAPIBaseURL = stub.URL
+	cfg.CacheTTL = time.Nanosecond
+	vc := NewVersionChecker(cfg)
+
+	done := make(chan error, 20)
+	for i := 0; i < 20; i++ {
+		go func() {
+			info, err := vc.GetLatestVersions(context.Background())
+			if err == nil && info.LatestKeycloakVersion != "26.8.2" {
+				err = fmt.Errorf("latest version %q", info.LatestKeycloakVersion)
+			}
+			done <- err
+		}()
+	}
+	for i := 0; i < 20; i++ {
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+// releaseStub answers GitHub's latest-release request after delay, counting
+// requests; fail makes it answer 503 instead.
+func releaseStub(t *testing.T, delay time.Duration, fail *atomic.Bool) (*httptest.Server, *int64) {
+	t.Helper()
+	var hits int64
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&hits, 1)
+		select {
+		case <-time.After(delay):
+		case <-r.Context().Done():
+			return
+		}
+		if fail != nil && fail.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tag_name":"26.8.2","html_url":"https://example.invalid/26.8.2","body":""}`))
+	}))
+	t.Cleanup(stub.Close)
+	return stub, &hits
+}
+
+func stubChecker(url string, ttl, timeout time.Duration) *VersionChecker {
+	cfg := DefaultVersionCheckerConfig()
+	cfg.Enabled = true
+	cfg.GitHubAPIBaseURL = url
+	cfg.CacheTTL = ttl
+	cfg.HTTPTimeout = timeout
+	return NewVersionChecker(cfg)
+}
+
+// callConcurrently calls GetLatestVersions from n goroutines and returns their
+// errors and how long the slowest took.
+func callConcurrently(vc *VersionChecker, n int) ([]error, time.Duration) {
+	errs := make(chan error, n)
+	start := time.Now()
+	for i := 0; i < n; i++ {
+		go func() {
+			info, err := vc.GetLatestVersions(context.Background())
+			if err == nil && info.LatestKeycloakVersion != "26.8.2" {
+				err = fmt.Errorf("latest version %q", info.LatestKeycloakVersion)
+			}
+			errs <- err
+		}()
+	}
+	out := make([]error, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, <-errs)
+	}
+	return out, time.Since(start)
+}
+
+func TestGetLatestVersions_ConcurrentCallersShareOneFetch(t *testing.T) {
+	stub, hits := releaseStub(t, 200*time.Millisecond, nil)
+	vc := stubChecker(stub.URL, time.Hour, 5*time.Second)
+
+	errs, _ := callConcurrently(vc, 20)
+	for _, err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	if n := atomic.LoadInt64(hits); n != 1 {
+		t.Errorf("20 concurrent callers made %d requests to GitHub, want 1", n)
+	}
+}
+
+// When GitHub does not answer, every waiting caller is released when the one
+// shared fetch times out, and later callers get the failure straight away
+// until the retry interval has passed.
+func TestGetLatestVersions_HangingGitHubCostsOneTimeout(t *testing.T) {
+	stub, hits := releaseStub(t, 10*time.Second, nil)
+	vc := stubChecker(stub.URL, time.Hour, 300*time.Millisecond)
+
+	errs, took := callConcurrently(vc, 10)
+	for _, err := range errs {
+		if err == nil {
+			t.Error("a caller got versions from a GitHub that never answered")
+		}
+	}
+	if took > 2*time.Second {
+		t.Errorf("10 concurrent callers took %v, want about one 300ms timeout", took)
+	}
+
+	start := time.Now()
+	if _, err := vc.GetLatestVersions(context.Background()); err == nil {
+		t.Error("the call after a failure succeeded")
+	}
+	if d := time.Since(start); d > 100*time.Millisecond {
+		t.Errorf("the call after a failure took %v, want it answered from the remembered failure", d)
+	}
+	if n := atomic.LoadInt64(hits); n != 1 {
+		t.Errorf("GitHub was asked %d times, want 1", n)
+	}
+}
+
+func TestGetLatestVersions_RetriesAfterTheInterval(t *testing.T) {
+	var fail atomic.Bool
+	fail.Store(true)
+	stub, hits := releaseStub(t, 0, &fail)
+	// A 50ms cache TTL makes the retry interval 50ms too.
+	vc := stubChecker(stub.URL, 50*time.Millisecond, time.Second)
+
+	if _, err := vc.GetLatestVersions(context.Background()); err == nil {
+		t.Fatal("the first call succeeded against a failing GitHub")
+	}
+	fail.Store(false)
+	if _, err := vc.GetLatestVersions(context.Background()); err == nil {
+		t.Error("a call within the retry interval asked GitHub again")
+	}
+	time.Sleep(80 * time.Millisecond)
+	info, err := vc.GetLatestVersions(context.Background())
+	if err != nil || info.LatestKeycloakVersion != "26.8.2" {
+		t.Fatalf("after the retry interval: %v, %v", info, err)
+	}
+	if n := atomic.LoadInt64(hits); n != 2 {
+		t.Errorf("GitHub was asked %d times, want 2", n)
+	}
+}
+
+// The caller that starts a fetch can give up without failing the others
+// waiting for it.
+func TestGetLatestVersions_ACanceledCallerDoesNotFailOthers(t *testing.T) {
+	stub, _ := releaseStub(t, 300*time.Millisecond, nil)
+	vc := stubChecker(stub.URL, time.Hour, 5*time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	first := make(chan error, 1)
+	go func() {
+		_, err := vc.GetLatestVersions(ctx)
+		first <- err
+	}()
+	time.Sleep(10 * time.Millisecond)
+	info, err := vc.GetLatestVersions(context.Background())
+	if err != nil || info.LatestKeycloakVersion != "26.8.2" {
+		t.Errorf("the waiting caller got %v, %v", info, err)
+	}
+	if err := <-first; err == nil {
+		t.Error("the canceled caller got no error")
+	}
 }

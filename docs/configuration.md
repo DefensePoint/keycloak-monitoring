@@ -442,6 +442,12 @@ keycloak:
     # Check for newer Keycloak versions
     # ========================================================================
     version_checker:
+      # Off by default; the only setting that contacts a host outside your
+      # infrastructure (api.github.com). Only a server reporting a plain
+      # release number, such as 26.4.2, is compared: a vendor or distribution
+      # build follows its own release line and is never shown as behind.
+      enabled: false
+
       # Cache duration for version information
       cache_ttl: 24h
 

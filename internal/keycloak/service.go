@@ -449,8 +449,9 @@ func (s *service) GetVersionInfo(ctx context.Context, tenantID string) (*Version
 		return nil, err
 	}
 
+	// Only a plain release number is compared, see isUpstreamRelease.
 	isKeycloakOutdated := false
-	if currentVersion != "" && latestVersions != nil && latestVersions.LatestKeycloakVersion != "" {
+	if isUpstreamRelease(currentVersion) && latestVersions != nil && latestVersions.LatestKeycloakVersion != "" {
 		isKeycloakOutdated = IsVersionOutdated(currentVersion, latestVersions.LatestKeycloakVersion)
 	}
 

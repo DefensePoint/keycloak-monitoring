@@ -568,6 +568,10 @@ keycloak:
       #
       # With this false, no version checker is constructed and the UI simply
       # shows no version information.
+      #
+      # Only a server reporting a plain release number, such as 26.4.2, is
+      # compared. A vendor or distribution build adds its own suffix and
+      # follows its own release line, so it is never shown as behind upstream.
       enabled: false
 
       # How long to cache version information before checking again
