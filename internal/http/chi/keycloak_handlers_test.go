@@ -237,7 +237,7 @@ func TestKeycloakHandlers_Events_TypeFilterStaysInRealm(t *testing.T) {
 					{RealmName: "realmA", EventType: "LOGIN", Username: "victim@example.com"},
 				},
 			}
-			svc := keycloak.NewService(repo, nil, nil, nil, nil, nil)
+			svc := keycloak.NewService(repo, nil, nil, nil, nil, nil, nil)
 			rbacSvc := &mockRBACChecker{policies: policyFor("tenant-a", "realmB")}
 			router := setupTestKeycloakRouter(newTestKeycloakHandlers(svc, rbacSvc))
 
@@ -272,7 +272,7 @@ func TestKeycloakHandlers_Events_TypeFilterStaysInRealm(t *testing.T) {
 
 func TestKeycloakHandlers_Events_DeniedRealmNeverQueries(t *testing.T) {
 	repo := &stubKeycloakEventRepo{}
-	svc := keycloak.NewService(repo, nil, nil, nil, nil, nil)
+	svc := keycloak.NewService(repo, nil, nil, nil, nil, nil, nil)
 	rbacSvc := &mockRBACChecker{policies: policyFor("tenant-a", "realmB")}
 	router := setupTestKeycloakRouter(newTestKeycloakHandlers(svc, rbacSvc))
 

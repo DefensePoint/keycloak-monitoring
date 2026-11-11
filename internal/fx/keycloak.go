@@ -58,10 +58,12 @@ func provideKeycloakService(
 	metricsRepo keycloak.MetricsRepository,
 	healthRepo keycloak.HealthRepository,
 	realmRepo keycloak.RealmRepository,
+	cfg *config.AppConfig,
 ) keycloak.Service {
 	// ClientProvider and VersionChecker are optional - pass nil for now
 	// These will be provided by the monitor pool when live Keycloak access is needed
-	return keycloak.NewService(eventRepo, metricsRepo, healthRepo, realmRepo, nil, nil)
+	return keycloak.NewService(eventRepo, metricsRepo, healthRepo, realmRepo, nil, nil,
+		cfg.Keycloak.Global.AmfaAuthenticatorIDs)
 }
 
 // ============================================================================

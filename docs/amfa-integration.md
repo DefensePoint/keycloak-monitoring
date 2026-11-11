@@ -111,6 +111,20 @@ The listed client can then read the monitoring data of every realm in that AMFA 
 
 Stats are realm-scoped over the API: "All Realms" is not aggregated, and the pages ask for a specific realm instead.
 
+## Which realms show AMFA sections
+
+The Events page shows its AMFA sections (KPI cards, geolocation map, Risk column) for a realm when any of the realm's top-level authentication flows contains an enabled AMFA authenticator. KMT always matches the Adaptive MFA plugin's provider IDs, `adaptive-auth` and `conditional-adaptive-auth`. An extension that registers the AMFA authenticators under its own IDs needs them listed, or its realms show no AMFA sections and no error:
+
+```yaml
+keycloak:
+  global:
+    amfa_authenticator_ids:
+      - custom-adaptive-auth
+      - custom-conditional-adaptive-auth
+```
+
+The same list can be set as `MONITORING_KEYCLOAK_GLOBAL_AMFA_AUTHENTICATOR_IDS=custom-adaptive-auth,custom-conditional-adaptive-auth`. The list is added to the built-in IDs and is only read from `keycloak.global`, so a change to it needs a restart. KMT checks each realm's flows at most every 5 minutes, so a change to a realm's flows can take that long to show.
+
 ## RBAC
 
 The `amfa:read` permission is added by a migration that runs once per database, on the first KMT startup that has it, and is recorded in `data_migrations`:
@@ -142,6 +156,7 @@ Then open the AMFA Events page from the sidebar (`/{tenantId}/amfa-events`) and 
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
+| A realm whose login uses AMFA shows no AMFA sections on the Events page | Its flows use an AMFA authenticator under a provider ID KMT does not match, such as an extension's own IDs. | List the IDs in `keycloak.global.amfa_authenticator_ids` and restart. See [Which realms show AMFA sections](#which-realms-show-amfa-sections). |
 | Page returns 404 `amfa_not_configured` for a tenant | That tenant has no `amfa:` block, or `amfa.enabled: false`. | Add or enable the block. |
 | API transport: AMFA pages fail with 500 (`AMFA stats failed`, `AMFA list events failed`) for every realm except the admin realm, the MCP `get_amfa_stats` tool answers `internal error`, and those realms get no mirrored AMFA events or AMFA alerts | AMFA refuses KMT's admin-realm token for other realms. AMFA's access log shows `403` on `/{realm}/monitoring/...`, with `Token realm does not match request realm`. | List the client in AMFA's `MONITORING_TRUSTED_READERS` (see [What has to exist](#what-has-to-exist)). |
 | API transport: every realm fails, the admin realm included | AMFA rejects the token itself: the Keycloak base URL is missing from AMFA's `OIDC_TRUSTED_BASE_URLS`, or the token lacks the `amfa` audience. | Add the base URL, or the audience mapper on the client (see [What has to exist](#what-has-to-exist)). |

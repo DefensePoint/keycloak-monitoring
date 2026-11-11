@@ -29,7 +29,7 @@ func (r *countingEventRepo) CountEventsByType(_ context.Context, _, _, eventType
 }
 
 func newStatsService(repo EventRepository) Service {
-	return NewService(repo, nil, nil, nil, nil, nil)
+	return NewService(repo, nil, nil, nil, nil, nil, nil)
 }
 
 func TestGetEventStats_SumsEveryCount(t *testing.T) {
