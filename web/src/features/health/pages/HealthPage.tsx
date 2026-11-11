@@ -115,9 +115,17 @@ export function HealthPage() {
           <SectionCard title="Keycloak Server Status">
             <Box
               sx={{
-                display: "grid",
-                gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" },
+                // A wrapping row rather than a grid: a value that does not fit
+                // moves to its own line instead of breaking mid-word, and the
+                // version, such as a vendor build's long one, breaks only when
+                // it is wider than the whole card.
+                display: "flex",
+                flexWrap: "wrap",
                 gap: 3,
+                "& > *": { flex: "1 1 auto", minWidth: 0 },
+                "& > :nth-of-type(3) .MuiTypography-h4": {
+                  overflowWrap: "anywhere",
+                },
               }}
             >
               <Box>
