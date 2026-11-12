@@ -323,6 +323,56 @@ describe("HealthPage", () => {
     });
   });
 
+  it("says the update check does not apply to a version that is not compared", async () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        health: {
+          ...mockKeycloakDashboard.health,
+          server_version: "26.4.2.redhat-00001",
+        },
+        version_info: {
+          ...mockKeycloakDashboard.version_info,
+          is_keycloak_outdated: false,
+          version_comparable: false,
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<HealthPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Update check does not apply to this build"),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Update Available/)).not.toBeInTheDocument();
+  });
+
+  it("does not show that caption for a compared version", async () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        ...mockKeycloakDashboard,
+        version_info: {
+          ...mockKeycloakDashboard.version_info,
+          version_comparable: true,
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<HealthPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("23.0.1")).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText("Update check does not apply to this build"),
+    ).not.toBeInTheDocument();
+  });
+
   // A failed first load used to render the same "No health data available" as
   // a tenant that simply had nothing to report.
   it("shows a failed first load as an error, not as no data", async () => {

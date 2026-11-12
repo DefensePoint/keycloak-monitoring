@@ -762,9 +762,13 @@ func (h *KeycloakHandlers) handleKeycloakVersionCheck(w http.ResponseWriter, r *
 
 	versionInfo, err := h.service.GetVersionInfo(ctx, tenantID)
 	if err != nil {
-		h.log.Error("Failed to get version info",
-			logger.Str("tenant_id", tenantID),
-			logger.Err(err))
+		// The version checker logs a failed GitHub fetch once; logging it on
+		// every request too would repeat it for as long as GitHub is down.
+		if !errors.Is(err, keycloak.ErrVersionLookupFailed) {
+			h.log.Error("Failed to get version info",
+				logger.Str("tenant_id", tenantID),
+				logger.Err(err))
+		}
 		httputil.RespondInternalError(w, h.log, "Failed to retrieve version data from health check or external sources")
 		return
 	}

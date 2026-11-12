@@ -55,6 +55,9 @@ export function HealthPage() {
   const releaseUrl = versionInfo ? versionInfo.keycloak_release_url : "";
   const releaseLabel = "View Keycloak Release Notes";
   const isOutdated = versionInfo ? versionInfo.is_keycloak_outdated : false;
+  // A vendor build, such as Red Hat build of Keycloak, follows its own release
+  // line and is not compared, so the page says so instead of looking up to date.
+  const notComparable = versionInfo?.version_comparable === false;
   const latestVersionDisplay = latestVersion?.trim()
     ? latestVersion
     : "Unknown";
@@ -115,9 +118,17 @@ export function HealthPage() {
           <SectionCard title="Keycloak Server Status">
             <Box
               sx={{
-                display: "grid",
-                gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" },
+                // A wrapping row rather than a grid: a value that does not fit
+                // moves to its own line instead of breaking mid-word, and the
+                // version, such as a vendor build's long one, breaks only when
+                // it is wider than the whole card.
+                display: "flex",
+                flexWrap: "wrap",
                 gap: 3,
+                "& > *": { flex: "1 1 auto", minWidth: 0 },
+                "& > :nth-of-type(3) .MuiTypography-h4": {
+                  overflowWrap: "anywhere",
+                },
               }}
             >
               <Box>
@@ -189,6 +200,15 @@ export function HealthPage() {
                       </Tooltip>
                     )}
                   </Box>
+                  {notComparable && (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", mt: 0.5 }}
+                    >
+                      Update check does not apply to this build
+                    </Typography>
+                  )}
                 </Box>
               )}
             </Box>

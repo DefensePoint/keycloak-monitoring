@@ -251,6 +251,9 @@ export interface KeycloakVersionInfo {
   keycloak_release_url: string;
   is_keycloak_outdated: boolean;
   has_security_updates: boolean;
+  // False when the server version, such as a Red Hat build of Keycloak's, is
+  // not compared with upstream releases.
+  version_comparable?: boolean;
 }
 
 // ============================================================================

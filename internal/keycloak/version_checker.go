@@ -3,12 +3,22 @@ package keycloak
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 )
+
+// ErrVersionLookupFailed wraps every error GetLatestVersions returns for a
+// failed fetch from GitHub, including a remembered one. The checker logs each
+// failed fetch once, so callers need not log it again.
+var ErrVersionLookupFailed = errors.New("failed to fetch latest Keycloak version")
 
 // GitHubRelease represents a GitHub release
 type GitHubRelease struct {
@@ -29,14 +39,41 @@ type VersionInfo struct {
 
 // VersionChecker handles checking for latest Keycloak versions
 type VersionChecker struct {
-	httpClient       *http.Client
-	cache            *VersionInfo
-	cacheTime        time.Time
+	httpClient *http.Client
+	log        *logger.Logger
+
+	// mu guards the fields below it. Page loads call GetLatestVersions
+	// concurrently: one of them fetches while the others wait for that fetch
+	// and share its result, so GitHub is asked once however many pages load.
+	mu        sync.Mutex
+	cache     *VersionInfo
+	cacheTime time.Time
+	// failure and failedAt hold the last failed fetch, which is returned
+	// until retryAfter has passed, so an unreachable GitHub costs one slow
+	// page load per interval rather than one per page load.
+	failure          error
+	failedAt         time.Time
+	inflight         *versionFetch
 	cacheTTL         time.Duration
 	githubAPIBaseURL string
 	keycloakOwner    string
 	keycloakRepo     string
+
+	// notComparable holds the tenant and server version pairs already
+	// logged as not compared with upstream, so each is logged once.
+	notComparable sync.Map
 }
+
+// versionFetch is one fetch from GitHub that concurrent callers share.
+type versionFetch struct {
+	done chan struct{}
+	info *VersionInfo
+	err  error
+}
+
+// failureRetryInterval is how long a failed fetch is remembered before
+// GitHub is asked again, unless the cache TTL is shorter.
+const failureRetryInterval = time.Minute
 
 // VersionCheckerConfig contains configuration for the version checker
 type VersionCheckerConfig struct {
@@ -48,6 +85,9 @@ type VersionCheckerConfig struct {
 	GitHubAPIBaseURL string
 	KeycloakOwner    string
 	KeycloakRepo     string
+	// Logger receives one line per failed fetch and one when fetching
+	// recovers. Nil discards them.
+	Logger *logger.Logger
 }
 
 // DefaultVersionCheckerConfig returns default configuration.
@@ -81,10 +121,15 @@ func NewVersionChecker(cfg VersionCheckerConfig) *VersionChecker {
 		return nil
 	}
 
+	log := cfg.Logger
+	if log == nil {
+		log = logger.NewNoop()
+	}
 	return &VersionChecker{
 		httpClient: &http.Client{
 			Timeout: cfg.HTTPTimeout,
 		},
+		log:              log,
 		cacheTTL:         cfg.CacheTTL,
 		githubAPIBaseURL: cfg.GitHubAPIBaseURL,
 		keycloakOwner:    cfg.KeycloakOwner,
@@ -92,31 +137,122 @@ func NewVersionChecker(cfg VersionCheckerConfig) *VersionChecker {
 	}
 }
 
-// GetLatestVersions returns the latest version information
+// GetLatestVersions returns the latest version information, from the cache
+// while it is fresh. Concurrent callers share one fetch, and a failed fetch is
+// returned again until the retry interval has passed.
 func (vc *VersionChecker) GetLatestVersions(ctx context.Context) (*VersionInfo, error) {
-	// Return cached version if still valid
+	vc.mu.Lock()
 	if vc.cache != nil && time.Since(vc.cacheTime) < vc.cacheTTL {
-		return vc.cache, nil
+		info := vc.cache
+		vc.mu.Unlock()
+		return info, nil
 	}
-
-	versionInfo := &VersionInfo{
-		LastChecked: time.Now(),
+	if vc.failure != nil && time.Since(vc.failedAt) < vc.retryAfter() {
+		err := vc.failure
+		vc.mu.Unlock()
+		return nil, err
 	}
+	f := vc.inflight
+	if f == nil {
+		f = &versionFetch{done: make(chan struct{})}
+		vc.inflight = f
+		// The fetch outlives the caller that started it, since others wait
+		// for it; the HTTP client's timeout still bounds it.
+		go vc.fetch(context.WithoutCancel(ctx), f)
+	}
+	vc.mu.Unlock()
 
-	// Fetch latest Keycloak version with release notes
+	select {
+	case <-f.done:
+		return f.info, f.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// CachedVersions returns the last fetched version information without
+// waiting for GitHub, even when it is older than the cache TTL, or nil while
+// no fetch has succeeded yet. When the cache is stale or empty it starts a
+// fetch in the background, unless one is running or a failed one is still
+// remembered, so later calls get the new answer.
+//
+// Pages that poll, such as the dashboard, use this: waiting for an
+// unreachable GitHub would hold every one of their requests for the HTTP
+// timeout, once per retry interval.
+func (vc *VersionChecker) CachedVersions(ctx context.Context) *VersionInfo {
+	vc.mu.Lock()
+	defer vc.mu.Unlock()
+	fresh := vc.cache != nil && time.Since(vc.cacheTime) < vc.cacheTTL
+	failedRecently := vc.failure != nil && time.Since(vc.failedAt) < vc.retryAfter()
+	if !fresh && !failedRecently && vc.inflight == nil {
+		f := &versionFetch{done: make(chan struct{})}
+		vc.inflight = f
+		go vc.fetch(context.WithoutCancel(ctx), f)
+	}
+	return vc.cache
+}
+
+// noteNotComparable logs, once per tenant and server version, that the
+// version is not compared with upstream releases, so an operator who enabled
+// the checker can tell a vendor build from one that is up to date.
+func (vc *VersionChecker) noteNotComparable(tenantID, version string) {
+	if _, seen := vc.notComparable.LoadOrStore(tenantID+"\x00"+version, struct{}{}); seen || vc.log == nil {
+		return
+	}
+	vc.log.Info("Version check: the server version is not a plain upstream release, such as a Red Hat build of Keycloak, so it is not compared with upstream Keycloak",
+		logger.Str("tenant_id", tenantID), logger.Str("server_version", version))
+}
+
+// fetch asks GitHub for the latest release, records the result for later
+// callers and releases everyone waiting on f.
+func (vc *VersionChecker) fetch(ctx context.Context, f *versionFetch) {
+	info, err := vc.fetchLatestVersions(ctx)
+
+	vc.mu.Lock()
+	recovered := err == nil && vc.failure != nil
+	if err != nil {
+		vc.failure, vc.failedAt = err, time.Now()
+	} else {
+		vc.cache, vc.cacheTime = info, time.Now()
+		vc.failure = nil
+	}
+	retry := vc.retryAfter()
+	vc.inflight = nil
+	f.info, f.err = info, err
+	vc.mu.Unlock()
+
+	// Logged before the waiting callers are released, so the line is
+	// written by the time any of them returns.
+	if err != nil {
+		vc.log.Warn("Version check: could not fetch the latest Keycloak release; no update notice is shown until a later attempt succeeds",
+			logger.Err(err), logger.Dur("retry_after", retry))
+	} else if recovered {
+		vc.log.Info("Version check: fetched the latest Keycloak release again",
+			logger.Str("latest_keycloak_version", info.LatestKeycloakVersion))
+	}
+	close(f.done)
+}
+
+func (vc *VersionChecker) fetchLatestVersions(ctx context.Context) (*VersionInfo, error) {
 	release, err := vc.fetchLatestGitHubReleaseWithBody(ctx, vc.keycloakOwner, vc.keycloakRepo)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch latest Keycloak version: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrVersionLookupFailed, err)
 	}
-	versionInfo.LatestKeycloakVersion = strings.TrimPrefix(release.TagName, "v")
-	versionInfo.KeycloakReleaseURL = release.HTMLURL
-	versionInfo.HasSecurityUpdates = ContainsSecurityUpdates(release.Body)
+	return &VersionInfo{
+		LatestKeycloakVersion: strings.TrimPrefix(release.TagName, "v"),
+		KeycloakReleaseURL:    release.HTMLURL,
+		HasSecurityUpdates:    ContainsSecurityUpdates(release.Body),
+		LastChecked:           time.Now(),
+	}, nil
+}
 
-	// Update cache
-	vc.cache = versionInfo
-	vc.cacheTime = time.Now()
-
-	return versionInfo, nil
+// retryAfter is how long a failed fetch is returned before GitHub is asked
+// again: failureRetryInterval, or the cache TTL when that is shorter.
+func (vc *VersionChecker) retryAfter() time.Duration {
+	if vc.cacheTTL > 0 && vc.cacheTTL < failureRetryInterval {
+		return vc.cacheTTL
+	}
+	return failureRetryInterval
 }
 
 // fetchLatestGitHubReleaseWithBody fetches the latest release from a GitHub repository with full body
@@ -182,6 +318,21 @@ func CompareVersions(v1, v2 string) int {
 	}
 
 	return 0
+}
+
+// upstreamRelease matches a plain release number as upstream Keycloak reports
+// it, such as 26.4.2.
+var upstreamRelease = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+$`)
+
+// isUpstreamRelease reports whether a server version can be compared with
+// upstream Keycloak releases. A vendor or distribution build reports its own
+// suffix after the release number and follows its own release line, so
+// comparing it with upstream would announce updates its vendor has not
+// shipped. Development builds such as 999.0.0-SNAPSHOT are skipped the same
+// way. A Red Hat build of Keycloak, such as 26.4.2.redhat-00001, is one of
+// these.
+func isUpstreamRelease(version string) bool {
+	return upstreamRelease.MatchString(version)
 }
 
 // IsVersionOutdated checks if the current version is outdated compared to the latest
