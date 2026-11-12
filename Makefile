@@ -6,6 +6,10 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 SWAG_VERSION ?= v1.16.6
 SWAG = go run github.com/swaggo/swag/cmd/swag@$(SWAG_VERSION)
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+# The local compose file builds its images with these, for the settings page.
+export KMT_BUILD_VERSION := $(VERSION)
+export KMT_BUILD_COMMIT := $(GIT_COMMIT)
+export KMT_BUILD_DATE := $(BUILD_DATE)
 
 # Other variables
 DOCKER_COMPOSE_LOCAL_FILE := "./deployments/local/docker-compose.yml"
