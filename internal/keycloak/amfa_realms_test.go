@@ -159,3 +159,16 @@ func TestListAmfaEnabledRealms_NoClientProvider(t *testing.T) {
 		t.Error("expected error when no client provider is configured")
 	}
 }
+
+// The IDs logged at startup are the ones matched: the built-in ones always,
+// the configured ones trimmed, without blanks or duplicates, in a stable order.
+func TestAmfaAuthenticatorIDs(t *testing.T) {
+	got := AmfaAuthenticatorIDs([]string{" custom-adaptive-auth ", "", "adaptive-auth", "custom-adaptive-auth"})
+	want := []string{"adaptive-auth", "conditional-adaptive-auth", "custom-adaptive-auth"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got := AmfaAuthenticatorIDs(nil); !reflect.DeepEqual(got, builtinAmfaAuthenticatorIDs) {
+		t.Errorf("no extra ids: got %v, want %v", got, builtinAmfaAuthenticatorIDs)
+	}
+}

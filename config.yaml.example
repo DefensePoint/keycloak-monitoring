@@ -558,7 +558,9 @@ keycloak:
     # MFA plugin's adaptive-auth and conditional-adaptive-auth are always
     # matched. List here the IDs of an extension that registers the AMFA
     # authenticators under other names; a realm using only those shows no AMFA
-    # sections and no error until they are listed.
+    # sections and no error until they are listed. Any listed ID marks a realm
+    # as using AMFA, so list only AMFA authenticators. The IDs in effect are
+    # logged at startup ("AMFA authenticator IDs").
     # amfa_authenticator_ids:
     #   - custom-adaptive-auth
     #   - custom-conditional-adaptive-auth

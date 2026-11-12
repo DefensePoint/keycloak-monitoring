@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -150,6 +151,17 @@ func amfaAuthenticatorIDSet(extra []string) map[string]struct{} {
 			ids[id] = struct{}{}
 		}
 	}
+	return ids
+}
+
+// AmfaAuthenticatorIDs returns the provider IDs matched as AMFA, the built-in
+// ones plus the non-blank extra ones, sorted, for logging what is in effect.
+func AmfaAuthenticatorIDs(extra []string) []string {
+	ids := make([]string, 0, len(builtinAmfaAuthenticatorIDs)+len(extra))
+	for id := range amfaAuthenticatorIDSet(extra) {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
 	return ids
 }
 
