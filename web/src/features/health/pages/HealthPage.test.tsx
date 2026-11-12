@@ -420,6 +420,37 @@ describe("HealthPage", () => {
     });
   });
 
+  // Without a server version there is nothing to compare with the latest
+  // release, so no update notice may show even when version_info says so.
+  it("shows no update notice when the server version is not available", () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        health: {
+          ...mockKeycloakDashboard.health,
+          server_version: "",
+        },
+        version_info: {
+          ...mockKeycloakDashboard.version_info,
+          is_keycloak_outdated: true,
+          has_security_updates: true,
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<HealthPage />);
+
+    expect(screen.getByText("Not available")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Security Update Required|Update Available/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/available$/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("View Keycloak Release Notes"),
+    ).not.toBeInTheDocument();
+  });
+
   // A failed first load used to render the same "No health data available" as
   // a tenant that simply had nothing to report.
   it("shows a failed first load as an error, not as no data", async () => {
