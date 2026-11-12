@@ -368,11 +368,12 @@ func (s *service) GetDashboard(ctx context.Context, tenantID string, realmName s
 	health, _ := s.healthRepo.GetLatestHealth(ctx, tenantID)
 	dashboard.Health = health
 
-	// Get version info if health has version
+	// Get version info if health has version. The dashboard does not wait for
+	// GitHub: it shows the last fetched release, if any, and a stale or missing
+	// one is fetched in the background.
 	if health != nil && health.ServerVersion != "" && s.versionChecker != nil {
-		versionInfo, err := s.GetVersionInfo(ctx, tenantID)
-		if err == nil {
-			dashboard.VersionInfo = versionInfo
+		if latest := s.versionChecker.CachedVersions(ctx); latest != nil {
+			dashboard.VersionInfo = s.versionResult(tenantID, health.ServerVersion, latest)
 		}
 	}
 
@@ -449,20 +450,30 @@ func (s *service) GetVersionInfo(ctx context.Context, tenantID string) (*Version
 		return nil, err
 	}
 
-	// Only a plain release number is compared, see isUpstreamRelease.
+	return s.versionResult(tenantID, currentVersion, latestVersions), nil
+}
+
+// versionResult compares the server version with the latest upstream release.
+// Only a plain release number is compared, see isUpstreamRelease.
+func (s *service) versionResult(tenantID, currentVersion string, latest *VersionInfo) *VersionCheckResult {
+	comparable := isUpstreamRelease(currentVersion)
+	if !comparable && currentVersion != "" {
+		s.versionChecker.noteNotComparable(tenantID, currentVersion)
+	}
 	isKeycloakOutdated := false
-	if isUpstreamRelease(currentVersion) && latestVersions != nil && latestVersions.LatestKeycloakVersion != "" {
-		isKeycloakOutdated = IsVersionOutdated(currentVersion, latestVersions.LatestKeycloakVersion)
+	if comparable && latest.LatestKeycloakVersion != "" {
+		isKeycloakOutdated = IsVersionOutdated(currentVersion, latest.LatestKeycloakVersion)
 	}
 
 	return &VersionCheckResult{
 		CurrentVersion:        currentVersion,
-		LatestKeycloakVersion: latestVersions.LatestKeycloakVersion,
-		KeycloakReleaseURL:    latestVersions.KeycloakReleaseURL,
+		LatestKeycloakVersion: latest.LatestKeycloakVersion,
+		KeycloakReleaseURL:    latest.KeycloakReleaseURL,
 		IsKeycloakOutdated:    isKeycloakOutdated,
-		HasSecurityUpdates:    latestVersions.HasSecurityUpdates,
-		LastChecked:           latestVersions.LastChecked,
-	}, nil
+		VersionComparable:     comparable,
+		HasSecurityUpdates:    latest.HasSecurityUpdates,
+		LastChecked:           latest.LastChecked,
+	}
 }
 
 // GetUsers returns users from a Keycloak realm.

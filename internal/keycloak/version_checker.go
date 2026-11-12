@@ -58,6 +58,10 @@ type VersionChecker struct {
 	githubAPIBaseURL string
 	keycloakOwner    string
 	keycloakRepo     string
+
+	// notComparable holds the tenant and server version pairs already
+	// logged as not compared with upstream, so each is logged once.
+	notComparable sync.Map
 }
 
 // versionFetch is one fetch from GitHub that concurrent callers share.
@@ -164,6 +168,39 @@ func (vc *VersionChecker) GetLatestVersions(ctx context.Context) (*VersionInfo, 
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+// CachedVersions returns the last fetched version information without
+// waiting for GitHub, even when it is older than the cache TTL, or nil while
+// no fetch has succeeded yet. When the cache is stale or empty it starts a
+// fetch in the background, unless one is running or a failed one is still
+// remembered, so later calls get the new answer.
+//
+// Pages that poll, such as the dashboard, use this: waiting for an
+// unreachable GitHub would hold every one of their requests for the HTTP
+// timeout, once per retry interval.
+func (vc *VersionChecker) CachedVersions(ctx context.Context) *VersionInfo {
+	vc.mu.Lock()
+	defer vc.mu.Unlock()
+	fresh := vc.cache != nil && time.Since(vc.cacheTime) < vc.cacheTTL
+	failedRecently := vc.failure != nil && time.Since(vc.failedAt) < vc.retryAfter()
+	if !fresh && !failedRecently && vc.inflight == nil {
+		f := &versionFetch{done: make(chan struct{})}
+		vc.inflight = f
+		go vc.fetch(context.WithoutCancel(ctx), f)
+	}
+	return vc.cache
+}
+
+// noteNotComparable logs, once per tenant and server version, that the
+// version is not compared with upstream releases, so an operator who enabled
+// the checker can tell a vendor build from one that is up to date.
+func (vc *VersionChecker) noteNotComparable(tenantID, version string) {
+	if _, seen := vc.notComparable.LoadOrStore(tenantID+"\x00"+version, struct{}{}); seen || vc.log == nil {
+		return
+	}
+	vc.log.Info("Version check: the server version is not a plain upstream release, such as a Red Hat build of Keycloak, so it is not compared with upstream Keycloak",
+		logger.Str("tenant_id", tenantID), logger.Str("server_version", version))
 }
 
 // fetch asks GitHub for the latest release, records the result for later
@@ -292,7 +329,8 @@ var upstreamRelease = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+$`)
 // suffix after the release number and follows its own release line, so
 // comparing it with upstream would announce updates its vendor has not
 // shipped. Development builds such as 999.0.0-SNAPSHOT are skipped the same
-// way.
+// way. A Red Hat build of Keycloak, such as 26.4.2.redhat-00001, is one of
+// these.
 func isUpstreamRelease(version string) bool {
 	return upstreamRelease.MatchString(version)
 }

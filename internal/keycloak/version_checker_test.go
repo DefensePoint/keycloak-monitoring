@@ -245,6 +245,14 @@ func (r fixedHealthRepo) GetLatestHealth(context.Context, string) (*domain.Keycl
 	return &domain.KeycloakHealth{ServerVersion: r.version}, nil
 }
 
+// noRealms answers GetRealms with none, for a dashboard of all realms. Every
+// other RealmRepository method is left to the embedded nil interface.
+type noRealms struct{ RealmRepository }
+
+func (noRealms) GetRealms(context.Context, string) ([]*domain.KeycloakRealmInfo, error) {
+	return nil, nil
+}
+
 // A vendor build is never reported as behind upstream, however far its
 // release number trails; a plain release still is.
 func TestGetVersionInfo_ComparesOnlyUpstreamReleases(t *testing.T) {
@@ -254,14 +262,16 @@ func TestGetVersionInfo_ComparesOnlyUpstreamReleases(t *testing.T) {
 		cacheTTL:  time.Hour,
 	}
 	tests := []struct {
-		version      string
-		wantOutdated bool
+		version        string
+		wantOutdated   bool
+		wantComparable bool
 	}{
-		{"26.4.2", true},
-		{"26.8.2", false},
-		{"26.0.6.vendor-00001", false},
-		{"999.0.0-SNAPSHOT", false},
-		{"", false},
+		{"26.4.2", true, true},
+		{"26.8.2", false, true},
+		{"26.0.6.vendor-00001", false, false},
+		{"26.4.2.redhat-00001", false, false},
+		{"999.0.0-SNAPSHOT", false, false},
+		{"", false, false},
 	}
 	for _, tt := range tests {
 		svc := NewService(nil, nil, fixedHealthRepo{version: tt.version}, nil, nil, checker)
@@ -271,6 +281,9 @@ func TestGetVersionInfo_ComparesOnlyUpstreamReleases(t *testing.T) {
 		}
 		if info.IsKeycloakOutdated != tt.wantOutdated {
 			t.Errorf("server %q: outdated = %v, want %v", tt.version, info.IsKeycloakOutdated, tt.wantOutdated)
+		}
+		if info.VersionComparable != tt.wantComparable {
+			t.Errorf("server %q: comparable = %v, want %v", tt.version, info.VersionComparable, tt.wantComparable)
 		}
 		if info.CurrentVersion != tt.version || info.LatestKeycloakVersion != "26.8.2" {
 			t.Errorf("server %q: got current %q, latest %q", tt.version, info.CurrentVersion, info.LatestKeycloakVersion)
@@ -492,5 +505,130 @@ func TestGetLatestVersions_LogsEachFailedFetchOnce(t *testing.T) {
 	}
 	if n := atomic.LoadInt64(hits); n != 2 {
 		t.Errorf("GitHub was asked %d times, want 2", n)
+	}
+}
+
+// A version that is not compared is logged once per tenant and version, not on
+// every request, and a comparable one not at all.
+func TestVersionResult_LogsANotComparableVersionOncePerTenant(t *testing.T) {
+	var buf bytes.Buffer
+	checker := &VersionChecker{
+		log:       logger.New(zerolog.New(&buf)),
+		cache:     &VersionInfo{LatestKeycloakVersion: "26.8.2"},
+		cacheTime: time.Now(),
+		cacheTTL:  time.Hour,
+	}
+	for _, call := range []struct{ tenant, version string }{
+		{"t1", "26.4.2.redhat-00001"},
+		{"t1", "26.4.2.redhat-00001"},
+		{"t2", "26.4.2.redhat-00001"},
+		{"t1", "26.4.2"},
+	} {
+		svc := NewService(nil, nil, fixedHealthRepo{version: call.version}, noRealms{}, nil, checker)
+		if _, err := svc.GetVersionInfo(context.Background(), call.tenant); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.GetDashboard(context.Background(), call.tenant, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := strings.Count(buf.String(), "not compared with upstream Keycloak"); n != 2 {
+		t.Errorf("logged %d times, want once for each of 2 tenants: %s", n, buf.String())
+	}
+}
+
+// CachedVersions never waits for GitHub: with nothing cached it answers nil at
+// once and starts one fetch, which later calls share instead of starting more.
+func TestCachedVersions_DoesNotWaitForAHangingGitHub(t *testing.T) {
+	stub, hits := releaseStub(t, 10*time.Second, nil)
+	vc := stubChecker(stub.URL, time.Hour, 2*time.Second)
+
+	start := time.Now()
+	for i := 0; i < 10; i++ {
+		if info := vc.CachedVersions(context.Background()); info != nil {
+			t.Fatalf("call %d returned %v from a GitHub that never answered", i, info)
+		}
+	}
+	if d := time.Since(start); d > 100*time.Millisecond {
+		t.Errorf("10 calls took %v, want no wait for GitHub", d)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if n := atomic.LoadInt64(hits); n != 1 {
+		t.Errorf("GitHub was asked %d times, want 1", n)
+	}
+}
+
+// A stale cache is returned as it is while the newer release is fetched in the
+// background; the call after that fetch gets the newer one.
+func TestCachedVersions_ReturnsAStaleCacheAndRefreshesIt(t *testing.T) {
+	stub, hits := releaseStub(t, 200*time.Millisecond, nil)
+	vc := stubChecker(stub.URL, time.Hour, 2*time.Second)
+	vc.cache = &VersionInfo{LatestKeycloakVersion: "26.0.0"}
+	vc.cacheTime = time.Now().Add(-2 * time.Hour)
+
+	start := time.Now()
+	if info := vc.CachedVersions(context.Background()); info == nil || info.LatestKeycloakVersion != "26.0.0" {
+		t.Fatalf("got %v, want the stale 26.0.0", info)
+	}
+	if d := time.Since(start); d > 100*time.Millisecond {
+		t.Errorf("the call took %v, want no wait for GitHub", d)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if info := vc.CachedVersions(context.Background()); info.LatestKeycloakVersion == "26.8.2" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the cache was not refreshed in the background")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if n := atomic.LoadInt64(hits); n != 1 {
+		t.Errorf("GitHub was asked %d times, want 1", n)
+	}
+}
+
+// The defect: GetDashboard waited for GitHub, so with GitHub unreachable a
+// dashboard request took the whole HTTP timeout once per retry interval.
+func TestGetDashboard_DoesNotWaitForGitHub(t *testing.T) {
+	stub, _ := releaseStub(t, 10*time.Second, nil)
+	vc := stubChecker(stub.URL, time.Hour, 3*time.Second)
+	svc := NewService(nil, nil, fixedHealthRepo{version: "26.4.2"}, noRealms{}, nil, vc)
+
+	start := time.Now()
+	dashboard, err := svc.GetDashboard(context.Background(), "t1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 500*time.Millisecond {
+		t.Errorf("GetDashboard took %v with GitHub hanging, want no wait", d)
+	}
+	if dashboard.VersionInfo != nil {
+		t.Errorf("version info %v before any fetch succeeded", dashboard.VersionInfo)
+	}
+}
+
+// Once the background fetch has succeeded, the dashboard carries the comparison.
+func TestGetDashboard_ShowsTheVersionOnceFetched(t *testing.T) {
+	stub, _ := releaseStub(t, 0, nil)
+	vc := stubChecker(stub.URL, time.Hour, 2*time.Second)
+	svc := NewService(nil, nil, fixedHealthRepo{version: "26.4.2"}, noRealms{}, nil, vc)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		dashboard, err := svc.GetDashboard(context.Background(), "t1", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v := dashboard.VersionInfo; v != nil {
+			if !v.IsKeycloakOutdated || !v.VersionComparable || v.LatestKeycloakVersion != "26.8.2" {
+				t.Errorf("version info %+v, want 26.4.2 compared and outdated against 26.8.2", v)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the dashboard never showed version info")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

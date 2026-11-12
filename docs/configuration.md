@@ -445,7 +445,10 @@ keycloak:
       # Off by default; the only setting that contacts a host outside your
       # infrastructure (api.github.com). Only a server reporting a plain
       # release number, such as 26.4.2, is compared: a vendor or distribution
-      # build follows its own release line and is never shown as behind.
+      # build, such as Red Hat build of Keycloak (26.4.2.redhat-00001), follows
+      # its own release line and is never shown as behind. The Health page then
+      # says the update check does not apply to that build, and the server logs
+      # it once per tenant.
       enabled: false
 
       # Cache duration for version information

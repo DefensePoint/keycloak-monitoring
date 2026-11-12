@@ -68,4 +68,8 @@ type VersionCheckResult struct {
 	IsKeycloakOutdated    bool      `json:"is_keycloak_outdated"`
 	HasSecurityUpdates    bool      `json:"has_security_updates"`
 	LastChecked           time.Time `json:"last_checked"`
+	// VersionComparable is false when the server version is not a plain
+	// upstream release, such as a Red Hat build of Keycloak, and so was not
+	// compared: IsKeycloakOutdated is then always false.
+	VersionComparable bool `json:"version_comparable"`
 }

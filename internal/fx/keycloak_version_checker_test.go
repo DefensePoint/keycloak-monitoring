@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
+	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
+	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
 )
 
 func TestNewVersionChecker_DisabledBuildsNothing(t *testing.T) {
@@ -56,5 +58,51 @@ func TestNewVersionChecker_EnabledUsesTheConfiguredSource(t *testing.T) {
 	}
 	if info.LatestKeycloakVersion != "26.8.2" {
 		t.Errorf("latest version %q, want 26.8.2", info.LatestKeycloakVersion)
+	}
+}
+
+// healthWithVersion answers GetLatestHealth with one server version. Every
+// other HealthRepository method is left to the embedded nil interface.
+type healthWithVersion struct {
+	keycloak.HealthRepository
+	version string
+}
+
+func (r healthWithVersion) GetLatestHealth(context.Context, string) (*domain.KeycloakHealth, error) {
+	return &domain.KeycloakHealth{ServerVersion: r.version}, nil
+}
+
+// The service the app is built with has the version checker the config asks
+// for. The defect: provideKeycloakService passed nil, so an enabled checker
+// was never used. Builds the service the way fx does, not the checker alone.
+func TestProvideKeycloakService_UsesTheConfiguredVersionChecker(t *testing.T) {
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tag_name":"26.8.2","html_url":"https://example.invalid/26.8.2","body":""}`))
+	}))
+	defer stub.Close()
+
+	for _, enabled := range []bool{true, false} {
+		cfg := &config.AppConfig{}
+		cfg.Keycloak.Global.VersionChecker = config.VersionCheckerConfig{
+			Enabled:          enabled,
+			GitHubAPIBaseURL: stub.URL,
+			HTTPTimeout:      5 * time.Second,
+		}
+		svc := provideKeycloakService(cfg, nil, nil, nil, healthWithVersion{version: "26.4.2"}, nil)
+
+		info, err := svc.GetVersionInfo(context.Background(), "t1")
+		if err != nil {
+			t.Fatalf("enabled=%v: GetVersionInfo: %v", enabled, err)
+		}
+		if !enabled {
+			if info != nil {
+				t.Errorf("a disabled checker answered %+v", info)
+			}
+			continue
+		}
+		if info == nil || info.LatestKeycloakVersion != "26.8.2" || !info.IsKeycloakOutdated {
+			t.Errorf("enabled checker answered %+v, want 26.4.2 compared against 26.8.2", info)
+		}
 	}
 }

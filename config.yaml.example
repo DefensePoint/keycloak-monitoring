@@ -570,8 +570,11 @@ keycloak:
       # shows no version information.
       #
       # Only a server reporting a plain release number, such as 26.4.2, is
-      # compared. A vendor or distribution build adds its own suffix and
-      # follows its own release line, so it is never shown as behind upstream.
+      # compared. A vendor or distribution build, such as Red Hat build of
+      # Keycloak (26.4.2.redhat-00001), adds its own suffix and follows its own
+      # release line, so it is never shown as behind upstream. The Health page
+      # then says the update check does not apply to that build, and the
+      # server logs it once per tenant.
       enabled: false
 
       # How long to cache version information before checking again

@@ -55,6 +55,9 @@ export function HealthPage() {
   const releaseUrl = versionInfo ? versionInfo.keycloak_release_url : "";
   const releaseLabel = "View Keycloak Release Notes";
   const isOutdated = versionInfo ? versionInfo.is_keycloak_outdated : false;
+  // A vendor build, such as Red Hat build of Keycloak, follows its own release
+  // line and is not compared, so the page says so instead of looking up to date.
+  const notComparable = versionInfo?.version_comparable === false;
   const latestVersionDisplay = latestVersion?.trim()
     ? latestVersion
     : "Unknown";
@@ -197,6 +200,15 @@ export function HealthPage() {
                       </Tooltip>
                     )}
                   </Box>
+                  {notComparable && (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", mt: 0.5 }}
+                    >
+                      Update check does not apply to this build
+                    </Typography>
+                  )}
                 </Box>
               )}
             </Box>
