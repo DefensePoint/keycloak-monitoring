@@ -161,17 +161,9 @@ Then open the AMFA Events page from the sidebar (`/{tenantId}/amfa-events`) and 
 
 ## Seeding demo data for UI development
 
-For development / UI work without waiting for real AMFA traffic, seed a few synthetic `auth_process` rows and events directly:
+For development and UI work without waiting for real AMFA traffic, `deployments/local/amfa-demo/seed.sh` seeds about 730 logins over 30 days into a local AMFA engine stack: real city coordinates for the map, risk levels 1 to 4, VPN-flagged logins, an impossible-travel pair and a burst of rejections. It also creates the `demo-*` users in Keycloak, so the events show usernames rather than UUIDs, and the `kmt_ro` role. Every seeded row carries a marker, so `teardown.sh` removes exactly the demo data. See [its README](../deployments/local/amfa-demo/README.md).
 
-```sql
--- Insert one realistic record set:
---   1× auth_context (lat/long for the map, IP, country)
---   1× device + 1× location_network (FK targets)
---   1× auth_process (links them, sets realm + risk_level)
---   1× auth_event  (the displayable event row)
-```
-
-For two real users to appear with names instead of UUIDs, look up their UUIDs from Keycloak and use those `user_id` values in your seed.
+It writes `auth_process.auth_context_json` and leaves the `auth_context` table empty, as the engine itself does; KMT reads the JSON snapshot.
 
 ## Rollback
 
