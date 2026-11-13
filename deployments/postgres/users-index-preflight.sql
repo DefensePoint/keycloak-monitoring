@@ -52,8 +52,9 @@ SELECT 'username', count(*) FROM (
     GROUP BY username HAVING count(*) > 1) d;
 
 -- 3. The accounts behind those counts: one row per shared value, with the ids
---    of the live users sharing it, oldest first. Look them up by id to decide
---    which account to keep, then delete or change the others.
+--    of the live users sharing it, oldest first. "Resolving duplicate
+--    accounts" in README.md says which one to keep and how to retire or
+--    rename the others.
 SELECT 'email' AS column_name, string_agg(id::text, ',' ORDER BY id) AS user_ids
 FROM users WHERE deleted_at IS NULL AND email IS NOT NULL AND email <> ''
 GROUP BY email HAVING count(*) > 1

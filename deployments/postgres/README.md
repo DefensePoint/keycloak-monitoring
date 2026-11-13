@@ -129,11 +129,51 @@ prints the values.
 - Every count is 0: nothing to do. The server narrows or creates the indexes
   on start.
 - A count above 0 on a column whose index is `missing`: resolve those
-  accounts first. Look them up by the ids in the third result, keep one, and
-  soft-delete or correct the others. Then start the server.
+  accounts first, in SQL, since the server does not start until they are
+  resolved. Then start the server. See
+  [Resolving duplicate accounts](#resolving-duplicate-accounts).
 - On a release before this fix, also create a `missing` index yourself before
   starting, with the `CREATE UNIQUE INDEX` statement for it from the top of
   the script. The server then finds it and leaves it alone.
+
+### Resolving duplicate accounts
+
+For each line of the pre-flight's third result, look at the accounts behind
+its ids and choose the one to keep: the active account that signed in last.
+An SSO user who owns two accounts after a realm rebuild signs in with the
+subject of the newer one, so keeping the older one locks that person out.
+
+```sql
+SELECT id, auth_method, is_active, created_at, last_login_at, login_count
+FROM users WHERE id IN (12, 47)
+ORDER BY last_login_at DESC NULLS LAST;
+```
+
+Then retire the others. This does what deactivating an account in the UI
+does, which revokes its API tokens and ends its sessions, and also sets
+`deleted_at`, which is what takes the account out of the index. Deactivating
+alone does not:
+
+```sql
+BEGIN;
+UPDATE api_tokens SET revoked_at = now()
+WHERE user_id IN (12) AND revoked_at IS NULL;
+UPDATE users SET deleted_at = now(), is_active = false,
+                 session_epoch = session_epoch + 1
+WHERE id IN (12) AND deleted_at IS NULL;
+COMMIT;
+```
+
+A retired account cannot be brought back from the UI, and an SSO sign-in
+with its subject or email is refused as a deleted account. Retire only
+accounts nobody should use again.
+
+Two simple-auth accounts that share a username can both be kept instead:
+rename the one you would otherwise retire, and tell its owner the new name.
+
+```sql
+UPDATE users SET username = username || '-' || id WHERE id = 12;
+```
 
 ## Limitations
 
