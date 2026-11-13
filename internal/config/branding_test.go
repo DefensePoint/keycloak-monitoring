@@ -22,7 +22,10 @@ func loadBrandingConfig(t *testing.T, yaml string) *AppConfig {
 func TestBranding_UnsetKeepsTheDefaultNames(t *testing.T) {
 	cfg := loadBrandingConfig(t, "")
 
-	want := BrandingConfig{Name: "Keycloak Monitoring Tool", ShortName: "KMT", LogoText: "Keycloak"}
+	want := BrandingConfig{
+		Name: "Keycloak Monitoring Tool", ShortName: "KMT", LogoText: "Keycloak",
+		Vendor: "DefensePoint", ContactEmail: "security@defensepoint.com",
+	}
 	if cfg.Branding != want {
 		t.Errorf("Branding = %+v, want %+v", cfg.Branding, want)
 	}
@@ -45,7 +48,10 @@ branding:
   logo_text: "ACME"
 `)
 
-	want := BrandingConfig{Name: "Acme Monitoring Platform", ShortName: "ACME", LogoText: "ACME"}
+	want := BrandingConfig{
+		Name: "Acme Monitoring Platform", ShortName: "ACME", LogoText: "ACME",
+		Vendor: "DefensePoint", ContactEmail: "security@defensepoint.com",
+	}
 	if cfg.Branding != want {
 		t.Errorf("Branding = %+v, want %+v", cfg.Branding, want)
 	}
@@ -75,9 +81,14 @@ func TestBranding_FromEnvironmentVariables(t *testing.T) {
 	t.Setenv("MONITORING_BRANDING_NAME", "Acme Monitoring Platform")
 	t.Setenv("MONITORING_BRANDING_SHORT_NAME", "ACME")
 	t.Setenv("MONITORING_BRANDING_LOGO_TEXT", "ACME")
+	t.Setenv("MONITORING_BRANDING_VENDOR", "Acme")
+	t.Setenv("MONITORING_BRANDING_CONTACT_EMAIL", "security@acme.example")
 	cfg := loadBrandingConfig(t, "")
 
-	want := BrandingConfig{Name: "Acme Monitoring Platform", ShortName: "ACME", LogoText: "ACME"}
+	want := BrandingConfig{
+		Name: "Acme Monitoring Platform", ShortName: "ACME", LogoText: "ACME",
+		Vendor: "Acme", ContactEmail: "security@acme.example",
+	}
 	if cfg.Branding != want {
 		t.Errorf("Branding = %+v, want %+v", cfg.Branding, want)
 	}
@@ -108,8 +119,11 @@ func TestBranding_SlugAndFilePrefix(t *testing.T) {
 		{BrandingConfig{Name: "Keycloak Monitoring Tool", ShortName: "KMT"}, "keycloak-monitoring-tool", "kmt"},
 		{BrandingConfig{Name: "Acme Monitoring Platform", ShortName: "ACME"}, "acme-monitoring-platform", "acme"},
 		{BrandingConfig{Name: "  Acme -- Ops (EU)  ", ShortName: "Acme EU"}, "acme-ops-eu", "acme-eu"},
-		{BrandingConfig{Name: "Überwachung 2", ShortName: "Ü"}, "berwachung-2", "kmt"},
-		{BrandingConfig{Name: "***", ShortName: "***"}, "keycloak-monitoring-tool", "kmt"},
+		{BrandingConfig{Name: "Überwachung 2", ShortName: "Ü"}, "uberwachung-2", "u"},
+		{BrandingConfig{Name: "Café Straße Øst", ShortName: "ÆØ"}, "cafe-strasse-ost", "aeo"},
+		{BrandingConfig{Name: "Мониторинг", ShortName: "МН"}, "monitoring", "monitoring"},
+		{BrandingConfig{Name: "监控平台", ShortName: "监控"}, "monitoring", "monitoring"},
+		{BrandingConfig{Name: "***", ShortName: "***"}, "monitoring", "monitoring"},
 	}
 	for _, tt := range tests {
 		if got := tt.branding.Slug(); got != tt.slug {
@@ -118,5 +132,38 @@ func TestBranding_SlugAndFilePrefix(t *testing.T) {
 		if got := tt.branding.FilePrefix(); got != tt.file {
 			t.Errorf("%+v.FilePrefix() = %q, want %q", tt.branding, got, tt.file)
 		}
+	}
+}
+
+func TestBranding_ReportCredits(t *testing.T) {
+	tests := []struct {
+		name, yaml, vendor, email string
+	}{
+		{"unset", "", "DefensePoint", "security@defensepoint.com"},
+		{"vendor and address", `
+branding:
+  vendor: "Acme"
+  contact_email: "security@acme.example"
+`, "Acme", "security@acme.example"},
+		// The default address belongs to the default vendor.
+		{"vendor without an address", `
+branding:
+  vendor: "Acme"
+`, "Acme", ""},
+		{"address without a vendor", `
+branding:
+  contact_email: "soc@example.com"
+`, "DefensePoint", "soc@example.com"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := loadBrandingConfig(t, tt.yaml)
+			if cfg.Branding.Vendor != tt.vendor || cfg.Branding.ContactEmail != tt.email {
+				t.Errorf("credits = %q / %q, want %q / %q", cfg.Branding.Vendor, cfg.Branding.ContactEmail, tt.vendor, tt.email)
+			}
+			if again := cfg.Branding.WithDefaults(); again != cfg.Branding {
+				t.Errorf("WithDefaults is not stable: %+v, then %+v", cfg.Branding, again)
+			}
+		})
 	}
 }

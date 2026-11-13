@@ -21,3 +21,18 @@ func TestImplementation_NamesTheServerAfterTheBranding(t *testing.T) {
 		}
 	}
 }
+
+// The server built from the config names itself after its branding, as a
+// client sees it when it connects.
+func TestServer_ConnectedClientSeesTheBrandedName(t *testing.T) {
+	cfg := defaultTestCfg()
+	cfg.Branding = config.BrandingConfig{Name: "Acme Monitoring Platform"}
+	ts := newTestServerCustom(t, cfg, testLogger(), nil, acceptingValidator("pat_good"),
+		&mockPermissionService{}, &mockTenantReader{}, &mockRealmReader{},
+		&mockAlertReader{}, &mockAmfaStatsReader{}, &mockEventReader{})
+
+	info := connectClient(t, ts, "pat_good").InitializeResult().ServerInfo
+	if info.Name != "acme-monitoring-platform" || info.Title != "Acme Monitoring Platform" {
+		t.Errorf("server info = %q / %q, want the branded name", info.Name, info.Title)
+	}
+}

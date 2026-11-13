@@ -21,13 +21,33 @@ export function brandingSubtitle(branding: Branding): string {
   return name;
 }
 
+/** Letters that do not break down into an ASCII letter and accents. */
+const FOLDED_LETTERS: Record<string, string> = {
+  ß: "ss",
+  æ: "ae",
+  ø: "o",
+  œ: "oe",
+  đ: "d",
+  ł: "l",
+  þ: "th",
+  ı: "i",
+};
+
 /**
- * The start of a downloaded file's name: the short name in lower case, its
- * letters and digits joined by dashes, as the server does ("kmt").
+ * The start of a downloaded file's name: the short name in lower case
+ * without accents, its letters and digits joined by dashes, as the server
+ * does ("kmt", "Über" gives "uber"). A name with no letter that can be
+ * written in ASCII gives "monitoring" rather than a name the deployment did
+ * not choose.
  */
 export function filePrefix(branding: Branding): string {
-  const words = branding.short_name.toLowerCase().match(/[a-z0-9]+/g);
-  return words ? words.join("-") : "kmt";
+  const words = branding.short_name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[ßæøœđłþı]/g, (c) => FOLDED_LETTERS[c])
+    .match(/[a-z0-9]+/g);
+  return words ? words.join("-") : "monitoring";
 }
 
 /**

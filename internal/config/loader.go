@@ -227,6 +227,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("branding.name", DefaultBrandingName)
 	v.SetDefault("branding.short_name", DefaultBrandingShortName)
 	v.SetDefault("branding.logo_text", DefaultBrandingLogoText)
+	// Empty here, so WithDefaults can tell a vendor left unset, which brings
+	// the default contact address, from one set without an address. The keys
+	// stay registered so MONITORING_BRANDING_VENDOR and
+	// MONITORING_BRANDING_CONTACT_EMAIL bind without them in config.yaml.
+	v.SetDefault("branding.vendor", "")
+	v.SetDefault("branding.contact_email", "")
 
 	// =============================================================================
 	// Database Defaults

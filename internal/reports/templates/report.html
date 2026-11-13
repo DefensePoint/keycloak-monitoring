@@ -328,7 +328,7 @@
 
         <div class="cover-text">
             <h2 class="cover-subtitle">{{.TenantName}}<br>{{.ProductName}} Report<br>{{.StartDate.Format "January 2006"}}</h2>
-            <div class="cover-authors"><strong>Authors:</strong> DefensePoint Team</div>
+            <div class="cover-authors"><strong>Authors:</strong> {{.Vendor}} Team</div>
         </div>
     </div>
 
@@ -359,15 +359,15 @@
                         <th>Version History</th>
                         <th>Date</th>
                         <th>Authors</th>
-                        <th>Email Addresses</th>
+                        {{if .ContactEmail}}<th>Email Addresses</th>{{end}}
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
                         <td>1.0</td>
                         <td>{{.GeneratedAt.Format "2006-01-02"}}</td>
-                        <td>DefensePoint Team</td>
-                        <td>security@defensepoint.com</td>
+                        <td>{{.Vendor}} Team</td>
+                        {{if .ContactEmail}}<td>{{.ContactEmail}}</td>{{end}}
                     </tr>
                 </tbody>
             </table>
@@ -379,16 +379,18 @@
                 <tbody>
                     <tr>
                         <td><strong>Name</strong></td>
-                        <td>DefensePoint Security Team</td>
+                        <td>{{.Vendor}} Security Team</td>
                     </tr>
                     <tr>
                         <td><strong>Address</strong></td>
                         <td>Security Assessment Division</td>
                     </tr>
+                    {{if .ContactEmail}}
                     <tr>
                         <td><strong>Email</strong></td>
-                        <td>security@defensepoint.com</td>
+                        <td>{{.ContactEmail}}</td>
                     </tr>
+                    {{end}}
                 </tbody>
             </table>
         </div>

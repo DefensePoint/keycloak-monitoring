@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@/test-utils";
+import { render, screen, waitFor, withBranding } from "@/test-utils";
 import userEvent from "@testing-library/user-event";
 import { RealmPage } from "./RealmPage";
 import { useAuth, useTenant } from "@/shared/context";
@@ -529,6 +529,27 @@ describe("RealmPage", () => {
         ),
       ),
     ).toBeInTheDocument();
+  });
+
+  it("names the deployment's own product in that warning", () => {
+    mockUseRealmDashboard.mockReturnValue({
+      data: {
+        ...mockRealmDashboard,
+        realm_info: {
+          ...mockRealmDashboard.realm_info,
+          last_checked: "2026-10-14T10:00:00Z",
+          unreadable_since: "2026-10-14T10:05:00Z",
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+    render(withBranding(<RealmPage />));
+
+    expect(
+      screen.getByText(/ACME cannot read this realm's settings since/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/KMT cannot read/)).not.toBeInTheDocument();
   });
 
   it("shows no such warning for a realm it can read", () => {

@@ -1381,12 +1381,24 @@ branding:
   # of the name is shown under it ("Monitoring Tool").
   # Default: "Keycloak"
   logo_text: "Keycloak"
+
+  # Credited in PDF reports as the author ("<vendor> Team") and the contact
+  # ("<vendor> Security Team")
+  # Default: "DefensePoint"
+  vendor: "DefensePoint"
+
+  # Contact address in PDF reports. The default goes with the default vendor
+  # only: with a vendor set and no address, reports give none.
+  # Default: "security@defensepoint.com"
+  contact_email: "security@defensepoint.com"
 ```
 
-- The MCP server identifies itself as the full name in lower case with dashes (`keycloak-monitoring-tool`), with the full name as its title.
+- The MCP server identifies itself as the full name in lower case with dashes (`keycloak-monitoring-tool`), with the full name as its title. Report file names start with the short name written the same way. Accents are dropped ("Überwachung" gives `uberwachung`); a name with nothing that can be written in ASCII, as one in Cyrillic or Chinese, gives `monitoring`.
 - `notifications.slack.username` and the `{{product}}` placeholder in `notifications.email.subject` follow `branding.name` unless set.
 - A value left empty falls back to its default, and line breaks are removed.
 - The web UI remembers the last names the server sent, so the page shown while the server cannot be reached carries them too.
+- `vendor` and `contact_email` appear only in PDF reports; `/auth/config` does not publish them.
+- The logo is not part of the branding. The web UI shows `web/public/defensepoint-logo.svg` (with "DefensePoint" as its alternative text), and PDF reports use `assets/logo.png` and `assets/cover.png`. To change them, replace those files in the image you build.
 
 **Environment Variables:**
 
@@ -1394,6 +1406,8 @@ branding:
 export MONITORING_BRANDING_NAME="Keycloak Monitoring Tool"
 export MONITORING_BRANDING_SHORT_NAME=KMT
 export MONITORING_BRANDING_LOGO_TEXT=Keycloak
+export MONITORING_BRANDING_VENDOR=DefensePoint
+export MONITORING_BRANDING_CONTACT_EMAIL=security@defensepoint.com
 ```
 
 ## Configuration Examples

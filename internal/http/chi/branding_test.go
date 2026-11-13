@@ -13,7 +13,10 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/reports"
 )
 
-var acmeBranding = config.BrandingConfig{Name: "Acme Monitoring Platform", ShortName: "ACME", LogoText: "ACME"}
+var acmeBranding = config.BrandingConfig{
+	Name: "Acme Monitoring Platform", ShortName: "ACME", LogoText: "ACME",
+	Vendor: "Acme", ContactEmail: "security@acme.example",
+}
 
 // pdfRecordingReportService keeps the data the PDF was rendered from.
 type pdfRecordingReportService struct{ rendered *reports.Data }
@@ -52,6 +55,9 @@ func TestReportHandlers_Generate_NamesTheReportAfterTheBranding(t *testing.T) {
 	if rendered == nil || rendered.ProductName != acmeBranding.Name {
 		t.Errorf("PDF rendered with product %+v, want %q", rendered, acmeBranding.Name)
 	}
+	if rendered != nil && (rendered.Vendor != "Acme" || rendered.ContactEmail != "security@acme.example") {
+		t.Errorf("PDF credits %q / %q, want the configured vendor", rendered.Vendor, rendered.ContactEmail)
+	}
 }
 
 func TestReportHandlers_Generate_WithoutBrandingKeepsTheDefaultName(t *testing.T) {
@@ -62,6 +68,9 @@ func TestReportHandlers_Generate_WithoutBrandingKeepsTheDefaultName(t *testing.T
 	}
 	if rendered == nil || rendered.ProductName != config.DefaultBrandingName {
 		t.Errorf("PDF rendered with product %+v, want the default name", rendered)
+	}
+	if rendered != nil && (rendered.Vendor != config.DefaultBrandingVendor || rendered.ContactEmail != config.DefaultBrandingContactEmail) {
+		t.Errorf("PDF credits %q / %q, want the default vendor", rendered.Vendor, rendered.ContactEmail)
 	}
 }
 
@@ -93,6 +102,10 @@ func TestAuthConfig_PublishesTheBranding(t *testing.T) {
 		if got[k] != v {
 			t.Errorf("branding[%q] = %v, want %v", k, got[k], v)
 		}
+	}
+	// The report credits are for reports only, not the sign-in page.
+	if len(got) != len(want) {
+		t.Errorf("branding = %v, want only %v", got, want)
 	}
 }
 

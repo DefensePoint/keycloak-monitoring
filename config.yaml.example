@@ -38,6 +38,11 @@ branding:
   short_name: "KMT"
   # Word next to the logo; the rest of the name is shown under it
   logo_text: "Keycloak"
+  # PDF report credits: "<vendor> Team" as author, "<vendor> Security Team"
+  # as contact, with contact_email. Setting a vendor without an address
+  # leaves the address out. The logo images are not configurable here.
+  vendor: "DefensePoint"
+  contact_email: "security@defensepoint.com"
 
 # =============================================================================
 # SECURITY CONFIGURATION

@@ -31,7 +31,15 @@ describe("branding", () => {
     expect(filePrefix(DEFAULT_BRANDING)).toBe("kmt");
     expect(filePrefix(acme)).toBe("acme");
     expect(filePrefix({ ...acme, short_name: "Acme EU" })).toBe("acme-eu");
-    expect(filePrefix({ ...acme, short_name: "***" })).toBe("kmt");
+    expect(filePrefix({ ...acme, short_name: "Ü" })).toBe("u");
+    expect(filePrefix({ ...acme, short_name: "Café Straße Øst" })).toBe(
+      "cafe-strasse-ost",
+    );
+    expect(filePrefix({ ...acme, short_name: "ÆØ" })).toBe("aeo");
+    // A name with nothing to write in ASCII never falls back to KMT's.
+    expect(filePrefix({ ...acme, short_name: "МН" })).toBe("monitoring");
+    expect(filePrefix({ ...acme, short_name: "监控" })).toBe("monitoring");
+    expect(filePrefix({ ...acme, short_name: "***" })).toBe("monitoring");
   });
 
   it("remembers the last branding, and nothing when none was stored", () => {

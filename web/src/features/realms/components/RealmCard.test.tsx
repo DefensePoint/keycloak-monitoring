@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider, createTheme } from "@mui/material";
 import { RealmCard } from "./RealmCard";
+import { withBranding } from "@/test-utils";
 
 const theme = createTheme();
 
@@ -153,6 +154,17 @@ describe("RealmCard for a realm KMT cannot read", () => {
     await userEvent.hover(screen.getByText("Can't read"));
     expect(
       await screen.findByText(/cannot read this realm's settings since/),
+    ).toBeInTheDocument();
+  });
+
+  it("names the deployment's own product in the explanation", async () => {
+    renderWithTheme(
+      withBranding(<RealmCard realm={unreadable} onClick={vi.fn()} />),
+    );
+
+    await userEvent.hover(screen.getByText("Can't read"));
+    expect(
+      await screen.findByText(/^ACME cannot read this realm's settings since/),
     ).toBeInTheDocument();
   });
 

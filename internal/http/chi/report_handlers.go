@@ -199,7 +199,10 @@ func (h *ReportHandlers) handleGenerateReport(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	data.ProductName = h.branding.WithDefaults().Name
+	branding := h.branding.WithDefaults()
+	data.ProductName = branding.Name
+	data.Vendor = branding.Vendor
+	data.ContactEmail = branding.ContactEmail
 
 	// Generate PDF
 	pdfBytes, err := h.service.GeneratePDF(data)

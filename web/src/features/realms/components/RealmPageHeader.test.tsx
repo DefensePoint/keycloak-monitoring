@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { ThemeProvider, createTheme } from "@mui/material";
 import { BrowserRouter } from "react-router-dom";
 import { RealmPageHeader } from "./RealmPageHeader";
+import { withBranding } from "@/test-utils";
 
 const theme = createTheme();
 
@@ -154,5 +155,15 @@ describe("RealmPageHeader", () => {
 
     const homeLink = screen.getByText("KMT").closest("a");
     expect(homeLink).toHaveAttribute("href", "/tenant-1");
+  });
+
+  it("links the deployment's own short name to the tenant dashboard", () => {
+    renderWithProviders(withBranding(<RealmPageHeader {...defaultProps} />));
+
+    expect(screen.getByText("ACME").closest("a")).toHaveAttribute(
+      "href",
+      "/tenant-1",
+    );
+    expect(screen.queryByText("KMT")).not.toBeInTheDocument();
   });
 });
