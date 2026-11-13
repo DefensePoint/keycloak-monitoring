@@ -130,6 +130,24 @@ Service Accounts Enabled: ON      # enables the client_credentials grant
 
 **Save** the configuration.
 
+##### Admin API client scope (RHBK 26.6.9 and later)
+
+Some Keycloak builds, RHBK 26.6.9 among them, have a built-in client scope
+named `kc-admin-api`. On those builds the Admin API accepts only tokens that
+carry it, and only `admin-cli` has it by default. Look for `kc-admin-api` under
+**Client scopes** in the admin realm. If it is there, open the client's
+**Client scopes** tab, choose **Add client scope**, select `kc-admin-api` and
+add it as **Default**. Without it the token is still issued, but every Admin
+API call returns 401, even with the
+[Step 4](#step-4-assign-service-account-roles) roles in place, and health is
+DOWN. Adding the scope needs no restart: the platform picks it up with its next
+token, up to the token lifespan minus 30 seconds later.
+
+Upgrading Keycloak to such a build does not add the scope to clients that
+already exist: a `monitoring-service` client that worked on RHBK 26.6.7 gets
+401 after the upgrade to 26.6.9. Add the scope as part of the upgrade. Builds
+without it, such as RHBK 26.6.7 and Keycloak 26.7.5, need nothing.
+
 #### Step 3: Get Client Secret
 
 1. Go to the **Credentials** tab
@@ -534,6 +552,9 @@ make run
      assigned. A missing role does not stop the token; it shows up as 403
      errors or silent zeros, listed in
      [what each scoped role powers](#what-each-scoped-role-powers)
+   - If the token is issued but every Admin API call returns 401, the client
+     lacks the [`kc-admin-api` scope](#admin-api-client-scope-rhbk-2669-and-later)
+     that RHBK 26.6.9 and later require
 
 ### TLS Certificate Errors
 
