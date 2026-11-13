@@ -251,7 +251,7 @@ Create a pull request on GitHub/GitLab.
 | **Unit tests** (frontend) | React components + service URL/param construction. JSDOM, mocked deps. | `cd web && npm test -- --run` | Always run |
 | **DB-backed tests** (env-gated) | Repository queries against a real PostgreSQL, using only fixtures they clean up, plus the MCP security posture suite. | Skip when `KMT_TEST_DATABASE_DSN` unset. | Export `KMT_TEST_DATABASE_DSN`. |
 | **Destructive DB tests** (env-gated) | KMT's own migrations / RBAC seeders and the tenant purge path. Drop the schema or delete role rows globally. | Skip when `KMT_DESTRUCTIVE_TEST_DATABASE_DSN` unset; CI deliberately does not set it. | Point `KMT_DESTRUCTIVE_TEST_DATABASE_DSN` at a throwaway database. |
-| **AMFA integration tests** (build-tag + env-gated) | AMFA repository SQL queries against a real AMFA Postgres. Tagged `//go:build integration`. | Skip in default run. | `go test -tags=integration ./amfa/postgres/...` with `AMFA_TEST_DSN` set. The schema check in the same package drops `alembic_version` and reads `AMFA_DESTRUCTIVE_TEST_DSN` instead. |
+| **AMFA integration tests** (build-tag + env-gated) | AMFA repository SQL queries against a real AMFA Postgres. Tagged `//go:build integration`. | Skip in default run. | `go test -tags=integration ./internal/amfa/postgres/...` with `AMFA_TEST_DSN` set. The schema check in the same package drops `alembic_version` and reads `AMFA_DESTRUCTIVE_TEST_DSN` instead. See [Backend: AMFA integration tests](#backend-amfa-integration-tests). |
 | **Alert pipeline e2e** (build-tag + env-gated) | The alert pipeline against a whole running deployment. Tagged `//go:build integration`. | Skip in default run. | `go test -tags=integration ./tests/...` with `KMT_E2E_TEST_DATABASE_DSN` set. See `tests/test_README.md`. |
 | **Auth OIDC e2e** (build-tag + env-gated) | The OIDC login path against a real Keycloak: token claims, the provider, the service and the stored row. Provisions its own realm, client and users. Tagged `//go:build integration`. | Skip in default run. | `go test -tags=integration ./tests/ -run AuthOIDCE2E` with `KMT_AUTH_E2E_KEYCLOAK_URL` and `KMT_AUTH_E2E_DATABASE_DSN` set. Both throwaway; the DSN's schema is dropped. |
 | **Full e2e smoke** (manual) | UI walkthrough against running stacks. Not automated. | N/A | See `docs/amfa-integration.md` § Verification. |
@@ -264,11 +264,11 @@ The GitHub Actions workflow builds every binary and runs the Go unit tests (`go 
 
 | Suite | Gate | Needs | Run by hand when a pull request touches |
 |---|---|---|---|
-| AMFA repository and check (`amfa/postgres/repository_integration_test.go`, `amfacheck/integration_test.go`) | `-tags=integration` and `AMFA_TEST_DSN` | An AMFA Postgres with AMFA's schema, such as a local AMFA stack, and at least one `auth_process` row: several tests borrow its foreign-key values and skip without one. The tests insert and delete their own rows. | `amfa/postgres/`, `amfacheck/` |
-| AMFA schema check (`amfa/postgres/schema_check_integration_test.go`) | `-tags=integration` and `AMFA_DESTRUCTIVE_TEST_DSN` | A throwaway Postgres it may `CREATE TABLE` in. It drops `alembic_version`, and `testdb.RequireDisposable` refuses a database name without a `test`, `tmp` or `scratch` component. | `amfa/postgres/` |
-| AMFA API transport parity (`amfa/parity_integration_test.go`) | `-tags=integration` and all of `AMFA_TEST_DSN`, `AMFA_TEST_API_URL`, `AMFA_TEST_REALM`, `AMFA_TEST_TOKEN` | A running AMFA API and the database behind it, a realm with data in the last 30 days, and a bearer token for that realm. It compares the Postgres and HTTP repositories on that window, and a test skips when the window holds none of the rows it compares, such as geolocated, VPN-flagged or risk-rejected events. | `amfa/` |
-| Auth OIDC e2e (`tests/auth_oidc_e2e_test.go`, `tests/auth_oidc_account_status_e2e_test.go`) | `-tags=integration`, no `-short`, and both `KMT_AUTH_E2E_KEYCLOAK_URL` and `KMT_AUTH_E2E_DATABASE_DSN` | A throwaway Keycloak (`start-dev` is enough) and a throwaway Postgres. It creates and deletes its own realm and drops the DSN's schema. | `auth/`, `users/` |
-| Alert pipeline e2e (`tests/alerts_integration_test.go`) | `-tags=integration`, no `-short`, and `KMT_E2E_TEST_DATABASE_DSN` (`KMT_E2E_TEST_TENANT_ID` optional) | A whole running deployment: the stack, the server with its checkers, and that deployment's database. The test tenant (`e2e-alerts-fixture-8f42c1`, or the one in `KMT_E2E_TEST_TENANT_ID`) must be configured and enabled there, with `keycloak.global.event_checker.enabled` on and a notifier for that tenant, because the test waits for alerts and for `notification_logs` rows. Run with `-timeout 15m`. | `alerts/`, `events/`, `eventscheck/`, `metricscheck/`, `notifications/` |
+| AMFA repository and check (`internal/amfa/postgres/repository_integration_test.go`, `internal/amfacheck/integration_test.go`) | `-tags=integration` and `AMFA_TEST_DSN` | An AMFA Postgres with AMFA's schema, such as the engine's Compose stack (see [Backend: AMFA integration tests](#backend-amfa-integration-tests)), and at least one `auth_process` row: several tests borrow its foreign-key values and skip without one. The tests insert and delete their own rows. | `internal/amfa/postgres/`, `internal/amfacheck/` |
+| AMFA schema check (`internal/amfa/postgres/schema_check_integration_test.go`) | `-tags=integration` and `AMFA_DESTRUCTIVE_TEST_DSN` | A throwaway Postgres it may `CREATE TABLE` in. It drops `alembic_version`, and `testdb.RequireDisposable` refuses a database name without a `test`, `tmp` or `scratch` component. | `internal/amfa/postgres/` |
+| AMFA API transport parity (`internal/amfa/parity_integration_test.go`) | `-tags=integration` and all of `AMFA_TEST_DSN`, `AMFA_TEST_API_URL`, `AMFA_TEST_REALM`, `AMFA_TEST_TOKEN` | A running AMFA API and the database behind it, a realm with data in the last 30 days, and a bearer token for that realm. It compares the Postgres and HTTP repositories on that window, and a test skips when the window holds none of the rows it compares, such as geolocated, VPN-flagged or risk-rejected events. | `internal/amfa/` |
+| Auth OIDC e2e (`tests/auth_oidc_e2e_test.go`, `tests/auth_oidc_account_status_e2e_test.go`) | `-tags=integration`, no `-short`, and both `KMT_AUTH_E2E_KEYCLOAK_URL` and `KMT_AUTH_E2E_DATABASE_DSN` | A throwaway Keycloak (`start-dev` is enough) and a throwaway Postgres. It creates and deletes its own realm and drops the DSN's schema. | `internal/auth/`, `internal/users/` |
+| Alert pipeline e2e (`tests/alerts_integration_test.go`) | `-tags=integration`, no `-short`, and `KMT_E2E_TEST_DATABASE_DSN` (`KMT_E2E_TEST_TENANT_ID` optional) | A whole running deployment: the stack, the server with its checkers, and that deployment's database. The test tenant (`e2e-alerts-fixture-8f42c1`, or the one in `KMT_E2E_TEST_TENANT_ID`) must be configured and enabled there, with `keycloak.global.event_checker.enabled` on and a notifier for that tenant, because the test waits for alerts and for `notification_logs` rows. Run with `-timeout 15m`. | `internal/alerts/`, `internal/events/`, `internal/eventscheck/`, `internal/metricscheck/`, `internal/notifications/` |
 
 The alert pipeline e2e stays out of CI for good: it needs a whole running deployment (the stack, plus the server with its checkers polling every 5 minutes), it writes fixture events and a health row into that deployment's database, and it waits up to 6 minutes for each alert. The AMFA repository and parity suites stay out because they need AMFA's schema and data, which live in another repository; a job could provide them only by building an AMFA database from AMFA's migrations.
 
@@ -306,7 +306,7 @@ The `go-mod-cache` named volume persists across runs so subsequent invocations d
 
 ```bash
 # One package
-go test -v ./amfa/postgres/...
+go test -v ./internal/amfa/postgres/...
 
 # Race detector (CI default)
 go test -race ./...
@@ -326,8 +326,8 @@ The auth OIDC e2e is the one exception to that rule, and deliberately so: it nee
 
 | Variable | Read by | Point it at |
 |---|---|---|
-| `KMT_TEST_DATABASE_DSN` | The repository tests in `events/postgres`, `alerts/postgres`, `keycloak/postgres` and `tenant/postgres` (the enabled-flag tests), the database-backed handler tests in `internal/http/chi`, the MCP security posture suite in `internal/mcp`, and the client-secret migration test in `pkg/database`. They do not skip under `-short`, so a `-short` run with the variable set includes them. | Any dev database. These remove only the fixtures they create. |
-| `KMT_DESTRUCTIVE_TEST_DATABASE_DSN` | The RBAC permission migration in `pkg/database/client_test.go`, the tenant purge tests in `pkg/database` and `tenant/postgres`, the `users` migration and index tests in `pkg/database` (`email_verified_migration_test.go`, `user_unique_indexes_test.go`, `username_index_guard_test.go`), and the deleted-account tests in `users/postgres`. All of them also skip under `-short`. | A throwaway database only. These run `DROP SCHEMA public CASCADE`, delete the admin, operator and viewer rows globally, drop and rebuild the unique indexes on `users`, rewrite `email_verified` across every matching `users` row, and reset the `users` id sequence. |
+| `KMT_TEST_DATABASE_DSN` | The repository tests in `internal/events/postgres`, `internal/alerts/postgres`, `internal/keycloak/postgres` and `internal/tenant/postgres` (the enabled-flag tests), the lookup-error tests in `internal/amfacheck` (`lookup_error_integration_test.go`, which stub AMFA and need no build tag), the database-backed handler tests in `internal/http/chi`, the MCP security posture suite in `internal/mcp`, and the client-secret migration test in `pkg/database`. They do not skip under `-short`, so a `-short` run with the variable set includes them. | Any dev database. These remove only the fixtures they create. |
+| `KMT_DESTRUCTIVE_TEST_DATABASE_DSN` | The RBAC permission migration in `pkg/database/client_test.go`, the tenant purge tests in `pkg/database` and `internal/tenant/postgres`, the `users` migration and index tests in `pkg/database` (`email_verified_migration_test.go`, `user_unique_indexes_test.go`, `username_index_guard_test.go`), and the deleted-account tests in `internal/users/postgres`. All of them also skip under `-short`. | A throwaway database only. These run `DROP SCHEMA public CASCADE`, delete the admin, operator and viewer rows globally, drop and rebuild the unique indexes on `users`, rewrite `email_verified` across every matching `users` row, and reset the `users` id sequence. |
 
 Keep them separate. The destructive helpers also refuse to start unless the database name carries a `test`, `tmp` or `scratch` component, so a DSN aimed at `monitoring` fails loudly instead of wiping it, but that is a backstop and not a licence to reuse one variable for both.
 
@@ -371,12 +371,84 @@ KMT_REQUIRE_TEST_DSNS=KMT_DESTRUCTIVE_TEST_DATABASE_DSN \
 docker stop kmt-test-db
 ```
 
-`pkg/database` and `tenant/postgres` both run `DROP SCHEMA public CASCADE` against `KMT_DESTRUCTIVE_TEST_DATABASE_DSN`. The lock above keeps them from running at the same time, so they can go in one invocation:
+`pkg/database` and `internal/tenant/postgres` both run `DROP SCHEMA public CASCADE` against `KMT_DESTRUCTIVE_TEST_DATABASE_DSN`. The lock above keeps them from running at the same time, so they can go in one invocation:
 
 ```bash
 KMT_DESTRUCTIVE_TEST_DATABASE_DSN="host=localhost port=55432 dbname=kmt_test user=kmt password=kmt sslmode=disable" \
-  go test ./pkg/database/... ./tenant/postgres/...
+  go test ./pkg/database/... ./internal/tenant/postgres/...
 ```
+
+### Backend: AMFA integration tests
+
+The AMFA suites in [Suites CI does not run](#suites-ci-does-not-run) run against the open-source [Adaptive MFA engine](https://github.com/DefensePoint/keycloak-adaptive-mfa-engine). Its Compose stack has everything they need: the engine's Postgres with its schema, the engine API, and a Keycloak with the `test-amfa` realm. They are double-gated to stay out of default runs: `//go:build integration`, so they compile only with `-tags=integration`, and a `t.Skip(...)` when their variables are unset. The commands below pass `-count=1`: Go caches a test result by its code and environment variables, not by what the database holds, so without it a rerun after the AMFA data changed can print an old result.
+
+**1. Start the engine stack.** Follow the engine README's prerequisites (the `keycloak` hosts entry and the mkcert certificate) and its Quick Start:
+
+```bash
+cd keycloak-adaptive-mfa-engine/config/keycloak
+cp .env.example .env
+docker compose up --build -d
+```
+
+The first start builds the engine image and takes a few minutes. Once the containers are up, the engine answers:
+
+```bash
+curl http://localhost:8095/health   # {"status":"ok","db":"ok",...}
+```
+
+The engine applies its migrations on start, into the `adaptive_mfa` database on the Postgres at `localhost:5433` (user `keycloak`, password `password`).
+
+**2. Log in once.** Most repository and checker tests borrow foreign-key values from an existing `auth_process` row and skip without one (`no existing auth_process to borrow FK values from`). Follow steps 4 and 5 of the README's Quick Start: create `alice` in `test-amfa`, log in at the account console, and enter the one-time code from Mailpit. A completed login is also what gives the parity tests in step 5 events to compare.
+
+Without a browser, the engine's smoke suite records logins too, from the engine repository root. Its logins do not always complete, so the parity tests may then skip their event comparisons. Python's `requests` does not read the system trust store that `mkcert -install` adds to, so pass it mkcert's CA. A failing check of the suite itself does not matter here:
+
+```bash
+pip install requests
+REQUESTS_CA_BUNDLE="$(mkcert -CAROOT)/rootCA.pem" python3 tests/e2e/run_e2e.py
+```
+
+**3. Repository and checker tests.** The command also sets `KMT_TEST_DATABASE_DSN`, which runs the `TestLookupError_*` tests in `internal/amfacheck` alongside. They do not use AMFA: they stub it and store alerts in KMT's own database, so they need only that variable, with no build tag, and skip without it (see the [DB-backed unit tests](#backend--db-backed-unit-tests)):
+
+```bash
+AMFA_TEST_DSN="host=localhost port=5433 dbname=adaptive_mfa user=keycloak password=password sslmode=disable" \
+KMT_TEST_DATABASE_DSN="host=localhost port=55432 dbname=kmt_test user=kmt password=kmt sslmode=disable" \
+  go test -tags=integration -count=1 -v ./internal/amfa/postgres/ ./internal/amfacheck/
+```
+
+The tests insert and delete their own rows; the login from step 2 stays.
+
+**4. Schema check.** It drops `alembic_version`, so give it a throwaway database of its own, never `adaptive_mfa`. The engine's Postgres can hold it:
+
+```bash
+docker exec amfa-postgres-1 psql -U keycloak -c 'CREATE DATABASE amfa_scratch_test'
+AMFA_DESTRUCTIVE_TEST_DSN="host=localhost port=5433 dbname=amfa_scratch_test user=keycloak password=password sslmode=disable" \
+  go test -tags=integration -count=1 -v -run TestCheckAmfaSchema ./internal/amfa/postgres/
+```
+
+On later runs `CREATE DATABASE` reports that `amfa_scratch_test` already exists, which is fine. The test logs `relation "alembic_version" does not exist` in red on purpose: it checks the case of a database without the table, and passes.
+
+**5. API transport parity.** It needs a token from the `adaptive-auth-api` service account in `test-amfa`, which carries the `amfa` audience. Keycloak generates that client's secret when it imports the realm, so read it through the Admin API first. The token lasts five minutes, so run the tests right after:
+
+```bash
+export CURL_CA_BUNDLE="$(mkcert -CAROOT)/rootCA.pem"
+KC=https://keycloak:8443
+ADMIN=$(curl -s -d grant_type=password -d client_id=admin-cli -d username=admin -d password=admin \
+  "$KC/realms/master/protocol/openid-connect/token" | jq -r .access_token)
+ID=$(curl -s -H "Authorization: Bearer $ADMIN" \
+  "$KC/admin/realms/test-amfa/clients?clientId=adaptive-auth-api" | jq -r '.[0].id')
+SECRET=$(curl -s -H "Authorization: Bearer $ADMIN" \
+  "$KC/admin/realms/test-amfa/clients/$ID/client-secret" | jq -r .value)
+TOKEN=$(curl -s -d grant_type=client_credentials -d client_id=adaptive-auth-api -d client_secret="$SECRET" \
+  "$KC/realms/test-amfa/protocol/openid-connect/token" | jq -r .access_token)
+
+AMFA_TEST_DSN="host=localhost port=5433 dbname=adaptive_mfa user=keycloak password=password sslmode=disable" \
+AMFA_TEST_API_URL=http://localhost:8095 AMFA_TEST_REALM=test-amfa AMFA_TEST_TOKEN="$TOKEN" \
+  go test -tags=integration -count=1 -v -run TestParity ./internal/amfa/
+```
+
+A comparison skips when its window holds none of the rows it compares (`no ... in the window`). The window is the 30 days up to one minute before the run, so that a login arriving mid-test does not look like a difference; wait a minute after the login from step 2 before running these. With only the README's login, the stats, the event lists and the event-type counts are compared, and the comparisons that need geolocated, VPN-flagged or risk-rejected logins, or failed logins grouped by client or user, skip.
+
+**Teardown**, from `config/keycloak` in the engine repository: `docker compose down`, or `docker compose down -v` to delete its data as well.
 
 ### Frontend tests
 
@@ -391,7 +463,7 @@ npx tsc --noEmit                # type-check (no tests, no emit)
 npm run build                   # production build (catches more than tsc alone)
 ```
 
-Frontend tests use **Vitest + @testing-library/react** in JSDOM. JSDOM-hostile libraries (`react-leaflet`, `react-leaflet-cluster`) must be `vi.mock()`-ed in any test that imports a component using them — see `web/src/features/amfa/components/AmfaGeoMap.test.tsx` and `web/src/features/amfa/pages/AmfaEventsPage.test.tsx` for examples.
+Frontend tests use **Vitest + @testing-library/react** in JSDOM. JSDOM-hostile libraries (`react-leaflet`, `react-leaflet-cluster`) must be `vi.mock()`-ed in any test that imports a component using them. See `web/src/shared/components/AmfaGeoMap/AmfaGeoMap.test.tsx` and `web/src/shared/components/LocationMap/LocationMap.test.tsx` for examples.
 
 ### Writing tests
 
@@ -489,14 +561,14 @@ make test-all
 
 # Before opening a PR — also include integration if touching AMFA
 make test-all
-# ...bring up AMFA, then:
-AMFA_TEST_DSN="..." go test -tags=integration ./amfa/postgres/...
+# ...bring up the AMFA engine stack (see Backend: AMFA integration tests), then:
+AMFA_TEST_DSN="..." go test -tags=integration ./internal/amfa/postgres/...
 
 # Quick "did I break anything" while iterating (no race, no coverage):
 go test -short ./...
 
 # Just the package you're working on:
-go test -v ./amfa/...
+go test -v ./internal/amfa/...
 ```
 
 ## Common pitfalls
@@ -581,7 +653,7 @@ Always pass pixels:
 <MapContainer style={{ height: 600, width: "100%" }} ...>
 ```
 
-The canonical example is `web/src/features/amfa/components/AmfaGeoMap.tsx`, which carries an inline comment as a warning to future maintainers.
+The canonical example is `web/src/shared/components/AmfaGeoMap/AmfaGeoMap.tsx`, which carries an inline comment as a warning to future maintainers.
 
 ### 5. Distinguish DB availability errors from query/logic errors
 
@@ -590,7 +662,7 @@ When a handler queries a backing database, callers want to know the difference b
 The cleanest pattern is a small classifier at the repository boundary that translates connection-level errors to a sentinel:
 
 ```go
-// amfa/postgres/errors.go (canonical example)
+// internal/amfa/postgres/errors.go (canonical example)
 func classifyDBError(err error, op string) error {
     if err == nil { return nil }
     if errors.Is(err, context.DeadlineExceeded) ||
@@ -628,7 +700,7 @@ if err != nil {
 }
 ```
 
-Without classification, handlers tend to grow either dead `503` branches (if a sentinel is checked but never produced) or undifferentiated `500`s for everything. See `amfa/postgres/errors.go` for the full version including SQLSTATE class `08` (Connection Exception) and a heuristic substring fallback for plain-text errors from older drivers.
+Without classification, handlers tend to grow either dead `503` branches (if a sentinel is checked but never produced) or undifferentiated `500`s for everything. See `internal/amfa/postgres/errors.go` for the full version including SQLSTATE class `08` (Connection Exception) and a heuristic substring fallback for plain-text errors from older drivers.
 
 ## Code Quality
 
