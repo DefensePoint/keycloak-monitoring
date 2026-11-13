@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { DashboardPage } from "./DashboardPage";
 import { theme } from "@/theme";
 import { useTenant } from "@/shared/context";
+import { HEALTH_METRICS_HINT } from "@/shared/utils/healthAvailability";
 
 const mockUseNavigate = vi.fn();
 const mockUseKeycloakDashboard = vi.fn();
@@ -253,6 +254,102 @@ describe("DashboardPage", () => {
     // Query within the Active Alerts card to avoid ambiguity
     const alertsCard = screen.getByText("Active Alerts").closest("div");
     expect(alertsCard).toHaveTextContent("5");
+  });
+
+  it.each([0, undefined])(
+    "shows unavailable system details for missing metrics (%s)",
+    (missing) => {
+      mockUseKeycloakDashboard.mockReturnValue({
+        data: {
+          ...mockDashboard,
+          health: {
+            ...mockDashboard.health,
+            server_version: "",
+            uptime_millis: missing,
+            memory_used_bytes: missing,
+            memory_max_bytes: missing,
+            memory_free_bytes: missing,
+          },
+        },
+        isLoading: false,
+        isError: false,
+      });
+
+      render(<DashboardPage />);
+
+      expect(screen.getAllByText("Not available")).toHaveLength(2);
+      expect(screen.getByText("Version not available")).toBeInTheDocument();
+      expect(screen.getAllByText(HEALTH_METRICS_HINT)).toHaveLength(1);
+      expect(screen.queryByText(/NaN|Infinity/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      expect(screen.getByText("UP")).toBeInTheDocument();
+      expect(screen.getByText("10ms response")).toBeInTheDocument();
+    },
+  );
+
+  it.each(["DOWN", "DEGRADED", "UNKNOWN"])(
+    "does not blame missing metrics on roles when status is %s",
+    (status) => {
+      mockUseKeycloakDashboard.mockReturnValue({
+        data: {
+          ...mockDashboard,
+          health: {
+            ...mockDashboard.health,
+            status,
+            server_version: "",
+            uptime_millis: 0,
+            memory_used_bytes: 0,
+            memory_max_bytes: 0,
+          },
+        },
+        isLoading: false,
+        isError: false,
+      });
+      render(<DashboardPage />);
+      expect(screen.getAllByText("Not available")).toHaveLength(2);
+      expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
+      expect(screen.queryByTitle(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
+      expect(screen.getByText(status)).toBeInTheDocument();
+      expect(screen.getByText("10ms response")).toBeInTheDocument();
+    },
+  );
+
+  it("does not show role advice for stale UP data after a refresh fails", () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        ...mockDashboard,
+        health: {
+          ...mockDashboard.health,
+          server_version: "",
+          uptime_millis: 0,
+          memory_max_bytes: 0,
+        },
+      },
+      isLoading: false,
+      isError: true,
+      error: new Error("refresh failed"),
+    });
+    render(<DashboardPage />);
+    expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
+  });
+
+  it("preserves real zero used memory when the maximum is available", () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        ...mockDashboard,
+        health: { ...mockDashboard.health, memory_used_bytes: 0 },
+      },
+      isLoading: false,
+      isError: false,
+    });
+    render(<DashboardPage />);
+    expect(screen.getByText("0.0%")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute(
+      "aria-valuenow",
+      "0",
+    );
+    expect(screen.queryByText("Not available")).not.toBeInTheDocument();
+    expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
   });
 
   it("should display system health status", async () => {

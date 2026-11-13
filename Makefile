@@ -244,7 +244,7 @@ docker-rebuild: docker-build docker-down docker-up ## Rebuild images and restart
 # volume caches the module downloads between runs.
 ifeq ($(shell command -v go 2>/dev/null),)
 SWAG = docker run --rm -v $(CURDIR):/app -v kmt-swag-cache:/go -w /app \
-	golang:1.27.2 go run github.com/swaggo/swag/cmd/swag@$(SWAG_VERSION)
+	golang:1.27.3 go run github.com/swaggo/swag/cmd/swag@$(SWAG_VERSION)
 endif
 
 # --parseDependency is deliberately absent: it makes swag name every schema after

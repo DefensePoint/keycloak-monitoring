@@ -38,7 +38,12 @@ import {
   PageHeader,
   FeatureErrorBoundary,
 } from "@/shared/components";
+import { requestFailed } from "@/shared/lib";
 import { formatBytes } from "@/shared/utils";
+import {
+  getHealthAvailability,
+  getHealthMetricsHint,
+} from "@/shared/utils/healthAvailability";
 import { RealmSelector } from "../components";
 import type {
   Event,
@@ -73,10 +78,16 @@ export function RealmPage() {
   const [eventsPage, setEventsPage] = useState(1);
   const eventsPerPage = 10;
 
-  const { data: realmDashboard, isLoading } = useRealmDashboard({
+  const realmDashboardQuery = useRealmDashboard({
     tenantId: selectedTenant?.tenant_id,
     realm: realmName,
   });
+  const { data: realmDashboard, isLoading } = realmDashboardQuery;
+  const healthAvailability = getHealthAvailability(realmDashboard?.health);
+  const healthMetricsHint = getHealthMetricsHint(
+    requestFailed(realmDashboardQuery) ? null : realmDashboard?.health,
+    !healthAvailability.memory || !healthAvailability.uptime,
+  );
 
   const { data: allRealmsDashboard } = useKeycloakDashboard({
     tenantId: selectedTenant?.tenant_id,
@@ -1495,7 +1506,9 @@ export function RealmPage() {
                     Memory Used
                   </Typography>
                   <Typography variant="body2" sx={{ mt: 1 }}>
-                    {formatBytes(realmDashboard.health.memory_used_bytes)}
+                    {healthAvailability.memory
+                      ? formatBytes(realmDashboard.health.memory_used_bytes)
+                      : "Not available"}
                   </Typography>
                 </Box>
                 <Box>
@@ -1507,13 +1520,21 @@ export function RealmPage() {
                     Uptime
                   </Typography>
                   <Typography variant="body2" sx={{ mt: 1 }}>
-                    {Math.floor(
-                      realmDashboard.health.uptime_millis / 1000 / 60 / 60,
-                    )}
-                    h
+                    {healthAvailability.uptime
+                      ? `${Math.floor(realmDashboard.health.uptime_millis / 1000 / 60 / 60)}h`
+                      : "Not available"}
                   </Typography>
                 </Box>
               </Box>
+              {healthMetricsHint && (
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mt: 2 }}
+                >
+                  {healthMetricsHint}
+                </Typography>
+              )}
             </Paper>
           )}
         </Box>
