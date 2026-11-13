@@ -1,12 +1,11 @@
 package database
 
 import (
-	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -70,8 +69,9 @@ func preflightQueries(t *testing.T) []string {
 			queries = append(queries, q)
 		}
 	}
-	if len(queries) != 2 {
-		t.Fatalf("pre-flight script has %d queries, want the shape report and the duplicate count", len(queries))
+	if len(queries) != 3 {
+		t.Fatalf("pre-flight script has %d queries, want the shape report, the duplicate count "+
+			"and the duplicate list", len(queries))
 	}
 	return queries
 }
@@ -79,12 +79,15 @@ func preflightQueries(t *testing.T) []string {
 type preflightReport struct {
 	shapes     map[string]string
 	duplicates map[string]int
+	// groups lists, per column, the user ids of each set of live accounts
+	// sharing a value, as the script prints them.
+	groups map[string][]string
 }
 
 func runPreflight(t *testing.T, db *gorm.DB) preflightReport {
 	t.Helper()
 	queries := preflightQueries(t)
-	report := preflightReport{shapes: map[string]string{}, duplicates: map[string]int{}}
+	report := preflightReport{shapes: map[string]string{}, duplicates: map[string]int{}, groups: map[string][]string{}}
 
 	rows, err := db.Raw(queries[0]).Rows()
 	if err != nil {
@@ -112,6 +115,26 @@ func runPreflight(t *testing.T, db *gorm.DB) preflightReport {
 		report.duplicates[column] = count
 	}
 	_ = rows.Close()
+
+	rows, err = db.Raw(queries[2]).Rows()
+	if err != nil {
+		t.Fatalf("duplicate list: %v", err)
+	}
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("duplicate list columns: %v", err)
+	}
+	if strings.Join(cols, ",") != "column_name,user_ids" {
+		t.Fatalf("duplicate list columns = %v, want only column_name and user_ids, never the values", cols)
+	}
+	for rows.Next() {
+		var column, ids string
+		if err := rows.Scan(&column, &ids); err != nil {
+			t.Fatalf("scan duplicate list: %v", err)
+		}
+		report.groups[column] = append(report.groups[column], ids)
+	}
+	_ = rows.Close()
 	return report
 }
 
@@ -127,11 +150,6 @@ func assertPreflight(t *testing.T, got preflightReport, shapes map[string]string
 			t.Errorf("%s duplicated values = %d, want %d (report %v)", column, got.duplicates[column], want, got.duplicates)
 		}
 	}
-}
-
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // An operator who creates a missing index by hand must end up with exactly
@@ -211,19 +229,18 @@ func TestUsersIndexPreflight_ReportMatchesWhatTheServerDoes(t *testing.T) {
 	shapes["idx_users_email"] = "missing"
 	assertPreflight(t, runPreflight(t, db), shapes, none)
 
-	// This is what the script warns about: the server's own AutoMigrate
-	// cannot start on that database.
+	// GORM's AutoMigrate alone cannot start on that database...
 	if err := db.AutoMigrate(&User{}); !isUniqueViolation(err) {
 		t.Fatalf("auto-migrate with idx_users_email missing = %v, want a unique violation", err)
 	}
 
-	// The script's statement, run by hand, lets it start.
-	create := preflightCreateStatements(t)["idx_users_email"]
-	if err := db.Exec(create).Error; err != nil {
-		t.Fatalf("script statement for idx_users_email: %v", err)
+	// ...so the server creates the missing index first, with its final
+	// predicate, and AutoMigrate then leaves it alone.
+	if err := c.createMissingUserUniqueIndexes(); err != nil {
+		t.Fatalf("server creating the missing idx_users_email: %v", err)
 	}
 	if err := db.AutoMigrate(&User{}); err != nil {
-		t.Fatalf("auto-migrate after the script statement: %v", err)
+		t.Fatalf("auto-migrate after the server created the index: %v", err)
 	}
 	if err := c.migrateUserUniqueIndexes(); err != nil {
 		t.Fatalf("migrate unique indexes after the script statement: %v", err)
@@ -238,9 +255,31 @@ func TestUsersIndexPreflight_ReportMatchesWhatTheServerDoes(t *testing.T) {
 	if err := db.Exec("DROP INDEX idx_users_email").Error; err != nil {
 		t.Fatalf("drop email index: %v", err)
 	}
-	mustCreate(t, db, &User{Subject: "pf-e", Email: "pf-shared@example.invalid", AuthMethod: "oauth", IsActive: true})
-	assertPreflight(t, runPreflight(t, db), shapes, map[string]int{"email": 1, "subject": 0, "username": 0})
-	if err := db.Exec(create).Error; !isUniqueViolation(err) {
+	e := &User{Subject: "pf-e", Email: "pf-shared@example.invalid", AuthMethod: "oauth", IsActive: true}
+	mustCreate(t, db, e)
+	report := runPreflight(t, db)
+	assertPreflight(t, report, shapes, map[string]int{"email": 1, "subject": 0, "username": 0})
+
+	// The list names the two accounts by id, so the operator can resolve
+	// them without the script printing the address.
+	var d User
+	if err := db.Where("subject = ?", "pf-d").First(&d).Error; err != nil {
+		t.Fatalf("load pf-d: %v", err)
+	}
+	want := fmt.Sprintf("%d,%d", d.ID, e.ID)
+	if got := report.groups["email"]; len(got) != 1 || got[0] != want {
+		t.Errorf("email duplicate groups = %v, want [%s]", got, want)
+	}
+	if len(report.groups["subject"])+len(report.groups["username"]) != 0 {
+		t.Errorf("duplicate groups = %v, want only the email one", report.groups)
+	}
+
+	// Neither the server nor the script's statement can create the index
+	// until they are resolved.
+	if err := c.createMissingUserUniqueIndexes(); !isUniqueViolation(err) {
+		t.Fatalf("server with a live duplicate = %v, want a unique violation", err)
+	}
+	if err := db.Exec(preflightCreateStatements(t)["idx_users_email"]).Error; !isUniqueViolation(err) {
 		t.Fatalf("script statement with a live duplicate = %v, want a unique violation", err)
 	}
 }

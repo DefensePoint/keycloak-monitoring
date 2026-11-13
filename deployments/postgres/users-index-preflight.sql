@@ -8,16 +8,17 @@
 -- On a Compose server, run it through the postgres container instead; see
 -- "Running the scripts" in README.md.
 --
--- It only reads, and prints counts, never the email addresses, subjects or
--- usernames themselves.
+-- It only reads, and prints counts and user ids, never the email addresses,
+-- subjects or usernames themselves.
 --
 -- 1. Which of the three indexes exist today, and in which shape.
 --    "live-only": the server leaves it alone. "plain": the server narrows it,
---    which can never fail. "missing": create it yourself before starting, with
---    the statement for that index below. Left missing, the server's
---    AutoMigrate creates it over the whole column first, which fails on rows
---    the final index allows (several empty values, a soft-deleted account's
---    value reused), and the server does not start.
+--    in one transaction, which cannot fail on the data. "missing": the server
+--    creates it on start with its final predicate, which fails only if live
+--    accounts share a value (query 2); the server then does not start until
+--    they are resolved. Releases before this one built a missing index over
+--    the whole column instead and could not start at all; on those, create it
+--    yourself before starting, with the statement for that index below.
 --
 --      CREATE UNIQUE INDEX idx_users_email ON users(email)
 --        WHERE deleted_at IS NULL AND email IS NOT NULL AND email <> '';
@@ -35,8 +36,9 @@ ORDER BY 1;
 
 -- 2. How many values are duplicated among live, non-empty rows, which is
 --    exactly what those statements forbid. A non-zero count on a column whose
---    index is "missing" means its CREATE above fails until the duplicates are
---    resolved. For a "plain" or "live-only" index the count is always 0.
+--    index is "missing" means creating it fails until the duplicates are
+--    resolved, by the server or by hand. For a "plain" or "live-only" index
+--    the count is always 0.
 SELECT 'email' AS column_name, count(*) AS duplicated_values FROM (
     SELECT email FROM users WHERE deleted_at IS NULL AND email IS NOT NULL AND email <> ''
     GROUP BY email HAVING count(*) > 1) d
@@ -48,3 +50,19 @@ UNION ALL
 SELECT 'username', count(*) FROM (
     SELECT username FROM users WHERE deleted_at IS NULL AND username IS NOT NULL AND username <> ''
     GROUP BY username HAVING count(*) > 1) d;
+
+-- 3. The accounts behind those counts: one row per shared value, with the ids
+--    of the live users sharing it, oldest first. Look them up by id to decide
+--    which account to keep, then delete or change the others.
+SELECT 'email' AS column_name, string_agg(id::text, ',' ORDER BY id) AS user_ids
+FROM users WHERE deleted_at IS NULL AND email IS NOT NULL AND email <> ''
+GROUP BY email HAVING count(*) > 1
+UNION ALL
+SELECT 'subject', string_agg(id::text, ',' ORDER BY id)
+FROM users WHERE deleted_at IS NULL AND subject IS NOT NULL AND subject <> ''
+GROUP BY subject HAVING count(*) > 1
+UNION ALL
+SELECT 'username', string_agg(id::text, ',' ORDER BY id)
+FROM users WHERE deleted_at IS NULL AND username IS NOT NULL AND username <> ''
+GROUP BY username HAVING count(*) > 1
+ORDER BY 1, 2;

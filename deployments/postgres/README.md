@@ -102,13 +102,17 @@ docker compose exec -T -e MCP_PASSWORD='<strong-password>' postgres \
 
 The server keeps `idx_users_email`, `idx_users_subject` and
 `idx_users_username` to live, non-empty rows only. On start it narrows an
-index that covers the whole column, which can never fail. An index that is
-missing is the risk: `AutoMigrate` creates it over the whole column first, so
-rows the final index allows, such as several users with an empty email or
-username, or a soft-deleted account's value reused, make it fail with
-`could not create unique index "idx_users_email" (SQLSTATE 23505)`, and the
-server does not start. A database created by an older release can be in that
-state.
+index that covers the whole column, dropping and recreating it in one
+transaction, so a crash in between leaves the old index. It creates a missing
+index itself, with its final predicate, before GORM's `AutoMigrate` runs.
+That fails only when live accounts share a value; the server then stops with
+`idx_users_email is missing and cannot be created: live users share a value`,
+and does not start until they are resolved.
+
+Releases before this fix let `AutoMigrate` build a missing index over the
+whole column instead. On those, rows the final index allows, such as several
+users with an empty email or username, made the start fail with
+`could not create unique index "idx_users_email" (SQLSTATE 23505)`.
 
 Run the read-only pre-flight on the database before the first start of the
 new release:
@@ -118,15 +122,18 @@ psql -U "${POSTGRES_USER}" -d monitoring -f users-index-preflight.sql
 ```
 
 The first result lists each index as `live-only`, `plain` or `missing`; the
-second counts duplicated values among live, non-empty rows, without printing
-them.
+second counts duplicated values among live, non-empty rows; the third lists,
+for each duplicated value, the ids of the users sharing it. None of them
+prints the values.
 
-- No index `missing`: nothing to do.
-- An index `missing`: create it before starting, with the `CREATE UNIQUE
-  INDEX` statement for that index from the top of the script. The server then
-  finds it and leaves it alone. The statement fails only when that column's
-  count is above 0: resolve those duplicate accounts first, for example by
-  soft-deleting or correcting the extras, then create the index.
+- Every count is 0: nothing to do. The server narrows or creates the indexes
+  on start.
+- A count above 0 on a column whose index is `missing`: resolve those
+  accounts first. Look them up by the ids in the third result, keep one, and
+  soft-delete or correct the others. Then start the server.
+- On a release before this fix, also create a `missing` index yourself before
+  starting, with the `CREATE UNIQUE INDEX` statement for it from the top of
+  the script. The server then finds it and leaves it alone.
 
 ## Limitations
 
