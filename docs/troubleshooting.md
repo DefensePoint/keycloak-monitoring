@@ -300,7 +300,16 @@ authentication failed: unauthorized_client / invalid_client
    - **Client authentication** is ON (confidential) and **Service accounts** are enabled
    - The client secret matches (regenerate on the Credentials tab if unsure)
 
-3. **If the token issues but Admin API calls return 403**, the service account
+3. **If the token issues but every Admin API call returns 401**, the Keycloak
+   build requires the `kc-admin-api` client scope (RHBK 26.6.9 and later) and
+   the client does not have it. This also happens to a working client after an
+   upgrade to such a build, since the upgrade does not add the scope. Add
+   `kc-admin-api` as a **Default** scope on the client's **Client scopes** tab.
+   The platform recovers with its next token, up to the token lifespan minus
+   30 seconds later, with no restart. See
+   [keycloak-setup.md](keycloak-setup.md#admin-api-client-scope-rhbk-2669-and-later)
+
+4. **If the token issues but Admin API calls return 403**, the service account
    is missing roles:
    - Assign the master `admin` role (cross-realm), or the four scoped read roles
      `view-realm`, `view-users`, `view-clients` and `view-events` for each

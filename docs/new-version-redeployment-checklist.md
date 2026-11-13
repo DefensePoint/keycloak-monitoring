@@ -21,6 +21,11 @@ In the **master realm**:
 
 - assign the master `admin` realm
 role.
+- On RHBK 26.6.9 and later, add the `kc-admin-api` client scope to the client
+as a **Default** scope (Client scopes tab). Without it every Admin API call
+returns 401. Upgrading Keycloak to such a build does not add it to an existing
+client. See
+[Admin API client scope](keycloak-setup.md#admin-api-client-scope-rhbk-2669-and-later).
 
 1. **Advanced tab of the client → Access Token Lifespan = 3 minutes to avoid login bursts.**
 2. **Credentials tab → copy the client secret**
