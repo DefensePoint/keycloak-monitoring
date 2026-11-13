@@ -1094,6 +1094,56 @@ and says so, rather than guess who the rows belong to. Further tenants can be
 added after the first successful start. Databases created by any KMT release are not
 affected.
 
+### Upgrade: unique indexes on users
+
+A database from an older release can lack one of the unique indexes on
+`users`. The server creates a missing one on start, scoped to live, non-empty
+rows, and fails only when live users share a value in that column. Run the
+read-only `deployments/postgres/users-index-preflight.sql` before that start:
+it lists those users by id, without printing the values. See
+[its README](../deployments/postgres/README.md#before-upgrading-an-older-database)
+for what to do with the result.
+
+### Moving an existing database to a new deployment
+
+When a new deployment takes over the database of an existing one, for
+example a different Compose file or project, or a new host:
+
+1. Back up the database first (see [Database Backup](#database-backup)).
+2. Stop the old deployment completely, its API server, web server and MCP
+   server, before the new one starts. The new server migrates the schema on
+   its first start, and nothing coordinates that with a server from another
+   deployment still writing to the same database.
+3. Keep the data where the new deployment looks for it. On Compose the
+   database lives in a named volume, which Compose prefixes with the project
+   name (`docker volume ls` lists it). A Compose file that names a different
+   volume starts on a new, empty database without any error. Give the new
+   file the existing volume:
+
+   ```yaml
+   volumes:
+     kmt-postgres-data:
+       external: true
+       name: <the existing volume>
+   ```
+
+   Keep `POSTGRES_USER` and `POSTGRES_PASSWORD` as they were: Postgres reads
+   them only when it creates a new data directory, so changing them does not
+   change the existing roles.
+4. Keep the database name (`monitoring`) and the same
+   `security.encryption_key` (`MONITORING_SECURITY_ENCRYPTION_KEY`). The
+   tenants' client secrets are encrypted with that key. With another key
+   the server still starts, but skips every tenant and logs `client_secret
+   could not be decrypted, check encryption key`; the stored secrets are left
+   as they are, so restarting with the right key recovers them. It does not
+   recover a secret written while the wrong key was set: a tenant created or
+   given a new client secret in that time, or a plain-text secret encrypted by
+   `security.run_secret_migration`. Those are encrypted with the wrong key;
+   enter their client secrets again after restarting with the right one.
+5. Run the [users index pre-flight](#upgrade-unique-indexes-on-users), then
+   start the new deployment and check its log for the migration and each
+   tenant's first successful poll.
+
 ### PostgreSQL with TimescaleDB
 
 ```bash

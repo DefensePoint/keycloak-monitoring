@@ -14,6 +14,10 @@ migration or pipeline.
 - `alerts-status-index.sql` builds `idx_alerts_tenant_status_first_detected_id`
   on `(tenant_id, status, first_detected DESC, id DESC)` for the Alerts page,
   which defaults to `status=active`, with `CONCURRENTLY` for the same reason.
+- `users-index-preflight.sql` is a read-only check to run before upgrading a
+  database from an older release, whose unique indexes on `users` may not yet
+  cover live, non-empty rows only. See
+  [Before upgrading an older database](#before-upgrading-an-older-database).
 
 ## Running the scripts
 
@@ -93,6 +97,83 @@ docker compose exec -T -e MCP_PASSWORD='<strong-password>' postgres \
 5. Start `mcp-server`. It refuses to start until `mcp.database` names a role,
    and fails to connect until that role exists, so the read-only split cannot
    be lost by omission.
+
+## Before upgrading an older database
+
+The server keeps `idx_users_email`, `idx_users_subject` and
+`idx_users_username` to live, non-empty rows only. On start it narrows an
+index that covers the whole column, dropping and recreating it in one
+transaction, so a crash in between leaves the old index. It creates a missing
+index itself, with its final predicate, before GORM's `AutoMigrate` runs.
+That fails only when live accounts share a value; the server then stops with
+`idx_users_email is missing and cannot be created: live users share a value`,
+and does not start until they are resolved.
+
+Releases before this fix let `AutoMigrate` build a missing index over the
+whole column instead. On those, rows the final index allows, such as several
+users with an empty email or username, made the start fail with
+`could not create unique index "idx_users_email" (SQLSTATE 23505)`.
+
+Run the read-only pre-flight on the database before the first start of the
+new release:
+
+```bash
+psql -U "${POSTGRES_USER}" -d monitoring -f users-index-preflight.sql
+```
+
+The first result lists each index as `live-only`, `plain` or `missing`; the
+second counts duplicated values among live, non-empty rows; the third lists,
+for each duplicated value, the ids of the users sharing it. None of them
+prints the values.
+
+- Every count is 0: nothing to do. The server narrows or creates the indexes
+  on start.
+- A count above 0 on a column whose index is `missing`: resolve those
+  accounts first, in SQL, since the server does not start until they are
+  resolved. Then start the server. See
+  [Resolving duplicate accounts](#resolving-duplicate-accounts).
+- On a release before this fix, also create a `missing` index yourself before
+  starting, with the `CREATE UNIQUE INDEX` statement for it from the top of
+  the script. The server then finds it and leaves it alone.
+
+### Resolving duplicate accounts
+
+For each line of the pre-flight's third result, look at the accounts behind
+its ids and choose the one to keep: the active account that signed in last.
+An SSO user who owns two accounts after a realm rebuild signs in with the
+subject of the newer one, so keeping the older one locks that person out.
+
+```sql
+SELECT id, auth_method, is_active, created_at, last_login_at, login_count
+FROM users WHERE id IN (12, 47)
+ORDER BY last_login_at DESC NULLS LAST;
+```
+
+Then retire the others. This does what deactivating an account in the UI
+does, which revokes its API tokens and ends its sessions, and also sets
+`deleted_at`, which is what takes the account out of the index. Deactivating
+alone does not:
+
+```sql
+BEGIN;
+UPDATE api_tokens SET revoked_at = now()
+WHERE user_id IN (12) AND revoked_at IS NULL;
+UPDATE users SET deleted_at = now(), is_active = false,
+                 session_epoch = session_epoch + 1
+WHERE id IN (12) AND deleted_at IS NULL;
+COMMIT;
+```
+
+A retired account cannot be brought back from the UI, and an SSO sign-in
+with its subject or email is refused as a deleted account. Retire only
+accounts nobody should use again.
+
+Two simple-auth accounts that share a username can both be kept instead:
+rename the one you would otherwise retire, and tell its owner the new name.
+
+```sql
+UPDATE users SET username = username || '-' || id WHERE id = 12;
+```
 
 ## Limitations
 
