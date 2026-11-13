@@ -104,6 +104,21 @@ docker exec -i kmt-postgres psql -U monitoring -d monitoring \
   -c "DELETE FROM events WHERE event_id LIKE 'amfa-de300002-de30-4de3-8de3-%'"
 ```
 
+**Re-seeding after that also needs the mirror's position reset.** The mirror
+copies only events newer than the newest one it has copied for the tenant and
+realm, and that position only moves forward. A re-seed writes its events into
+the same past 30 days, older than that position, so without a reset almost
+none of it is copied and nothing reports an error. Delete the position, then
+restart KMT, which also holds it in memory; neither step works alone:
+
+```bash
+docker exec -i kmt-postgres psql -U monitoring -d monitoring \
+  -c "DELETE FROM amfa_mirror_watermarks WHERE tenant_id = 'amfa-demo' AND realm = 'test-amfa'"
+docker restart kmt-server
+```
+
+The next run copies the last `backfill_days` again.
+
 ## Why `auth_context` stays empty
 
 The seed writes `auth_process.auth_context_json` and leaves the `auth_context`
@@ -118,7 +133,7 @@ fallback that does.
 | File | Purpose |
 |---|---|
 | `seed.sh` | Driver. Creates users, then runs 01 and 02. |
-| `teardown.sh` | Runs 03, then deletes the demo users. `--keep-users` to keep them. |
+| `teardown.sh` | Runs 03, then deletes the demo users `seed.sh` created. `--keep-users` to keep them. |
 | `01-create-ro-role.sql` | Creates `kmt_ro` with SELECT-only grants. |
 | `02-seed-demo-data.sql` | Generates the dataset. Needs `:demo_users` from `seed.sh`. |
 | `03-purge-demo-data.sql` | Deletes only the demo rows. Safe against real history. |

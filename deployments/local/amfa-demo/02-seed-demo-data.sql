@@ -123,8 +123,12 @@ CROSS JOIN LATERAL (
     LIMIT 1
 ) c;
 
+-- Exists only because auth_process references it. It must stay inactive: the
+-- engine takes the realm's active default-group row as the realm's whole
+-- configuration, so an active row here would replace the real one and fail
+-- every real login in the realm. '[]' keeps it a valid, empty parameter list.
 INSERT INTO decision_params_config (id, realm_id, group_id, is_active, parameters, parameters_hash)
-VALUES (:'params_id'::uuid, :'realm', 'default', true, '{}'::json, 'de30demoparams');
+VALUES (:'params_id'::uuid, :'realm', 'default', false, '[]'::json, 'de30demoparams');
 
 INSERT INTO device (hash, device, operating_system, browser, screen_resolution, system_language, client)
 SELECT hash, device, operating_system, browser, screen_resolution, system_language, client FROM devices;
