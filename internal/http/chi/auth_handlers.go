@@ -16,6 +16,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/auth"
+	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	httputil "github.com/DefensePoint/keycloak-monitoring/internal/http"
 	_ "github.com/DefensePoint/keycloak-monitoring/internal/http/dto" // swagger
@@ -56,6 +57,12 @@ type AuthHandlers struct {
 	authMiddleware   func(http.Handler) http.Handler
 	sessionBlacklist *auth.SessionBlacklist
 	sessionRevoker   SessionRevoker
+	branding         config.BrandingConfig
+}
+
+// SetBranding sets the product names the login page shows.
+func (h *AuthHandlers) SetBranding(b config.BrandingConfig) {
+	h.branding = b
 }
 
 // SessionRevoker records logouts so that every server instance, and a
@@ -161,16 +168,18 @@ func (h *AuthHandlers) RegisterRoutes(r chi.Router) {
 // handleAuthConfig returns which authentication methods are enabled.
 //
 //	@Summary		Get authentication configuration
-//	@Description	Returns which authentication methods are enabled (simple, OAuth2)
+//	@Description	Returns which authentication methods are enabled (simple, OAuth2) and the product names to show
 //	@Tags			Auth
 //	@Produce		json
-//	@Success		200	{object}	object{simple_enabled=bool,oauth2_enabled=bool,auth_required=bool}
+//	@Success		200	{object}	object{simple_enabled=bool,oauth2_enabled=bool,auth_required=bool,branding=config.BrandingConfig}
 //	@Router			/auth/config [get]
 func (h *AuthHandlers) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
 	config := map[string]interface{}{
 		"simple_enabled": h.simpleEnabled,
 		"oauth2_enabled": h.oauth2Enabled,
 		"auth_required":  true,
+		// Public: the login page shows the names before anyone signs in.
+		"branding": h.branding.WithDefaults(),
 	}
 
 	httputil.RespondSuccess(w, h.log, config)

@@ -21,8 +21,6 @@ import (
 )
 
 const (
-	serverName = "keycloak-monitoring-tool"
-
 	// Endpoint is the path the MCP streamable transport is served on.
 	Endpoint = "/mcp"
 )
@@ -87,11 +85,7 @@ func newServerWithClock(
 	}
 	guard := newToolGuard(&cfg.MCP, rec, log)
 
-	srv := mcpsdk.NewServer(&mcpsdk.Implementation{
-		Name:    serverName,
-		Title:   "Keycloak Monitoring Tool",
-		Version: version.Version,
-	}, nil)
+	srv := mcpsdk.NewServer(implementation(cfg.Branding), nil)
 	srv.AddReceivingMiddleware(guard.auditRPC())
 	registerTools(srv, authz, realms, alertReader, amfaStats, eventReader, newCursorSigner(cfg.MCP.CursorHMACKey, log), &cfg.MCP, guard, clock)
 
@@ -164,4 +158,14 @@ func handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"healthy"}`))
+}
+
+// implementation is how the server names itself to MCP clients: after the
+// deployment's product name.
+func implementation(b config.BrandingConfig) *mcpsdk.Implementation {
+	return &mcpsdk.Implementation{
+		Name:    b.Slug(),
+		Title:   b.WithDefaults().Name,
+		Version: version.Version,
+	}
 }

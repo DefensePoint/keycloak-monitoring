@@ -80,4 +80,12 @@ export interface AuthConfig {
   simple_enabled: boolean;
   oauth2_enabled: boolean;
   auth_required: boolean;
+  branding?: Branding;
+}
+
+/** The product names a deployment shows (branding in config.yaml). */
+export interface Branding {
+  name: string;
+  short_name: string;
+  logo_text: string;
 }

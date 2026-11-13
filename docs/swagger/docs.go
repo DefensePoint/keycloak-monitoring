@@ -4421,7 +4421,7 @@ const docTemplate = `{
         },
         "/auth/config": {
             "get": {
-                "description": "Returns which authentication methods are enabled (simple, OAuth2)",
+                "description": "Returns which authentication methods are enabled (simple, OAuth2) and the product names to show",
                 "produces": [
                     "application/json"
                 ],
@@ -4437,6 +4437,9 @@ const docTemplate = `{
                             "properties": {
                                 "auth_required": {
                                     "type": "boolean"
+                                },
+                                "branding": {
+                                    "$ref": "#/definitions/config.BrandingConfig"
                                 },
                                 "oauth2_enabled": {
                                     "type": "boolean"
@@ -4948,6 +4951,23 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "UpdatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.BrandingConfig": {
+            "type": "object",
+            "properties": {
+                "logo_text": {
+                    "description": "LogoText is the word shown next to the logo.",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name is the full product name, as in \"Keycloak Monitoring Tool\".",
+                    "type": "string"
+                },
+                "short_name": {
+                    "description": "ShortName is used where the full name is too long, as in \"Can't\nreach the KMT server.\", and, lower-cased, in report file names.",
                     "type": "string"
                 }
             }

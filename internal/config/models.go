@@ -21,6 +21,7 @@ type AppConfig struct {
 	AlertSilences AlertSilencesConfig `mapstructure:"alert_silences"`
 	Security      SecurityConfig      `mapstructure:"security"`
 	MCP           MCPConfig           `mapstructure:"mcp"`
+	Branding      BrandingConfig      `mapstructure:"branding"`
 
 	// PlaceholderWarnings names the ${NAME} placeholders in the config file
 	// that were kept as literal text. Not a setting: LoadConfig fills it in,
@@ -673,7 +674,7 @@ func (c *AmfaCheckerConfig) ApplyDefaults() {
 
 // NotificationsConfig represents notification integrations configuration
 type NotificationsConfig struct {
-	BaseURL string       `mapstructure:"base_url"` // Base URL for the Keycloak Monitoring Tool web UI (e.g., https://monitoring.example.com)
+	BaseURL string       `mapstructure:"base_url"` // Base URL for the web UI (e.g., https://monitoring.example.com)
 	GitLab  GitLabConfig `mapstructure:"gitlab"`
 	Slack   SlackConfig  `mapstructure:"slack"`
 	Email   EmailConfig  `mapstructure:"email"`
@@ -681,6 +682,10 @@ type NotificationsConfig struct {
 	// storage or Keycloak event alert is retried while the alert stays open
 	// and unacknowledged.
 	RetryInterval time.Duration `mapstructure:"retry_interval"`
+
+	// ProductName is branding.name, the name the messages are signed with.
+	// Not a setting: LoadConfig fills it in.
+	ProductName string `mapstructure:"-"`
 }
 
 // GitLabConfig represents GitLab issue integration configuration

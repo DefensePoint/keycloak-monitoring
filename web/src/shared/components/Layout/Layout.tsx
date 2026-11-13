@@ -2,6 +2,8 @@ import { ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { useAuth, useTenant } from "@/shared/context";
 import { useIsAdmin } from "@/shared/hooks";
+import { useBranding } from "@/shared/hooks/useBranding";
+import { brandingSubtitle } from "@/shared/lib/branding";
 import { TenantSelector } from "../TenantSelector";
 import { TenantAccessGuard } from "../TenantAccessGuard";
 import {
@@ -33,6 +35,7 @@ interface LayoutProps {
 
 export function Layout({ children }: LayoutProps) {
   const { user, logout } = useAuth();
+  const branding = useBranding();
   const location = useLocation();
   const { tenantId } = useParams<{ tenantId: string }>();
   const { selectedTenant } = useTenant();
@@ -123,10 +126,10 @@ export function Layout({ children }: LayoutProps) {
                 color="text.primary"
                 sx={{ fontWeight: 700, letterSpacing: "-0.02em" }}
               >
-                Keycloak
+                {branding.logo_text}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Monitoring Tool
+                {brandingSubtitle(branding)}
               </Typography>
             </Box>
           </Box>

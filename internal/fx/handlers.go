@@ -228,10 +228,11 @@ type ReportHandlersParams struct {
 	Logger         *logger.Logger
 	AuthMiddleware *chihttp.AuthMiddleware
 	RBACMiddleware *chihttp.RBACMiddleware
+	Config         *config.AppConfig
 }
 
 func provideReportHandlers(p ReportHandlersParams) *chihttp.ReportHandlers {
-	return chihttp.NewReportHandlers(
+	handlers := chihttp.NewReportHandlers(
 		p.Service,
 		&reportTenantAdapter{p.TenantService},
 		&rbacCheckerAdapter{p.RBACService},
@@ -239,6 +240,11 @@ func provideReportHandlers(p ReportHandlersParams) *chihttp.ReportHandlers {
 		p.AuthMiddleware.Authenticate,
 		p.RBACMiddleware,
 	)
+	handlers.SetBranding(p.Config.Branding)
+	if w := p.Config.Branding.VendorWarning(); w != "" {
+		p.Logger.Warn(w)
+	}
+	return handlers
 }
 
 // SystemHandlersParams contains dependencies for system handlers.
@@ -329,6 +335,7 @@ func provideAuthHandlers(p AuthHandlersParams) *chihttp.AuthHandlers {
 	if p.UserRepo != nil {
 		handlers.SetSessionRevoker(p.UserRepo)
 	}
+	handlers.SetBranding(p.Config.Branding)
 
 	return handlers
 }
