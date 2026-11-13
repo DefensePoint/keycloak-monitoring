@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -163,6 +164,41 @@ branding:
 			}
 			if again := cfg.Branding.WithDefaults(); again != cfg.Branding {
 				t.Errorf("WithDefaults is not stable: %+v, then %+v", cfg.Branding, again)
+			}
+		})
+	}
+}
+
+// A rebrand that sets only the name still credits DefensePoint in PDF reports.
+// config.yaml.example sets the vendor explicitly, so a copied example is the
+// usual way to get there and must warn as well.
+func TestBranding_VendorWarning(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		want []string // all in the warning; nil means no warning
+	}{
+		{"default name", "", nil},
+		{"own name, vendor unset", "branding:\n  name: Acme Monitoring\n",
+			[]string{`"Acme Monitoring"`, "DefensePoint", "security@defensepoint.com", "branding.vendor", "branding.contact_email"}},
+		{"own name, vendor copied from the example",
+			"branding:\n  name: Acme Monitoring\n  vendor: DefensePoint\n  contact_email: security@defensepoint.com\n",
+			[]string{`"Acme Monitoring"`, "DefensePoint", "branding.vendor"}},
+		{"own name and vendor", "branding:\n  name: Acme Monitoring\n  vendor: Acme\n", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := loadBrandingConfig(t, c.yaml).Branding.VendorWarning()
+			if c.want == nil {
+				if got != "" {
+					t.Errorf("VendorWarning() = %q, want none", got)
+				}
+				return
+			}
+			for _, w := range c.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("VendorWarning() = %q, want it to mention %s", got, w)
+				}
 			}
 		})
 	}

@@ -41,6 +41,8 @@ branding:
   # PDF report credits: "<vendor> Team" as author, "<vendor> Security Team"
   # as contact, with contact_email. Setting a vendor without an address
   # leaves the address out. The logo images are not configurable here.
+  # Rebranding? Change these two as well: with only the name changed, reports
+  # still credit DefensePoint, and the server logs a warning at startup.
   vendor: "DefensePoint"
   contact_email: "security@defensepoint.com"
 

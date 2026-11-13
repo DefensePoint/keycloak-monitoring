@@ -1398,6 +1398,7 @@ branding:
 - A value left empty falls back to its default, and line breaks are removed.
 - The web UI remembers the last names the server sent, so the page shown while the server cannot be reached carries them too.
 - `vendor` and `contact_email` appear only in PDF reports; `/auth/config` does not publish them.
+- Rebranding takes `vendor` and `contact_email` too: with only `name` changed, PDF reports still credit DefensePoint. The server then logs a warning at startup naming the two settings, including when `vendor` was copied unchanged from `config.yaml.example`.
 - The logo is not part of the branding. The web UI shows `web/public/defensepoint-logo.svg` (with "DefensePoint" as its alternative text), and PDF reports use `assets/logo.png` and `assets/cover.png`. To change them, replace those files in the image you build.
 
 **Environment Variables:**

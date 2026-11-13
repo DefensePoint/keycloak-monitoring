@@ -241,6 +241,9 @@ func provideReportHandlers(p ReportHandlersParams) *chihttp.ReportHandlers {
 		p.RBACMiddleware,
 	)
 	handlers.SetBranding(p.Config.Branding)
+	if w := p.Config.Branding.VendorWarning(); w != "" {
+		p.Logger.Warn(w)
+	}
 	return handlers
 }
 

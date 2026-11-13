@@ -1,6 +1,7 @@
 package fx
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog"
 
 	"github.com/DefensePoint/keycloak-monitoring/internal/auth"
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
@@ -117,5 +119,36 @@ func TestProvideReportHandlers_NamesTheReportAfterTheConfiguredBranding(t *testi
 	}
 	if svc.rendered == nil || svc.rendered.ProductName != wiredBranding.Name || svc.rendered.Vendor != "Acme" {
 		t.Errorf("PDF rendered from %+v, want the configured product and vendor", svc.rendered)
+	}
+}
+
+// The server, which makes the PDF reports, says at startup when they would
+// still credit the default vendor under a customised name.
+func TestProvideReportHandlers_WarnsWhenReportsStillCreditTheDefaultVendor(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		branding config.BrandingConfig
+		warn     bool
+	}{
+		{"own name, default vendor", config.BrandingConfig{Name: "Acme Monitoring Platform"}.WithDefaults(), true},
+		{"own name and vendor", wiredBranding, false},
+		{"default branding", config.BrandingConfig{}.WithDefaults(), false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var out bytes.Buffer
+			log := logger.New(zerolog.New(&out))
+			provideReportHandlers(ReportHandlersParams{
+				Service:        &recordingReports{},
+				TenantService:  namedTenants{},
+				RBACService:    adminRBAC{},
+				Logger:         log,
+				AuthMiddleware: chihttp.NewAuthMiddleware(nil, bearerAuthService{}, nil, nil, log),
+				RBACMiddleware: provideRBACMiddleware(adminRBAC{}, log),
+				Config:         &config.AppConfig{Branding: c.branding},
+			})
+			if got := strings.Contains(out.String(), "branding.vendor"); got != c.warn {
+				t.Errorf("logged a vendor warning = %v, want %v; log: %s", got, c.warn, out.String())
+			}
+		})
 	}
 }

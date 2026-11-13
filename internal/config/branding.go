@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 
@@ -64,6 +65,22 @@ func (b BrandingConfig) WithDefaults() BrandingConfig {
 		Vendor:       vendor,
 		ContactEmail: email,
 	}
+}
+
+// VendorWarning says, for a branding with its own product name, that PDF
+// reports still credit the default vendor, or is empty. config.yaml.example
+// sets the vendor explicitly, so a rebrand that copied it and changed only the
+// name lands here as well as one that left the vendor out. Call it on a
+// branding with its defaults applied.
+func (b BrandingConfig) VendorWarning() string {
+	if b.Name == DefaultBrandingName || b.Vendor != DefaultBrandingVendor {
+		return ""
+	}
+	msg := fmt.Sprintf("branding.name is %q, but PDF reports still credit %s (branding.vendor)", b.Name, b.Vendor)
+	if b.ContactEmail == DefaultBrandingContactEmail {
+		msg += fmt.Sprintf(" and give %s as the contact (branding.contact_email)", b.ContactEmail)
+	}
+	return msg + "; set them to rebrand the reports"
 }
 
 // applyBranding settles the branding after loading and hands the product
