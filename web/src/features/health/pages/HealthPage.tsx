@@ -19,6 +19,10 @@ import { InfinispanMetrics } from "../components/InfinispanMetrics";
 import { formatBytes } from "@/shared/utils";
 import { requestFailed } from "@/shared/lib";
 import {
+  getHealthAvailability,
+  getHealthMetricsHint,
+} from "@/shared/utils/healthAvailability";
+import {
   LoadingSkeleton,
   EmptyState,
   ErrorState,
@@ -51,6 +55,14 @@ export function HealthPage() {
     keycloakDashboard && "version_info" in keycloakDashboard
       ? keycloakDashboard.version_info
       : null;
+  const healthAvailability = getHealthAvailability(health);
+  const healthMetricsHint = getHealthMetricsHint(
+    failed ? null : health,
+    !healthAvailability.memory ||
+      !healthAvailability.memoryFree ||
+      !healthAvailability.uptime ||
+      !healthAvailability.version,
+  );
   const latestVersion = versionInfo ? versionInfo.latest_keycloak_version : "";
   const releaseUrl = versionInfo ? versionInfo.keycloak_release_url : "";
   const releaseLabel = "View Keycloak Release Notes";
@@ -156,43 +168,50 @@ export function HealthPage() {
                   {health.response_time_ms}ms
                 </Typography>
               </Box>
-              {health.server_version && (
-                <Box>
+              <Box>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{
+                    display: "block",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    mb: 1,
+                  }}
+                >
+                  Server Version
+                </Typography>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                   <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{
-                      display: "block",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                      mb: 1,
-                    }}
+                    variant={healthAvailability.version ? "h4" : "body1"}
                   >
-                    Server Version
+                    {healthAvailability.version
+                      ? health.server_version
+                      : "Not available"}
                   </Typography>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Typography variant="h4">
-                      {health.server_version}
-                    </Typography>
-                    {versionInfo && isOutdated && (
-                      <Tooltip
-                        title={`${updateTitle}: ${latestVersionDisplay} available`}
-                      >
-                        <WarningIcon
-                          sx={{
-                            fontSize: 20,
-                            color: highlightSecurity
-                              ? "error.main"
-                              : "warning.main",
-                          }}
-                        />
-                      </Tooltip>
-                    )}
-                  </Box>
+                  {healthAvailability.version && versionInfo && isOutdated && (
+                    <Tooltip
+                      title={`${updateTitle}: ${latestVersionDisplay} available`}
+                    >
+                      <WarningIcon
+                        sx={{
+                          fontSize: 20,
+                          color: highlightSecurity
+                            ? "error.main"
+                            : "warning.main",
+                        }}
+                      />
+                    </Tooltip>
+                  )}
                 </Box>
-              )}
+              </Box>
             </Box>
-            {versionInfo && isOutdated && (
+            {healthMetricsHint && (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+                {healthMetricsHint}
+              </Typography>
+            )}
+            {healthAvailability.version && versionInfo && isOutdated && (
               <Box sx={{ mt: 3 }}>
                 <Typography variant="body2" color="text.secondary">
                   {updateTitle}: {latestVersionDisplay}
@@ -223,185 +242,202 @@ export function HealthPage() {
 
           {/* Memory Metrics */}
           <SectionCard title="Memory Usage">
-            <Box
-              sx={{
-                display: "grid",
-                gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" },
-                gap: 3,
-              }}
-            >
+            {!healthAvailability.memory ? (
               <Box>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
+                <Typography variant="h4">Not available</Typography>
+              </Box>
+            ) : (
+              <>
+                <Box
                   sx={{
-                    display: "block",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    mb: 1,
+                    display: "grid",
+                    gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" },
+                    gap: 3,
                   }}
                 >
-                  Memory Used
-                </Typography>
-                <Typography variant="h4">
-                  {formatBytes(health.memory_used_bytes)}
-                </Typography>
-              </Box>
-              <Box>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{
-                    display: "block",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    mb: 1,
-                  }}
-                >
-                  Memory Max
-                </Typography>
-                <Typography variant="h4">
-                  {formatBytes(health.memory_max_bytes)}
-                </Typography>
-              </Box>
-              <Box>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{
-                    display: "block",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    mb: 1,
-                  }}
-                >
-                  Memory Free
-                </Typography>
-                <Typography variant="h4">
-                  {formatBytes(health.memory_free_bytes)}
-                </Typography>
-              </Box>
-            </Box>
+                  <Box>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{
+                        display: "block",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                        mb: 1,
+                      }}
+                    >
+                      Memory Used
+                    </Typography>
+                    <Typography variant="h4">
+                      {formatBytes(health.memory_used_bytes)}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{
+                        display: "block",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                        mb: 1,
+                      }}
+                    >
+                      Memory Max
+                    </Typography>
+                    <Typography variant="h4">
+                      {formatBytes(health.memory_max_bytes)}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{
+                        display: "block",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                        mb: 1,
+                      }}
+                    >
+                      Memory Free
+                    </Typography>
+                    <Typography variant="h4">
+                      {healthAvailability.memoryFree
+                        ? formatBytes(health.memory_free_bytes)
+                        : "Not available"}
+                    </Typography>
+                  </Box>
+                </Box>
 
-            {/* Memory Usage Bar */}
-            <Box sx={{ mt: 3 }}>
-              <Box
-                sx={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  mb: 1,
-                }}
-              >
-                <Typography variant="caption" color="text.secondary">
-                  Usage
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {(
-                    (health.memory_used_bytes / health.memory_max_bytes) *
-                    100
-                  ).toFixed(1)}
-                  %
-                </Typography>
-              </Box>
-              <LinearProgress
-                variant="determinate"
-                value={
-                  (health.memory_used_bytes / health.memory_max_bytes) * 100
-                }
-                color={
-                  health.memory_used_bytes / health.memory_max_bytes > 0.9
-                    ? "error"
-                    : health.memory_used_bytes / health.memory_max_bytes > 0.7
-                      ? "warning"
-                      : "success"
-                }
-                sx={{ height: 12 }}
-              />
-            </Box>
+                {/* Memory Usage Bar */}
+                <Box sx={{ mt: 3 }}>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      mb: 1,
+                    }}
+                  >
+                    <Typography variant="caption" color="text.secondary">
+                      Usage
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {(
+                        (health.memory_used_bytes / health.memory_max_bytes) *
+                        100
+                      ).toFixed(1)}
+                      %
+                    </Typography>
+                  </Box>
+                  <LinearProgress
+                    variant="determinate"
+                    value={
+                      (health.memory_used_bytes / health.memory_max_bytes) * 100
+                    }
+                    color={
+                      health.memory_used_bytes / health.memory_max_bytes > 0.9
+                        ? "error"
+                        : health.memory_used_bytes / health.memory_max_bytes >
+                            0.7
+                          ? "warning"
+                          : "success"
+                    }
+                    sx={{ height: 12 }}
+                  />
+                </Box>
+              </>
+            )}
           </SectionCard>
 
           {/* Uptime */}
           <SectionCard title="Uptime">
-            <Box
-              sx={{
-                display: "grid",
-                gridTemplateColumns: {
-                  xs: "repeat(2, 1fr)",
-                  sm: "repeat(4, 1fr)",
-                },
-                gap: 3,
-              }}
-            >
+            {!healthAvailability.uptime ? (
               <Box>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{
-                    display: "block",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    mb: 1,
-                  }}
-                >
-                  Days
-                </Typography>
-                <Typography variant="h4">
-                  {Math.floor(health.uptime_millis / 1000 / 60 / 60 / 24)}
-                </Typography>
+                <Typography variant="h4">Not available</Typography>
               </Box>
-              <Box>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{
-                    display: "block",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    mb: 1,
-                  }}
-                >
-                  Hours
-                </Typography>
-                <Typography variant="h4">
-                  {Math.floor((health.uptime_millis / 1000 / 60 / 60) % 24)}
-                </Typography>
+            ) : (
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: {
+                    xs: "repeat(2, 1fr)",
+                    sm: "repeat(4, 1fr)",
+                  },
+                  gap: 3,
+                }}
+              >
+                <Box>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{
+                      display: "block",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      mb: 1,
+                    }}
+                  >
+                    Days
+                  </Typography>
+                  <Typography variant="h4">
+                    {Math.floor(health.uptime_millis / 1000 / 60 / 60 / 24)}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{
+                      display: "block",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      mb: 1,
+                    }}
+                  >
+                    Hours
+                  </Typography>
+                  <Typography variant="h4">
+                    {Math.floor((health.uptime_millis / 1000 / 60 / 60) % 24)}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{
+                      display: "block",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      mb: 1,
+                    }}
+                  >
+                    Minutes
+                  </Typography>
+                  <Typography variant="h4">
+                    {Math.floor((health.uptime_millis / 1000 / 60) % 60)}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{
+                      display: "block",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      mb: 1,
+                    }}
+                  >
+                    Seconds
+                  </Typography>
+                  <Typography variant="h4">
+                    {Math.floor((health.uptime_millis / 1000) % 60)}
+                  </Typography>
+                </Box>
               </Box>
-              <Box>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{
-                    display: "block",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    mb: 1,
-                  }}
-                >
-                  Minutes
-                </Typography>
-                <Typography variant="h4">
-                  {Math.floor((health.uptime_millis / 1000 / 60) % 60)}
-                </Typography>
-              </Box>
-              <Box>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{
-                    display: "block",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    mb: 1,
-                  }}
-                >
-                  Seconds
-                </Typography>
-                <Typography variant="h4">
-                  {Math.floor((health.uptime_millis / 1000) % 60)}
-                </Typography>
-              </Box>
-            </Box>
+            )}
           </SectionCard>
 
           {/* High Availability Section */}

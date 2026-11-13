@@ -284,19 +284,19 @@ make test-all               # both
 
 ### Backend — running with Docker (no local Go required)
 
-The project builds with `golang:1.27.2-alpine` (see `build/Dockerfile`). Same image runs tests:
+The project builds with `golang:1.27.3-alpine` (see `build/Dockerfile`). Same image runs tests:
 
 ```bash
 # Warm cache once (downloads modules, ~1 min):
 docker run --rm \
   -v "$PWD:/app" -v go-mod-cache:/go/pkg/mod -w /app \
-  golang:1.27.2-alpine \
+  golang:1.27.3-alpine \
   sh -c "apk add --no-cache git build-base && go mod download"
 
 # Subsequent runs are fast (~30s):
 docker run --rm \
   -v "$PWD:/app" -v go-mod-cache:/go/pkg/mod -w /app \
-  golang:1.27.2-alpine \
+  golang:1.27.3-alpine \
   sh -c "apk add --no-cache git build-base >/dev/null 2>&1 && go build ./... && go test -short ./..."
 ```
 

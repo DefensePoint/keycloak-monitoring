@@ -3,6 +3,7 @@ import { render, screen, waitFor, withBranding } from "@/test-utils";
 import userEvent from "@testing-library/user-event";
 import { RealmPage } from "./RealmPage";
 import { useAuth, useTenant } from "@/shared/context";
+import { HEALTH_METRICS_HINT } from "@/shared/utils/healthAvailability";
 
 const mockUseRealmDashboard = vi.fn();
 const mockUseKeycloakDashboard = vi.fn();
@@ -123,6 +124,7 @@ const mockRealmDashboard = {
     status: "UP",
     response_time_ms: 10,
     memory_used_bytes: 1000000,
+    memory_max_bytes: 4000000,
     uptime_millis: 3600000,
   },
 };
@@ -254,6 +256,77 @@ describe("RealmPage", () => {
       isLoading: false,
       isError: false,
     });
+  });
+
+  it("shows realm health numbers, and no role hint, when Keycloak reports them", () => {
+    render(<RealmPage />);
+    expect(screen.getByText("1000000B")).toBeInTheDocument();
+    expect(screen.getByText("1h")).toBeInTheDocument();
+    expect(screen.queryByText("Not available")).not.toBeInTheDocument();
+    expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
+    expect(screen.queryByTitle(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
+  });
+
+  it("does not present unavailable realm health numbers as measurements", () => {
+    mockUseRealmDashboard.mockReturnValue({
+      data: {
+        ...mockRealmDashboard,
+        health: {
+          ...mockRealmDashboard.health,
+          memory_used_bytes: 0,
+          memory_max_bytes: 0,
+          uptime_millis: 0,
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+    render(<RealmPage />);
+    expect(screen.getAllByText("Not available")).toHaveLength(2);
+    expect(screen.getByText(HEALTH_METRICS_HINT)).toBeVisible();
+    expect(screen.queryByText("0h")).not.toBeInTheDocument();
+  });
+
+  it.each(["DOWN", "DEGRADED", "UNKNOWN"])(
+    "does not suggest a role change when realm health is %s",
+    (status) => {
+      mockUseRealmDashboard.mockReturnValue({
+        data: {
+          ...mockRealmDashboard,
+          health: {
+            ...mockRealmDashboard.health,
+            status,
+            memory_used_bytes: 0,
+            memory_max_bytes: 0,
+            uptime_millis: 0,
+          },
+        },
+        isLoading: false,
+        isError: false,
+      });
+      render(<RealmPage />);
+      expect(screen.getAllByText("Not available")).toHaveLength(2);
+      expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
+      expect(screen.queryByTitle(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
+    },
+  );
+
+  it("does not show role advice for stale UP data after a refresh fails", () => {
+    mockUseRealmDashboard.mockReturnValue({
+      data: {
+        ...mockRealmDashboard,
+        health: {
+          ...mockRealmDashboard.health,
+          memory_max_bytes: 0,
+          uptime_millis: 0,
+        },
+      },
+      isLoading: false,
+      isError: true,
+      error: new Error("refresh failed"),
+    });
+    render(<RealmPage />);
+    expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
   });
 
   it("should render loading state initially", () => {
