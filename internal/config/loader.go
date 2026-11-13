@@ -310,6 +310,9 @@ func setDefaults(v *viper.Viper) {
 	// networks, so private IP ranges are allowed by default. Cloud-hosted
 	// deployments can flip this to false for extra hardening.
 	v.SetDefault("keycloak.global.connection.allow_private_ranges", true)
+	// Registered so MONITORING_KEYCLOAK_GLOBAL_AMFA_AUTHENTICATOR_IDS, a
+	// comma-separated list, applies without the key in config.yaml.
+	v.SetDefault("keycloak.global.amfa_authenticator_ids", []string{})
 
 	// =============================================================================
 	// Global Keycloak Configuration Checker Defaults

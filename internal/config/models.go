@@ -368,6 +368,11 @@ type KeycloakInstanceConfig struct {
 	VersionChecker    VersionCheckerConfig     `mapstructure:"version_checker"`    // Version checker settings
 	AmfaChecker       AmfaCheckerConfig        `mapstructure:"amfa_checker"`       // AMFA risk-alert checker settings
 	AmfaMirror        AmfaMirrorConfig         `mapstructure:"amfa_mirror"`        // AMFA events mirror (unified Events list)
+
+	// AmfaAuthenticatorIDs are authenticator provider IDs matched as AMFA when
+	// deciding which realms use AMFA, in addition to the Adaptive MFA plugin's
+	// adaptive-auth and conditional-adaptive-auth. Only read from keycloak.global.
+	AmfaAuthenticatorIDs []string `mapstructure:"amfa_authenticator_ids"`
 }
 
 // KeycloakPollingConfig represents polling intervals for Keycloak monitoring

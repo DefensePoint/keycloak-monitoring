@@ -551,6 +551,21 @@ keycloak:
       backfill_days: 1          # first-run lookback window
 
     # =========================================================================
+    # AMFA AUTHENTICATOR IDS
+    # =========================================================================
+    # The Events page shows its AMFA sections (KPI cards, map, Risk column) for
+    # realms whose login flows use an enabled AMFA authenticator. The Adaptive
+    # MFA plugin's adaptive-auth and conditional-adaptive-auth are always
+    # matched. List here the IDs of an extension that registers the AMFA
+    # authenticators under other names; a realm using only those shows no AMFA
+    # sections and no error until they are listed. Any listed ID marks a realm
+    # as using AMFA, so list only AMFA authenticators. The IDs in effect are
+    # logged at startup ("AMFA authenticator IDs").
+    # amfa_authenticator_ids:
+    #   - custom-adaptive-auth
+    #   - custom-conditional-adaptive-auth
+
+    # =========================================================================
     # VERSION CHECKER
     # =========================================================================
     # The version checker monitors for new Keycloak releases
@@ -662,8 +677,9 @@ keycloak:
       # same keys. Settings left out keep the global value; a list replaces the
       # global list. realms, polling, events, connection and infinispan_port
       # apply per tenant. config_checker, event_checker, amfa_checker,
-      # amfa_mirror, version_checker, infinispan_enabled and
-      # connection.allow_private_ranges are only read from keycloak.global;
+      # amfa_mirror, amfa_authenticator_ids, version_checker,
+      # infinispan_enabled and connection.allow_private_ranges are only read
+      # from keycloak.global;
       # setting them here logs a warning at startup and has no effect.
       config:
         # Realm the Dashboard and Events pages open on when the browser tab
