@@ -264,11 +264,11 @@ The GitHub Actions workflow builds every binary and runs the Go unit tests (`go 
 
 | Suite | Gate | Needs | Run by hand when a pull request touches |
 |---|---|---|---|
-| AMFA repository and check (`internal/amfa/postgres/repository_integration_test.go`, `internal/amfacheck/integration_test.go`, `internal/amfacheck/lookup_error_integration_test.go`) | `-tags=integration` and `AMFA_TEST_DSN`; the lookup-error tests also `KMT_TEST_DATABASE_DSN` | An AMFA Postgres with AMFA's schema, such as the engine's Compose stack (see [Backend: AMFA integration tests](#backend-amfa-integration-tests)), and at least one `auth_process` row: several tests borrow its foreign-key values and skip without one. The tests insert and delete their own rows. | `internal/amfa/postgres/`, `internal/amfacheck/` |
+| AMFA repository and check (`internal/amfa/postgres/repository_integration_test.go`, `internal/amfacheck/integration_test.go`) | `-tags=integration` and `AMFA_TEST_DSN` | An AMFA Postgres with AMFA's schema, such as the engine's Compose stack (see [Backend: AMFA integration tests](#backend-amfa-integration-tests)), and at least one `auth_process` row: several tests borrow its foreign-key values and skip without one. The tests insert and delete their own rows. | `internal/amfa/postgres/`, `internal/amfacheck/` |
 | AMFA schema check (`internal/amfa/postgres/schema_check_integration_test.go`) | `-tags=integration` and `AMFA_DESTRUCTIVE_TEST_DSN` | A throwaway Postgres it may `CREATE TABLE` in. It drops `alembic_version`, and `testdb.RequireDisposable` refuses a database name without a `test`, `tmp` or `scratch` component. | `internal/amfa/postgres/` |
 | AMFA API transport parity (`internal/amfa/parity_integration_test.go`) | `-tags=integration` and all of `AMFA_TEST_DSN`, `AMFA_TEST_API_URL`, `AMFA_TEST_REALM`, `AMFA_TEST_TOKEN` | A running AMFA API and the database behind it, a realm with data in the last 30 days, and a bearer token for that realm. It compares the Postgres and HTTP repositories on that window, and a test skips when the window holds none of the rows it compares, such as geolocated, VPN-flagged or risk-rejected events. | `internal/amfa/` |
-| Auth OIDC e2e (`tests/auth_oidc_e2e_test.go`, `tests/auth_oidc_account_status_e2e_test.go`) | `-tags=integration`, no `-short`, and both `KMT_AUTH_E2E_KEYCLOAK_URL` and `KMT_AUTH_E2E_DATABASE_DSN` | A throwaway Keycloak (`start-dev` is enough) and a throwaway Postgres. It creates and deletes its own realm and drops the DSN's schema. | `auth/`, `users/` |
-| Alert pipeline e2e (`tests/alerts_integration_test.go`) | `-tags=integration`, no `-short`, and `KMT_E2E_TEST_DATABASE_DSN` (`KMT_E2E_TEST_TENANT_ID` optional) | A whole running deployment: the stack, the server with its checkers, and that deployment's database. The test tenant (`e2e-alerts-fixture-8f42c1`, or the one in `KMT_E2E_TEST_TENANT_ID`) must be configured and enabled there, with `keycloak.global.event_checker.enabled` on and a notifier for that tenant, because the test waits for alerts and for `notification_logs` rows. Run with `-timeout 15m`. | `alerts/`, `events/`, `eventscheck/`, `metricscheck/`, `notifications/` |
+| Auth OIDC e2e (`tests/auth_oidc_e2e_test.go`, `tests/auth_oidc_account_status_e2e_test.go`) | `-tags=integration`, no `-short`, and both `KMT_AUTH_E2E_KEYCLOAK_URL` and `KMT_AUTH_E2E_DATABASE_DSN` | A throwaway Keycloak (`start-dev` is enough) and a throwaway Postgres. It creates and deletes its own realm and drops the DSN's schema. | `internal/auth/`, `internal/users/` |
+| Alert pipeline e2e (`tests/alerts_integration_test.go`) | `-tags=integration`, no `-short`, and `KMT_E2E_TEST_DATABASE_DSN` (`KMT_E2E_TEST_TENANT_ID` optional) | A whole running deployment: the stack, the server with its checkers, and that deployment's database. The test tenant (`e2e-alerts-fixture-8f42c1`, or the one in `KMT_E2E_TEST_TENANT_ID`) must be configured and enabled there, with `keycloak.global.event_checker.enabled` on and a notifier for that tenant, because the test waits for alerts and for `notification_logs` rows. Run with `-timeout 15m`. | `internal/alerts/`, `internal/events/`, `internal/eventscheck/`, `internal/metricscheck/`, `internal/notifications/` |
 
 The alert pipeline e2e stays out of CI for good: it needs a whole running deployment (the stack, plus the server with its checkers polling every 5 minutes), it writes fixture events and a health row into that deployment's database, and it waits up to 6 minutes for each alert. The AMFA repository and parity suites stay out because they need AMFA's schema and data, which live in another repository; a job could provide them only by building an AMFA database from AMFA's migrations.
 
@@ -326,8 +326,8 @@ The auth OIDC e2e is the one exception to that rule, and deliberately so: it nee
 
 | Variable | Read by | Point it at |
 |---|---|---|
-| `KMT_TEST_DATABASE_DSN` | The repository tests in `events/postgres`, `alerts/postgres`, `keycloak/postgres` and `tenant/postgres` (the enabled-flag tests), the database-backed handler tests in `internal/http/chi`, the MCP security posture suite in `internal/mcp`, and the client-secret migration test in `pkg/database`. They do not skip under `-short`, so a `-short` run with the variable set includes them. | Any dev database. These remove only the fixtures they create. |
-| `KMT_DESTRUCTIVE_TEST_DATABASE_DSN` | The RBAC permission migration in `pkg/database/client_test.go`, the tenant purge tests in `pkg/database` and `tenant/postgres`, the `users` migration and index tests in `pkg/database` (`email_verified_migration_test.go`, `user_unique_indexes_test.go`, `username_index_guard_test.go`), and the deleted-account tests in `users/postgres`. All of them also skip under `-short`. | A throwaway database only. These run `DROP SCHEMA public CASCADE`, delete the admin, operator and viewer rows globally, drop and rebuild the unique indexes on `users`, rewrite `email_verified` across every matching `users` row, and reset the `users` id sequence. |
+| `KMT_TEST_DATABASE_DSN` | The repository tests in `internal/events/postgres`, `internal/alerts/postgres`, `internal/keycloak/postgres` and `internal/tenant/postgres` (the enabled-flag tests), the lookup-error tests in `internal/amfacheck` (`lookup_error_integration_test.go`, which stub AMFA and need no build tag), the database-backed handler tests in `internal/http/chi`, the MCP security posture suite in `internal/mcp`, and the client-secret migration test in `pkg/database`. They do not skip under `-short`, so a `-short` run with the variable set includes them. | Any dev database. These remove only the fixtures they create. |
+| `KMT_DESTRUCTIVE_TEST_DATABASE_DSN` | The RBAC permission migration in `pkg/database/client_test.go`, the tenant purge tests in `pkg/database` and `internal/tenant/postgres`, the `users` migration and index tests in `pkg/database` (`email_verified_migration_test.go`, `user_unique_indexes_test.go`, `username_index_guard_test.go`), and the deleted-account tests in `internal/users/postgres`. All of them also skip under `-short`. | A throwaway database only. These run `DROP SCHEMA public CASCADE`, delete the admin, operator and viewer rows globally, drop and rebuild the unique indexes on `users`, rewrite `email_verified` across every matching `users` row, and reset the `users` id sequence. |
 
 Keep them separate. The destructive helpers also refuse to start unless the database name carries a `test`, `tmp` or `scratch` component, so a DSN aimed at `monitoring` fails loudly instead of wiping it, but that is a backstop and not a licence to reuse one variable for both.
 
@@ -371,11 +371,11 @@ KMT_REQUIRE_TEST_DSNS=KMT_DESTRUCTIVE_TEST_DATABASE_DSN \
 docker stop kmt-test-db
 ```
 
-`pkg/database` and `tenant/postgres` both run `DROP SCHEMA public CASCADE` against `KMT_DESTRUCTIVE_TEST_DATABASE_DSN`. The lock above keeps them from running at the same time, so they can go in one invocation:
+`pkg/database` and `internal/tenant/postgres` both run `DROP SCHEMA public CASCADE` against `KMT_DESTRUCTIVE_TEST_DATABASE_DSN`. The lock above keeps them from running at the same time, so they can go in one invocation:
 
 ```bash
 KMT_DESTRUCTIVE_TEST_DATABASE_DSN="host=localhost port=55432 dbname=kmt_test user=kmt password=kmt sslmode=disable" \
-  go test ./pkg/database/... ./tenant/postgres/...
+  go test ./pkg/database/... ./internal/tenant/postgres/...
 ```
 
 ### Backend: AMFA integration tests
@@ -407,7 +407,7 @@ pip install requests
 REQUESTS_CA_BUNDLE="$(mkcert -CAROOT)/rootCA.pem" python3 tests/e2e/run_e2e.py
 ```
 
-**3. Repository and checker tests.** The `TestLookupError_*` tests in `internal/amfacheck` also store alerts in KMT's own database, so they need `KMT_TEST_DATABASE_DSN` too (see the [DB-backed unit tests](#backend--db-backed-unit-tests)) and skip without it:
+**3. Repository and checker tests.** The command also sets `KMT_TEST_DATABASE_DSN`, which runs the `TestLookupError_*` tests in `internal/amfacheck` alongside. They do not use AMFA: they stub it and store alerts in KMT's own database, so they need only that variable, with no build tag, and skip without it (see the [DB-backed unit tests](#backend--db-backed-unit-tests)):
 
 ```bash
 AMFA_TEST_DSN="host=localhost port=5433 dbname=adaptive_mfa user=keycloak password=password sslmode=disable" \
@@ -463,7 +463,7 @@ npx tsc --noEmit                # type-check (no tests, no emit)
 npm run build                   # production build (catches more than tsc alone)
 ```
 
-Frontend tests use **Vitest + @testing-library/react** in JSDOM. JSDOM-hostile libraries (`react-leaflet`, `react-leaflet-cluster`) must be `vi.mock()`-ed in any test that imports a component using them — see `web/src/features/amfa/components/AmfaGeoMap.test.tsx` and `web/src/features/amfa/pages/AmfaEventsPage.test.tsx` for examples.
+Frontend tests use **Vitest + @testing-library/react** in JSDOM. JSDOM-hostile libraries (`react-leaflet`, `react-leaflet-cluster`) must be `vi.mock()`-ed in any test that imports a component using them. See `web/src/shared/components/AmfaGeoMap/AmfaGeoMap.test.tsx` and `web/src/shared/components/LocationMap/LocationMap.test.tsx` for examples.
 
 ### Writing tests
 
@@ -653,7 +653,7 @@ Always pass pixels:
 <MapContainer style={{ height: 600, width: "100%" }} ...>
 ```
 
-The canonical example is `web/src/features/amfa/components/AmfaGeoMap.tsx`, which carries an inline comment as a warning to future maintainers.
+The canonical example is `web/src/shared/components/AmfaGeoMap/AmfaGeoMap.tsx`, which carries an inline comment as a warning to future maintainers.
 
 ### 5. Distinguish DB availability errors from query/logic errors
 
