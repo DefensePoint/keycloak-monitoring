@@ -30,6 +30,11 @@ const mockVersionInfo = {
   platform: "linux/amd64",
 };
 
+// The value shown under a version field's label, so a check cannot pass on
+// the same text in another field.
+const fieldValue = (label: string) =>
+  screen.getByText(label).nextElementSibling;
+
 describe("SettingsPage", () => {
   const mockUser = {
     name: "Test User",
@@ -164,6 +169,69 @@ describe("SettingsPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it.each([
+    "unknown",
+    "Unknown",
+    "UNKNOWN",
+    " unknown ",
+    "",
+    " ",
+    undefined,
+    null,
+  ])("should display Unknown for git commit %j", (git_commit) => {
+    mockUseVersion.mockReturnValue({
+      data: { ...mockVersionInfo, git_commit },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<SettingsPage />);
+
+    expect(fieldValue("Git Commit")).toHaveTextContent(/^Unknown$/);
+    expect(fieldValue("Build Date")).not.toHaveTextContent("Unknown");
+  });
+
+  it("uses the same fallback for missing commit and build date", () => {
+    mockUseVersion.mockReturnValue({
+      data: {
+        ...mockVersionInfo,
+        git_commit: "unknown",
+        build_date: "unknown",
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<SettingsPage />);
+
+    expect(fieldValue("Git Commit")).toHaveTextContent(/^Unknown$/);
+    expect(fieldValue("Build Date")).toHaveTextContent(/^Unknown$/);
+  });
+
+  it("should display a valid build date in local time", () => {
+    render(<SettingsPage />);
+
+    expect(
+      screen.getByText(new Date(mockVersionInfo.build_date).toLocaleString()),
+    ).toBeInTheDocument();
+  });
+
+  it.each(["unknown", "not-a-date", "", undefined, null])(
+    "should display Unknown for build date %j",
+    (build_date) => {
+      mockUseVersion.mockReturnValue({
+        data: { ...mockVersionInfo, build_date },
+        isLoading: false,
+        isError: false,
+      });
+
+      render(<SettingsPage />);
+
+      expect(fieldValue("Build Date")).toHaveTextContent(/^Unknown$/);
+      expect(fieldValue("Git Commit")).toHaveTextContent(/^abc123def$/);
+    },
+  );
+
   it("should display default version when version info not available", () => {
     mockUseVersion.mockReturnValue({
       data: null,
@@ -174,6 +242,9 @@ describe("SettingsPage", () => {
     render(<SettingsPage />);
 
     expect(screen.getByText("0.1.0")).toBeInTheDocument();
+    // No fields at all while there is nothing to show, not "Unknown" ones.
+    expect(screen.queryByText("Git Commit")).not.toBeInTheDocument();
+    expect(screen.queryByText("Build Date")).not.toBeInTheDocument();
   });
 
   it("should display auto-detected timezone", () => {

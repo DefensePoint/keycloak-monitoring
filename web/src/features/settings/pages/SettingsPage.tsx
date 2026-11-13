@@ -10,6 +10,16 @@ export function SettingsPage() {
   const { selectedTenant } = useTenant();
 
   const { data: versionInfo } = useVersion(selectedTenant?.tenant_id);
+  const gitCommit = versionInfo?.git_commit?.trim();
+  const gitCommitLabel =
+    gitCommit && gitCommit.toLowerCase() !== "unknown" ? gitCommit : "Unknown";
+  const buildDate = versionInfo?.build_date
+    ? new Date(versionInfo.build_date)
+    : null;
+  const buildDateLabel =
+    buildDate && !Number.isNaN(buildDate.getTime())
+      ? buildDate.toLocaleString()
+      : "Unknown";
 
   return (
     <Box sx={{ p: { xs: 2, sm: 4 } }}>
@@ -442,7 +452,7 @@ export function SettingsPage() {
                   {versionInfo?.version || "0.1.0"}
                 </Typography>
               </Box>
-              {versionInfo?.git_commit && (
+              {versionInfo && (
                 <Box>
                   <Typography
                     variant="caption"
@@ -456,11 +466,11 @@ export function SettingsPage() {
                     Git Commit
                   </Typography>
                   <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-                    {versionInfo.git_commit}
+                    {gitCommitLabel}
                   </Typography>
                 </Box>
               )}
-              {versionInfo?.build_date && (
+              {versionInfo && (
                 <Box>
                   <Typography
                     variant="caption"
@@ -473,9 +483,7 @@ export function SettingsPage() {
                   >
                     Build Date
                   </Typography>
-                  <Typography variant="body2">
-                    {new Date(versionInfo.build_date).toLocaleString()}
-                  </Typography>
+                  <Typography variant="body2">{buildDateLabel}</Typography>
                 </Box>
               )}
               {versionInfo?.go_version && (
