@@ -1,5 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { dashboardService } from "../services";
+import { useBranding } from "@/shared/hooks/useBranding";
+import { filePrefix } from "@/shared/lib/branding";
 
 interface GenerateReportParams {
   tenantId: string;
@@ -9,6 +11,7 @@ interface GenerateReportParams {
 }
 
 export function useGenerateReport() {
+  const branding = useBranding();
   return useMutation({
     mutationFn: async ({
       tenantId,
@@ -25,7 +28,7 @@ export function useGenerateReport() {
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `kmt-report-${tenantName}-${startDate}-to-${endDate}.pdf`;
+      link.download = `${filePrefix(branding)}-report-${tenantName}-${startDate}-to-${endDate}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);

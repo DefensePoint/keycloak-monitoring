@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Box, Typography, Button, Chip, alpha, useTheme } from "@mui/material";
 import { Logout } from "@mui/icons-material";
 import { TimeSelector } from "@/shared/components/TimeSelector";
+import { useBranding } from "@/shared/hooks/useBranding";
 import { RealmSelector } from "./RealmSelector";
 import type { RealmPageHeaderProps } from "../types";
 
@@ -19,6 +20,7 @@ export const RealmPageHeader: React.FC<RealmPageHeaderProps> = ({
   onLogout,
 }) => {
   const theme = useTheme();
+  const branding = useBranding();
 
   return (
     <Box
@@ -58,7 +60,7 @@ export const RealmPageHeader: React.FC<RealmPageHeaderProps> = ({
                   fontSize: "0.875rem",
                 }}
               >
-                KMT
+                {branding.short_name}
               </Link>
               <Typography color="text.secondary">/</Typography>
               <Typography

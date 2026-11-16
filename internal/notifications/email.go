@@ -33,6 +33,8 @@ type EmailNotifier struct {
 	logger *logger.Logger
 	// timeout is emailSendTimeout, shortened by tests.
 	timeout time.Duration
+	// product is the product name the email is signed with.
+	product string
 }
 
 // NewEmailNotifier creates a new email notifier.
@@ -94,7 +96,8 @@ func (e *EmailNotifier) buildSubject(alert *domain.Alert) string {
 	// Use configured subject template if available
 	if e.config.Subject != "" {
 		// Simple template replacement
-		subject := strings.ReplaceAll(e.config.Subject, "{{severity}}", strings.ToUpper(alert.Severity.String()))
+		subject := strings.ReplaceAll(e.config.Subject, "{{product}}", productName(e.product))
+		subject = strings.ReplaceAll(subject, "{{severity}}", strings.ToUpper(alert.Severity.String()))
 		subject = strings.ReplaceAll(subject, "{{title}}", alert.Title)
 		subject = strings.ReplaceAll(subject, "{{resource}}", alert.ResourceName)
 		// A line break in alert data would end the Subject header and start
@@ -103,8 +106,9 @@ func (e *EmailNotifier) buildSubject(alert *domain.Alert) string {
 	}
 
 	// Default subject format
-	return oneLine(fmt.Sprintf("[%s] Keycloak Monitoring Tool Alert: %s - %s",
+	return oneLine(fmt.Sprintf("[%s] %s Alert: %s - %s",
 		strings.ToUpper(alert.Severity.String()),
+		productName(e.product),
 		alert.Title,
 		alert.ResourceName))
 }
@@ -120,6 +124,7 @@ func (e *EmailNotifier) buildHTMLBody(alert *domain.Alert) (string, error) {
 		"TypeLabel":     alert.Type,
 		"StatusLabel":   alert.Status,
 		"Year":          time.Now().Year(),
+		"Product":       productName(e.product),
 	}
 
 	var buf bytes.Buffer
@@ -288,7 +293,7 @@ const emailTemplate = `<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Keycloak Monitoring Tool Alert</title>
+    <title>{{.Product}} Alert</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -424,8 +429,8 @@ const emailTemplate = `<!DOCTYPE html>
             </div>
         </div>
         <div class="footer">
-            <p>This is an automated alert from Keycloak Monitoring Tool</p>
-            <p>&copy; {{.Year}} Keycloak Monitoring Tool. All rights reserved.</p>
+            <p>This is an automated alert from {{.Product}}</p>
+            <p>&copy; {{.Year}} {{.Product}}. All rights reserved.</p>
         </div>
     </div>
 </body>
