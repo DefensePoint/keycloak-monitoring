@@ -69,6 +69,7 @@ func newStatsRealRowsStack(t *testing.T, rbacSvc RBACChecker) *statsRealRowsStac
 		kcpg.NewRealmRepository(db),
 		nil,
 		nil,
+		nil,
 	)
 
 	return &statsRealRowsStack{
@@ -213,7 +214,7 @@ func TestEventStatsRealRows_ScopedCallerSeesOnlyTheirRealm(t *testing.T) {
 	// that the id exists.
 	stack.router = setupTestKeycloakRouter(newTestKeycloakHandlers(
 		keycloak.NewService(kcpg.NewEventRepository(stack.db), nil, nil,
-			kcpg.NewRealmRepository(stack.db), nil, nil),
+			kcpg.NewRealmRepository(stack.db), nil, nil, nil),
 		&mockRBACChecker{policies: policyFor(stack.tenantID, "prod")},
 	))
 

@@ -248,7 +248,7 @@ keycloak:
       # Another instance
 ```
 
-A tenant's `config:` block takes the same keys as `keycloak.global`. Settings it leaves out keep the global value, and a list in it replaces the global list. These apply per tenant: `default_realm`, `realms`, `polling`, `events`, `connection` and `infinispan_port`. These are only read from `keycloak.global`: `config_checker`, `event_checker`, `amfa_checker`, `amfa_mirror`, `version_checker`, `infinispan_enabled` and `connection.allow_private_ranges`. Setting one of them for a tenant logs a warning at startup and has no effect. A value of the wrong type, such as `events_interval: soon`, stops startup; an unknown key is logged as a warning when the tenant's monitor starts.
+A tenant's `config:` block takes the same keys as `keycloak.global`. Settings it leaves out keep the global value, and a list in it replaces the global list. These apply per tenant: `default_realm`, `realms`, `polling`, `events`, `connection` and `infinispan_port`. These are only read from `keycloak.global`: `config_checker`, `event_checker`, `amfa_checker`, `amfa_mirror`, `amfa_authenticator_ids`, `version_checker`, `infinispan_enabled` and `connection.allow_private_ranges`. Setting one of them for a tenant logs a warning at startup and has no effect. A value of the wrong type, such as `events_interval: soon`, stops startup; an unknown key is logged as a warning when the tenant's monitor starts.
 
 **Complete Multi-Tenant Example:**
 
