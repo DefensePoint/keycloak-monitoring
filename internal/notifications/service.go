@@ -92,7 +92,9 @@ func NewFullService(
 
 	// Initialize enabled notifiers
 	if cfg.GitLab.Enabled {
-		svc.gitlab = NewGitLabNotifier(&cfg.GitLab, log)
+		n := NewGitLabNotifier(&cfg.GitLab, log)
+		n.product = cfg.ProductName
+		svc.gitlab = n
 		svc.enabled = true
 		log.Info("GitLab notifier enabled",
 			logger.Str("url", cfg.GitLab.URL),
@@ -100,13 +102,17 @@ func NewFullService(
 	}
 
 	if cfg.Slack.Enabled {
-		svc.slack = NewSlackNotifier(&cfg.Slack, cfg.BaseURL, log)
+		n := NewSlackNotifier(&cfg.Slack, cfg.BaseURL, log)
+		n.product = cfg.ProductName
+		svc.slack = n
 		svc.enabled = true
 		log.Info("Slack notifier enabled")
 	}
 
 	if cfg.Email.Enabled {
-		svc.email = NewEmailNotifier(&cfg.Email, log)
+		n := NewEmailNotifier(&cfg.Email, log)
+		n.product = cfg.ProductName
+		svc.email = n
 		svc.enabled = true
 		log.Info("Email notifier enabled",
 			logger.Int("recipients", len(cfg.Email.To)))

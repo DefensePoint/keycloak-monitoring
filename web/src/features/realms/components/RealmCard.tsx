@@ -10,6 +10,7 @@ import {
 } from "@mui/material";
 import type { RealmCardProps } from "../types";
 import { unreadableRealmText } from "../utils/unreadable";
+import { useBranding } from "@/shared/hooks/useBranding";
 
 export const RealmCard: React.FC<RealmCardProps> = ({ realm, onClick }) => {
   const theme = useTheme();
@@ -22,9 +23,11 @@ export const RealmCard: React.FC<RealmCardProps> = ({ realm, onClick }) => {
 
   // A realm KMT can no longer read shows what it last read, so its stored
   // health says nothing about now.
+  const branding = useBranding();
   const unreadable = unreadableRealmText(
     realm.unreadable_since,
     realm.last_checked,
+    branding.short_name,
   );
   const isHealthy = realm.enabled && realm.is_healthy;
 

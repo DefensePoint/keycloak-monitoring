@@ -23,6 +23,8 @@ type GitLabNotifier struct {
 	config     *config.GitLabConfig
 	httpClient *http.Client
 	logger     *logger.Logger
+	// product is the product name the issues and notes are signed with.
+	product string
 }
 
 // NewGitLabNotifier creates a new GitLab notifier.
@@ -141,8 +143,8 @@ func (g *GitLabNotifier) ShareIssue(ctx context.Context, issueIID string, alert 
 		reopened = " It reopened this issue, which was closed while an alert on this resource is open."
 	}
 	note := map[string]string{"body": fmt.Sprintf(
-		"%s\n\n%s\n\nKeycloak Monitoring Tool added this alert at %s.%s The issue stays open until the last alert on this resource resolves.",
-		heading, gitlabCodeBlock(alert.Description), time.Now().UTC().Format(time.RFC3339), reopened)}
+		"%s\n\n%s\n\n%s added this alert at %s.%s The issue stays open until the last alert on this resource resolves.",
+		heading, gitlabCodeBlock(alert.Description), productName(g.product), time.Now().UTC().Format(time.RFC3339), reopened)}
 	if err := g.sendIssueRequest(ctx, http.MethodPost, issueURL+"/notes", note, http.StatusCreated); err != nil {
 		return fmt.Errorf("failed to comment on GitLab issue %s: %w", issueIID, err)
 	}
@@ -205,9 +207,9 @@ func (g *GitLabNotifier) ResolveIssue(ctx context.Context, issueIID string, aler
 	}
 	issueURL := g.issueURL(issueIID)
 
-	reason := "Keycloak Monitoring Tool saw this alert resolved"
+	reason := productName(g.product) + " saw this alert resolved"
 	if alert.ResolutionNote != "" {
-		reason = alert.ResolutionNote + " Keycloak Monitoring Tool resolved this alert"
+		reason = alert.ResolutionNote + " " + productName(g.product) + " resolved this alert"
 	}
 	outcome := "closed the issue"
 	if ignored > 0 {
@@ -489,7 +491,7 @@ func (g *GitLabNotifier) buildIssueDescription(alert *domain.Alert) string {
 	}
 
 	buf.WriteString("---\n")
-	buf.WriteString("*This issue was automatically created by the Keycloak Monitoring Tool*\n")
+	buf.WriteString("*This issue was automatically created by " + productName(g.product) + "*\n")
 
 	return buf.String()
 }

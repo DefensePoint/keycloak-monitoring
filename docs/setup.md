@@ -39,9 +39,11 @@ logging is enabled, so monitoring client authentications also produce events.
 The Keycloak consoles use `admin` and `BUNDLED_KC_ADMIN_PASSWORD` by default.
 
 The setup container waits for Keycloak authentication to become available,
-creates or updates each confidential `monitoring-service` client, assigns its
-service account the master `admin` role, creates a `demo` realm, and verifies
-realm/user/client/event reads and server information access. The broad `admin`
+creates or updates each confidential `monitoring-service` client, adds the
+`kc-admin-api` client scope to it when the Keycloak build has one (RHBK 26.6.9
+and later), assigns its service account the master `admin` role, creates a
+`demo` realm, and verifies realm/user/client/event reads and server information
+access. The broad `admin`
 role is the existing deployment choice described in [Keycloak setup](keycloak-setup.md);
 this disposable local demo is not a production deployment template.
 

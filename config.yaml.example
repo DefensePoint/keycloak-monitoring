@@ -25,6 +25,28 @@
 ################################################################################
 
 # =============================================================================
+# BRANDING
+# =============================================================================
+# The product name shown in the web UI, alert emails, Slack messages, GitLab
+# issues, PDF reports and the MCP server. Leave it out to keep the defaults.
+branding:
+  # Full name: page title, settings page, notifications, reports, MCP server
+  # (whose identifier is this name in lower case with dashes)
+  name: "Keycloak Monitoring Tool"
+  # Short name: "Can't reach the KMT server.", the realm page link and, in
+  # lower case, report file names (kmt-report-<tenant>-<from>-to-<to>.pdf)
+  short_name: "KMT"
+  # Word next to the logo; the rest of the name is shown under it
+  logo_text: "Keycloak"
+  # PDF report credits: "<vendor> Team" as author, "<vendor> Security Team"
+  # as contact, with contact_email. Setting a vendor without an address
+  # leaves the address out. The logo images are not configurable here.
+  # Rebranding? Change these two as well: with only the name changed, reports
+  # still credit DefensePoint, and the server logs a warning at startup.
+  vendor: "DefensePoint"
+  contact_email: "security@defensepoint.com"
+
+# =============================================================================
 # SECURITY CONFIGURATION
 # =============================================================================
 security:
@@ -551,6 +573,21 @@ keycloak:
       backfill_days: 1          # first-run lookback window
 
     # =========================================================================
+    # AMFA AUTHENTICATOR IDS
+    # =========================================================================
+    # The Events page shows its AMFA sections (KPI cards, map, Risk column) for
+    # realms whose login flows use an enabled AMFA authenticator. The Adaptive
+    # MFA plugin's adaptive-auth and conditional-adaptive-auth are always
+    # matched. List here the IDs of an extension that registers the AMFA
+    # authenticators under other names; a realm using only those shows no AMFA
+    # sections and no error until they are listed. Any listed ID marks a realm
+    # as using AMFA, so list only AMFA authenticators. The IDs in effect are
+    # logged at startup ("AMFA authenticator IDs").
+    # amfa_authenticator_ids:
+    #   - custom-adaptive-auth
+    #   - custom-conditional-adaptive-auth
+
+    # =========================================================================
     # VERSION CHECKER
     # =========================================================================
     # The version checker monitors for new Keycloak releases
@@ -669,8 +706,9 @@ keycloak:
       # same keys. Settings left out keep the global value; a list replaces the
       # global list. realms, polling, events, connection and infinispan_port
       # apply per tenant. config_checker, event_checker, amfa_checker,
-      # amfa_mirror, version_checker, infinispan_enabled and
-      # connection.allow_private_ranges are only read from keycloak.global;
+      # amfa_mirror, amfa_authenticator_ids, version_checker,
+      # infinispan_enabled and connection.allow_private_ranges are only read
+      # from keycloak.global;
       # setting them here logs a warning at startup and has no effect.
       config:
         # Realm the Dashboard and Events pages open on when the browser tab
@@ -858,8 +896,8 @@ notifications:
     channel: ""
 
     # Optional: Custom bot username for messages
-    # If not specified, uses the webhook's configured name
-    username: "Keycloak Monitoring Tool"
+    # If not specified, uses branding.name
+    username: ""
 
     # Optional: Custom emoji icon for bot
     # Examples: ":robot_face:", ":shield:", ":warning:"
@@ -929,9 +967,10 @@ notifications:
     skip_verify: false
 
     # Optional: Custom email subject template
-    # Available placeholders: {{severity}}, {{title}}, {{resource}}
-    # If not specified, uses default format
-    subject: "[{{severity}}] Keycloak Monitoring Tool Alert: {{title}}"
+    # Available placeholders: {{product}} (branding.name), {{severity}},
+    # {{title}}, {{resource}}
+    # If set to "", uses "[SEVERITY] <branding.name> Alert: <title> - <resource>"
+    subject: "[{{severity}}] {{product}} Alert: {{title}}"
 
     # Minimum severity level for sending email notifications
     # Only alerts with this severity or higher will trigger emails

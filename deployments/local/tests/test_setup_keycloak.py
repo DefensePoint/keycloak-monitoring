@@ -32,6 +32,10 @@ class FakeKeycloak:
         self.requests = []
         self.token_failures = []
         self.denied = None
+        # Set to True to act like a build with the kc-admin-api scope (RHBK
+        # 26.6.9): Admin API calls then need it among the client's default scopes.
+        self.admin_api_scope = False
+        self.default_scopes = set()
         state = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -69,7 +73,9 @@ class FakeKeycloak:
                         status = 200 if valid else 401
                         response = {"access_token": "service-token"}
                 elif self.headers.get("Authorization") == "Bearer service-token":
-                    if not state.admin_role or path == state.denied:
+                    if state.admin_api_scope and "kc-admin-api-uuid" not in state.default_scopes:
+                        status = 401
+                    elif not state.admin_role or path == state.denied:
                         status = 403
                     elif path == "/admin/realms":
                         response = list(state.realms.values())
@@ -88,6 +94,17 @@ class FakeKeycloak:
                 elif path == "/admin/realms/master/clients/client-uuid" and self.command == "PUT":
                     state.client.update(data)
                     status = 204
+                elif path == "/admin/realms/master/client-scopes" and self.command == "GET":
+                    response = [{"id": "profile-uuid", "name": "profile"}]
+                    if state.admin_api_scope:
+                        response.append({"id": "kc-admin-api-uuid", "name": "kc-admin-api"})
+                elif path.startswith("/admin/realms/master/clients/client-uuid/default-client-scopes/"):
+                    scope_id = path.rsplit("/", 1)[1]
+                    if scope_id == "kc-admin-api-uuid" and state.admin_api_scope:
+                        state.default_scopes.add(scope_id)
+                        status = 204
+                    else:
+                        status = 404
                 elif path.endswith("/service-account-user"):
                     response = {"id": "account-uuid"}
                 elif path == "/admin/realms/master/roles/admin":
@@ -152,6 +169,26 @@ class ProvisioningTests(unittest.TestCase):
         creates = [r for r in self.fake.requests if r[:2] == ("POST", "/admin/realms/master/clients")]
         self.assertEqual(len(creates), 1)
         self.assertTrue(all(v["eventsEnabled"] for v in self.fake.events.values()))
+
+    def test_admin_api_scope_is_added_when_keycloak_has_it(self):
+        self.fake.admin_api_scope = True
+        self.provision()
+        self.provision()
+        self.assertEqual(self.fake.default_scopes, {"kc-admin-api-uuid"})
+        verified = [r for r in self.fake.requests if r[:2] == ("GET", "/admin/realms/demo/events")]
+        self.assertEqual(len(verified), 2)
+
+    def test_admin_api_scope_is_left_alone_when_keycloak_has_none(self):
+        self.provision()
+        self.assertEqual(self.fake.default_scopes, set())
+        self.assertFalse(any("/default-client-scopes/" in r[1] for r in self.fake.requests))
+
+    def test_missing_admin_api_scope_fails_verify(self):
+        self.provision()
+        self.fake.admin_api_scope = True
+        with self.assertRaises(setup.SetupError) as error:
+            self.client.verify("first-$secret")
+        self.assertEqual(error.exception.status, 401)
 
     def test_invalid_admin_credentials_fail_without_retry_or_mutation(self):
         with patch.object(setup.time, "sleep") as sleep:

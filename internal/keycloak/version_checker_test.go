@@ -274,7 +274,7 @@ func TestGetVersionInfo_ComparesOnlyUpstreamReleases(t *testing.T) {
 		{"", false, false},
 	}
 	for _, tt := range tests {
-		svc := NewService(nil, nil, fixedHealthRepo{version: tt.version}, nil, nil, checker)
+		svc := NewService(nil, nil, fixedHealthRepo{version: tt.version}, nil, nil, checker, nil)
 		info, err := svc.GetVersionInfo(context.Background(), "t1")
 		if err != nil {
 			t.Fatalf("GetVersionInfo(%q): %v", tt.version, err)
@@ -524,7 +524,7 @@ func TestVersionResult_LogsANotComparableVersionOncePerTenant(t *testing.T) {
 		{"t2", "26.4.2.redhat-00001"},
 		{"t1", "26.4.2"},
 	} {
-		svc := NewService(nil, nil, fixedHealthRepo{version: call.version}, noRealms{}, nil, checker)
+		svc := NewService(nil, nil, fixedHealthRepo{version: call.version}, noRealms{}, nil, checker, nil)
 		if _, err := svc.GetVersionInfo(context.Background(), call.tenant); err != nil {
 			t.Fatal(err)
 		}
@@ -593,7 +593,7 @@ func TestCachedVersions_ReturnsAStaleCacheAndRefreshesIt(t *testing.T) {
 func TestGetDashboard_DoesNotWaitForGitHub(t *testing.T) {
 	stub, _ := releaseStub(t, 10*time.Second, nil)
 	vc := stubChecker(stub.URL, time.Hour, 3*time.Second)
-	svc := NewService(nil, nil, fixedHealthRepo{version: "26.4.2"}, noRealms{}, nil, vc)
+	svc := NewService(nil, nil, fixedHealthRepo{version: "26.4.2"}, noRealms{}, nil, vc, nil)
 
 	start := time.Now()
 	dashboard, err := svc.GetDashboard(context.Background(), "t1", "")
@@ -612,7 +612,7 @@ func TestGetDashboard_DoesNotWaitForGitHub(t *testing.T) {
 func TestGetDashboard_ShowsTheVersionOnceFetched(t *testing.T) {
 	stub, _ := releaseStub(t, 0, nil)
 	vc := stubChecker(stub.URL, time.Hour, 2*time.Second)
-	svc := NewService(nil, nil, fixedHealthRepo{version: "26.4.2"}, noRealms{}, nil, vc)
+	svc := NewService(nil, nil, fixedHealthRepo{version: "26.4.2"}, noRealms{}, nil, vc, nil)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {

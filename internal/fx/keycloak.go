@@ -61,10 +61,15 @@ func provideKeycloakService(
 	healthRepo keycloak.HealthRepository,
 	realmRepo keycloak.RealmRepository,
 ) keycloak.Service {
+	// A misspelled ID matches nothing and fails silently, as the realms that
+	// use it show no AMFA sections, so the IDs in effect are logged once.
+	extra := cfg.Keycloak.Global.AmfaAuthenticatorIDs
+	logInfo(log, "AMFA authenticator IDs", logger.Strs("ids", keycloak.AmfaAuthenticatorIDs(extra)))
+
 	// The ClientProvider is set later by the monitor pool, when live Keycloak
 	// access is needed.
 	return keycloak.NewService(eventRepo, metricsRepo, healthRepo, realmRepo, nil,
-		newVersionChecker(cfg.Keycloak.Global.VersionChecker, log))
+		newVersionChecker(cfg.Keycloak.Global.VersionChecker, log), extra)
 }
 
 // newVersionChecker builds the version checker from

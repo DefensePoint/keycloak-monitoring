@@ -90,6 +90,12 @@ class Keycloak:
             raise SetupError(f"expected one monitoring-service client, found {len(clients)}")
         client_id = clients[0]["id"]
         self.request("PUT", realm_path + "/clients/" + client_id, settings)
+        # Builds with the kc-admin-api client scope (RHBK 26.6.9 and later) reject
+        # Admin API tokens without it, and only admin-cli gets it by default.
+        scopes = self.request("GET", realm_path + "/client-scopes")
+        for scope in scopes:
+            if scope["name"] == "kc-admin-api":
+                self.request("PUT", realm_path + "/clients/" + client_id + "/default-client-scopes/" + scope["id"])
         account = self.request("GET", realm_path + "/clients/" + client_id + "/service-account-user")
         role = self.request("GET", realm_path + "/roles/admin")
         self.request("POST", realm_path + "/users/" + account["id"] + "/role-mappings/realm", [role])

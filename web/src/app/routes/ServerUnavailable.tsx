@@ -7,6 +7,8 @@ import {
   CardContent,
   Typography,
 } from "@mui/material";
+import { useBranding, useBrandingKnown } from "@/shared/hooks/useBranding";
+import { brandingSubtitle } from "@/shared/lib/branding";
 
 interface ServerUnavailableProps {
   nextRetryAt: number | null;
@@ -26,6 +28,10 @@ export function ServerUnavailable({
   onRetryNow,
 }: ServerUnavailableProps) {
   const [seconds, setSeconds] = useState(() => secondsUntil(nextRetryAt));
+  const branding = useBranding();
+  // A browser that never reached the server does not know the product's
+  // name, so it names none rather than possibly the wrong one.
+  const named = useBrandingKnown();
 
   useEffect(() => {
     setSeconds(secondsUntil(nextRetryAt));
@@ -70,17 +76,23 @@ export function ServerUnavailable({
                 alt="DefensePoint"
                 sx={{ width: 48, height: 48 }}
               />
-              <Typography variant="h3" sx={{ color: "text.primary" }}>
-                Keycloak
-              </Typography>
+              {named && (
+                <Typography variant="h3" sx={{ color: "text.primary" }}>
+                  {branding.logo_text}
+                </Typography>
+              )}
             </Box>
-            <Typography variant="body2" sx={{ color: "text.secondary" }}>
-              MONITORING TOOL
-            </Typography>
+            {named && (
+              <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                {brandingSubtitle(branding).toUpperCase()}
+              </Typography>
+            )}
           </Box>
 
           <Alert severity="warning" sx={{ mb: 3 }}>
-            Can't reach the KMT server.
+            {named
+              ? `Can't reach the ${branding.short_name} server.`
+              : "Can't reach the server."}
           </Alert>
           <Typography
             variant="body2"
