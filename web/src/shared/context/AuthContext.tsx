@@ -13,12 +13,23 @@ import {
   ServerUnavailableError,
 } from "@/shared/services/authService";
 import { SESSION_EXPIRED_EVENT } from "@/shared/lib/apiClient";
-import type { UserInfo, AuthConfig } from "@/shared/types/auth.types";
+import {
+  DEFAULT_BRANDING,
+  rememberBranding,
+  rememberedBranding,
+} from "@/shared/lib/branding";
+import type { UserInfo, AuthConfig, Branding } from "@/shared/types/auth.types";
 
 interface AuthContextType {
   user: UserInfo | null;
   isAuthenticated: boolean;
   authConfig: AuthConfig | null;
+  // The product names to show: the server's, or the last ones it sent
+  // while it cannot be reached.
+  branding: Branding;
+  // Whether branding came from the server, now or last time. Before that it
+  // is the default, which might name the wrong product.
+  brandingKnown: boolean;
   isLoading: boolean;
   // The session ended while the user was signed in.
   sessionExpired: boolean;
@@ -51,6 +62,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [user, setUser] = useState<UserInfo | null>(null);
   const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
+  const [knownBranding, setBranding] = useState<Branding | null>(
+    rememberedBranding,
+  );
+  const branding = knownBranding ?? DEFAULT_BRANDING;
   const [isLoading, setIsLoading] = useState(true);
   const [sessionExpired, setSessionExpired] = useState(false);
   const userRef = useRef<UserInfo | null>(null);
@@ -95,6 +110,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!mountedRef.current) return;
       startedRef.current = true;
       setAuthConfig(config);
+      const serverBranding = config.branding ?? DEFAULT_BRANDING;
+      setBranding(serverBranding);
+      rememberBranding(serverBranding);
       setUser(userInfo);
       setServerUnavailable(false);
       setNextRetryAt(null);
@@ -121,6 +139,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const retryNow = useCallback(() => {
     void startup();
   }, [startup]);
+
+  // Until the name is known the page keeps the title it was served with,
+  // which names no product.
+  const knownName = knownBranding?.name;
+  useEffect(() => {
+    if (knownName) {
+      document.title = `${knownName} - Security Monitoring Dashboard`;
+    }
+  }, [knownName]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -263,6 +290,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isAuthenticated: user !== null,
         authConfig,
+        branding,
+        brandingKnown: knownBranding !== null,
         isLoading,
         sessionExpired,
         serverUnavailable,

@@ -704,7 +704,8 @@ notifications:
     channel: "#security-alerts"
 
     # Optional: Custom bot username
-    username: "Keycloak Monitoring Tool"
+    # Default: branding.name
+    username: "Security Alerts"
 
     # Optional: Bot icon emoji
     icon_emoji: ":shield:"
@@ -747,8 +748,9 @@ notifications:
     skip_verify: false
 
     # Optional: Custom email subject template
-    # Default: "[Keycloak Monitoring Tool] {severity} Alert: {check_name}"
-    subject: "[Keycloak Security] {severity}: {check_name}"
+    # Placeholders: {{product}} (branding.name), {{severity}}, {{title}}, {{resource}}
+    # Default: "[{{severity}}] {{product}} Alert: {{title}}"
+    subject: "[Keycloak Security] {{severity}}: {{title}}"
 
     # Minimum severity level to send emails
     # Options: info, warning, error, critical
@@ -1359,6 +1361,56 @@ export MONITORING_MCP_RATE_BURST=30
 export MONITORING_MCP_MAX_RESPONSE_BYTES=1048576
 ```
 
+### Branding
+
+The product name in everything a user sees: the web UI (sign-in page, header, page title, settings page), alert emails, Slack messages, GitLab issues and notes, PDF reports and their file names, and the name the MCP server gives clients. A deployment that runs KMT under its own name sets it here; with nothing set, KMT looks as it always has.
+
+```yaml
+branding:
+  # Full product name
+  # Default: "Keycloak Monitoring Tool"
+  name: "Keycloak Monitoring Tool"
+
+  # Short name, used where the full name is too long ("Can't reach the KMT
+  # server.", the realm page link) and, in lower case with dashes, at the
+  # start of report file names: kmt-report-<tenant>-<from>-to-<to>.pdf
+  # Default: "KMT"
+  short_name: "KMT"
+
+  # Word shown next to the logo. When the full name starts with it, the rest
+  # of the name is shown under it ("Monitoring Tool").
+  # Default: "Keycloak"
+  logo_text: "Keycloak"
+
+  # Credited in PDF reports as the author ("<vendor> Team") and the contact
+  # ("<vendor> Security Team")
+  # Default: "DefensePoint"
+  vendor: "DefensePoint"
+
+  # Contact address in PDF reports. The default goes with the default vendor
+  # only: with a vendor set and no address, reports give none.
+  # Default: "security@defensepoint.com"
+  contact_email: "security@defensepoint.com"
+```
+
+- The MCP server identifies itself as the full name in lower case with dashes (`keycloak-monitoring-tool`), with the full name as its title. Report file names start with the short name written the same way. Accents are dropped ("Überwachung" gives `uberwachung`); a name with nothing that can be written in ASCII, as one in Cyrillic or Chinese, gives `monitoring`.
+- `notifications.slack.username` and the `{{product}}` placeholder in `notifications.email.subject` follow `branding.name` unless set.
+- A value left empty falls back to its default, and line breaks are removed.
+- The web UI remembers the last names the server sent, so the page shown while the server cannot be reached carries them too.
+- `vendor` and `contact_email` appear only in PDF reports; `/auth/config` does not publish them.
+- Rebranding takes `vendor` and `contact_email` too: with only `name` changed, PDF reports still credit DefensePoint. The server then logs a warning at startup naming the two settings, including when `vendor` was copied unchanged from `config.yaml.example`.
+- The logo is not part of the branding. The web UI shows `web/public/defensepoint-logo.svg` (with "DefensePoint" as its alternative text), and PDF reports use `assets/logo.png` and `assets/cover.png`. To change them, replace those files in the image you build.
+
+**Environment Variables:**
+
+```bash
+export MONITORING_BRANDING_NAME="Keycloak Monitoring Tool"
+export MONITORING_BRANDING_SHORT_NAME=KMT
+export MONITORING_BRANDING_LOGO_TEXT=Keycloak
+export MONITORING_BRANDING_VENDOR=DefensePoint
+export MONITORING_BRANDING_CONTACT_EMAIL=security@defensepoint.com
+```
+
 ## Configuration Examples
 
 ### Development Configuration
@@ -1550,7 +1602,6 @@ notifications:
     enabled: true
     # Use environment variable: MONITORING_NOTIFICATIONS_SLACK_WEBHOOK_URL
     channel: "#security-alerts"
-    username: "Keycloak Monitoring Tool"
     min_severity: "warning"
 
   email:

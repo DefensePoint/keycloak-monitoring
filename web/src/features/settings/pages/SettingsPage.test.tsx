@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@/test-utils";
+import { render, screen, waitFor, withBranding } from "@/test-utils";
 import { SettingsPage } from "./SettingsPage";
 import { useAuth, useTenant } from "@/shared/context";
 
@@ -158,6 +158,15 @@ describe("SettingsPage", () => {
     expect(screen.getByText("abc123def")).toBeInTheDocument();
     expect(screen.getByText("go1.21.0")).toBeInTheDocument();
     expect(screen.getByText("linux/amd64")).toBeInTheDocument();
+  });
+
+  it("names the deployment's own product in the about section", () => {
+    render(withBranding(<SettingsPage />));
+
+    expect(screen.getByText("Acme Monitoring Platform")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Keycloak Monitoring Tool"),
+    ).not.toBeInTheDocument();
   });
 
   it.each([
