@@ -1,13 +1,25 @@
 import { Box, Card, CardContent, Typography, Chip } from "@mui/material";
 import { useAuth, useTenant } from "@/shared/context";
 import { useVersion } from "@/shared/hooks";
+import { useBranding } from "@/shared/hooks/useBranding";
 import { PageHeader } from "@/shared/components";
 
 export function SettingsPage() {
   const { user } = useAuth();
+  const branding = useBranding();
   const { selectedTenant } = useTenant();
 
   const { data: versionInfo } = useVersion(selectedTenant?.tenant_id);
+  const gitCommit = versionInfo?.git_commit?.trim();
+  const gitCommitLabel =
+    gitCommit && gitCommit.toLowerCase() !== "unknown" ? gitCommit : "Unknown";
+  const buildDate = versionInfo?.build_date
+    ? new Date(versionInfo.build_date)
+    : null;
+  const buildDateLabel =
+    buildDate && !Number.isNaN(buildDate.getTime())
+      ? buildDate.toLocaleString()
+      : "Unknown";
 
   return (
     <Box sx={{ p: { xs: 2, sm: 4 } }}>
@@ -422,9 +434,7 @@ export function SettingsPage() {
                 >
                   Application
                 </Typography>
-                <Typography variant="body2">
-                  Keycloak Monitoring Tool
-                </Typography>
+                <Typography variant="body2">{branding.name}</Typography>
               </Box>
               <Box>
                 <Typography
@@ -442,7 +452,7 @@ export function SettingsPage() {
                   {versionInfo?.version || "0.1.0"}
                 </Typography>
               </Box>
-              {versionInfo?.git_commit && (
+              {versionInfo && (
                 <Box>
                   <Typography
                     variant="caption"
@@ -456,11 +466,11 @@ export function SettingsPage() {
                     Git Commit
                   </Typography>
                   <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-                    {versionInfo.git_commit}
+                    {gitCommitLabel}
                   </Typography>
                 </Box>
               )}
-              {versionInfo?.build_date && (
+              {versionInfo && (
                 <Box>
                   <Typography
                     variant="caption"
@@ -473,9 +483,7 @@ export function SettingsPage() {
                   >
                     Build Date
                   </Typography>
-                  <Typography variant="body2">
-                    {new Date(versionInfo.build_date).toLocaleString()}
-                  </Typography>
+                  <Typography variant="body2">{buildDateLabel}</Typography>
                 </Box>
               )}
               {versionInfo?.go_version && (

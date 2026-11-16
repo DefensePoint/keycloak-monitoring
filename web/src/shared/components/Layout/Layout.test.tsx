@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@/test-utils";
+import { render, screen, withBranding } from "@/test-utils";
 import { BrowserRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -122,6 +122,17 @@ describe("Layout", () => {
     expect(screen.getByAltText("DefensePoint")).toBeInTheDocument();
     expect(screen.getByText("Keycloak")).toBeInTheDocument();
     expect(screen.getByText("Monitoring Tool")).toBeInTheDocument();
+  });
+
+  it("shows the deployment's own names next to the logo", () => {
+    vi.mocked(useAuth).mockReturnValue(mockAuthContext());
+
+    renderWithRouter(withBranding(<Layout>{null}</Layout>));
+
+    expect(screen.getByText("Acme")).toBeInTheDocument();
+    expect(screen.getByText("Monitoring Platform")).toBeInTheDocument();
+    expect(screen.queryByText("Keycloak")).not.toBeInTheDocument();
+    expect(screen.queryByText("Monitoring Tool")).not.toBeInTheDocument();
   });
 
   it("should render all navigation items", () => {

@@ -2,6 +2,7 @@ export { useLocalStorage } from "./useLocalStorage";
 export { useSessionStorage } from "./useSessionStorage";
 export { useTimeRangeStorage } from "./useTimeRangeStorage";
 export { useDebounce } from "./useDebounce";
+export { useBranding } from "./useBranding";
 export {
   usePermission,
   useRole,

@@ -16,6 +16,7 @@ import { Close as CloseIcon } from "@mui/icons-material";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { FormTextField, FormCheckbox, FormSelect } from "@/shared/components";
+import { useBranding } from "@/shared/hooks/useBranding";
 import {
   createTenantSchema,
   updateTenantSchema,
@@ -51,6 +52,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
   onCancel,
 }) => {
   const schema = isCreating ? createTenantSchema : updateTenantSchema;
+  const branding = useBranding();
   // TenantCard already blocks Edit for a config-defined tenant. Check again
   // here in case this form opens some other way.
   const isReadOnly = !isCreating && !!editingTenant?.is_config_defined;
@@ -303,7 +305,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
                 control={control}
                 label="AMFA endpoint"
                 placeholder="https://amfa.internal:8000"
-                helperText="Keycloak Monitoring Tool reads events from this address. It authenticates with the client above, so no database details are needed."
+                helperText={`${branding.name} reads events from this address. It authenticates with the client above, so no database details are needed.`}
                 required
                 fullWidth
               />

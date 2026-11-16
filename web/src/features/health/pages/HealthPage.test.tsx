@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@/test-utils";
 import userEvent from "@testing-library/user-event";
 import { HealthPage } from "./HealthPage";
 import { useTenant } from "@/shared/context";
+import { HEALTH_METRICS_HINT } from "@/shared/utils/healthAvailability";
 
 const mockUseKeycloakDashboard = vi.fn();
 
@@ -216,6 +217,102 @@ describe("HealthPage", () => {
     });
   });
 
+  it.each([0, undefined])(
+    "shows unavailable system details for missing metrics (%s)",
+    (missing) => {
+      mockUseKeycloakDashboard.mockReturnValue({
+        data: {
+          health: {
+            ...mockKeycloakDashboard.health,
+            server_version: "",
+            uptime_millis: missing,
+            memory_used_bytes: missing,
+            memory_max_bytes: missing,
+            memory_free_bytes: missing,
+          },
+        },
+        isLoading: false,
+        isError: false,
+      });
+      render(<HealthPage />);
+
+      expect(screen.getAllByText("Not available")).toHaveLength(3);
+      expect(screen.getAllByText(HEALTH_METRICS_HINT)).toHaveLength(1);
+      expect(screen.queryByText(/NaN|Infinity/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      expect(screen.queryByText("Days")).not.toBeInTheDocument();
+      expect(screen.queryByText("0B")).not.toBeInTheDocument();
+      expect(screen.getByText("UP")).toBeInTheDocument();
+      expect(screen.getByText("15ms")).toBeInTheDocument();
+    },
+  );
+
+  it.each(["DOWN", "DEGRADED", "UNKNOWN"])(
+    "does not blame missing metrics on roles when status is %s",
+    (status) => {
+      mockUseKeycloakDashboard.mockReturnValue({
+        data: {
+          health: {
+            ...mockKeycloakDashboard.health,
+            status,
+            server_version: "",
+            uptime_millis: 0,
+            memory_used_bytes: 0,
+            memory_max_bytes: 0,
+          },
+        },
+        isLoading: false,
+        isError: false,
+      });
+      render(<HealthPage />);
+      expect(screen.getAllByText("Not available")).toHaveLength(3);
+      expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
+      expect(screen.queryByTitle(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
+      expect(screen.getByText(status)).toBeInTheDocument();
+      expect(screen.getByText("15ms")).toBeInTheDocument();
+    },
+  );
+
+  it("does not show role advice for stale UP data after a refresh fails", () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        health: {
+          ...mockKeycloakDashboard.health,
+          server_version: "",
+          uptime_millis: 0,
+          memory_max_bytes: 0,
+        },
+      },
+      isLoading: false,
+      isError: true,
+      error: new Error("refresh failed"),
+    });
+    render(<HealthPage />);
+    expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
+  });
+
+  it("preserves real zero used and free memory when the maximum is available", () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        health: {
+          ...mockKeycloakDashboard.health,
+          memory_used_bytes: 0,
+          memory_free_bytes: 0,
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+    render(<HealthPage />);
+    expect(screen.getByText("0.0%")).toBeInTheDocument();
+    expect(screen.getAllByText("0B")).toHaveLength(2);
+    expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute(
+      "aria-valuenow",
+      "0",
+    );
+  });
+
   it("should display uptime", async () => {
     render(<HealthPage />);
 
@@ -321,6 +418,37 @@ describe("HealthPage", () => {
     await waitFor(() => {
       expect(screen.getByText(/Update Available/)).toBeInTheDocument();
     });
+  });
+
+  // Without a server version there is nothing to compare with the latest
+  // release, so no update notice may show even when version_info says so.
+  it("shows no update notice when the server version is not available", () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        health: {
+          ...mockKeycloakDashboard.health,
+          server_version: "",
+        },
+        version_info: {
+          ...mockKeycloakDashboard.version_info,
+          is_keycloak_outdated: true,
+          has_security_updates: true,
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<HealthPage />);
+
+    expect(screen.getByText("Not available")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Security Update Required|Update Available/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/available$/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("View Keycloak Release Notes"),
+    ).not.toBeInTheDocument();
   });
 
   // A failed first load used to render the same "No health data available" as

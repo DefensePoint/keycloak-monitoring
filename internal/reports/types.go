@@ -36,6 +36,13 @@ func (s RealmScope) empty() bool {
 
 // Data contains all data needed for a report.
 type Data struct {
+	// ProductName is the product the report names itself after.
+	ProductName string
+	// Vendor is credited as the report's author and contact.
+	Vendor string
+	// ContactEmail is the vendor's address; empty leaves it out.
+	ContactEmail string
+
 	TenantID    string
 	TenantName  string
 	StartDate   time.Time

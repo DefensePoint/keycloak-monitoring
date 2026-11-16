@@ -212,9 +212,15 @@ chmod 600 .env
 make docker-build
 
 # Or build individually
-docker build --build-arg SERVICE=server -t kmt-server:latest .
-docker build --build-arg SERVICE=web -t kmt-web:latest .
+make docker-build-server
+make docker-build-web
+make docker-build-mcp-server
 ```
+
+The make targets pass the version, commit and build date into each image,
+which the settings page shows. A plain `docker build -f build/Dockerfile`
+without the `VERSION`, `VCS_REF` and `BUILD_DATE` build arguments gives an
+image that reports version `dev` and an unknown commit and build date.
 
 The AMFA geolocation map draws from boundary data bundled in the web image, so
 it needs no tile-service key and no network access to a third party. See

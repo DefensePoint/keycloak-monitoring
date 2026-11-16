@@ -375,10 +375,11 @@ func syncTenant(ctx context.Context, p BootstrapParams, tenantID string, cfgTena
 }
 
 // globalOnlyTenantKeys are tenant config: settings nothing reads per tenant:
-// the checkers and the AMFA mirror are built once from keycloak.global, the
-// SSRF policy must not be loosened by one tenant, and infinispan_enabled is
-// read from neither block.
+// the checkers, the AMFA mirror and the AMFA authenticator IDs are read once
+// from keycloak.global, the SSRF policy must not be loosened by one tenant,
+// and infinispan_enabled is read from neither block.
 var globalOnlyTenantKeys = []string{
+	"amfa_authenticator_ids",
 	"amfa_checker",
 	"amfa_mirror",
 	"config_checker",
