@@ -63,10 +63,13 @@ ARG BUILD_DATE=unknown
 #  - -trimpath removes local paths
 #  - -buildvcs=false prevents embedding VCS info automatically (we pass our own)
 #  - -ldflags strip symbols, set version fields; -extldflags '-static' ensures static link
+#  - BUILD_DATE differs on every build, so this step never comes from the layer
+#    cache; the Go build cache mount keeps it to compiling what changed
 ENV CGO_ENABLED=0
 ARG TARGETOS
 ARG TARGETARCH
-RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
     -mod=readonly -trimpath -buildvcs=false \
     -ldflags="-w -s -extldflags '-static' \
       -X 'github.com/DefensePoint/keycloak-monitoring/internal/version.Version=${VERSION}' \

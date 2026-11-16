@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@/test-utils";
+import { render, screen, waitFor, withBranding } from "@/test-utils";
 import userEvent from "@testing-library/user-event";
 import { TenantForm } from "./TenantForm";
 
@@ -469,6 +469,29 @@ describe("TenantForm", () => {
     );
 
     expect(screen.getByLabelText(/amfa endpoint/i)).toBeInTheDocument();
+  });
+
+  it("names the deployment's own product in the AMFA endpoint help", () => {
+    render(
+      withBranding(
+        <TenantForm
+          {...defaultProps}
+          isCreating={false}
+          editingTenant={tenantFixture({
+            amfa: { enabled: true, api_base_url: "https://amfa.example.com" },
+          })}
+        />,
+      ),
+    );
+
+    expect(
+      screen.getByText(
+        /^Acme Monitoring Platform reads events from this address/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Keycloak Monitoring Tool/),
+    ).not.toBeInTheDocument();
   });
 
   it("shows a tenant's stored AMFA endpoint when editing", () => {
