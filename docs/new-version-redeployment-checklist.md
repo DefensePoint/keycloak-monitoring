@@ -98,8 +98,11 @@ polling worker` line shows it, the setting did not apply.
   users and sessions show within one more 5 min metrics poll, about 22.5 min.
   A realm deleted in Keycloak drops off within 15 min.
 - Event-check alerts run only when `keycloak.global.event_checker.enabled` is
-  true (it is off by default), and only for tenants defined in the config
-  file. An alert about newly collected events can take one more cycle.
+  true, and configuration-check alerts only when
+  `keycloak.global.config_checker.enabled` is true (both are off by default).
+  They cover every enabled tenant, including one added in the interface after
+  the deploy, which gets them as soon as it is saved. An alert about newly
+  collected events can take one more cycle.
 - These times apply to tenants on the global settings. If
   `keycloak.global.realms` lists realms, only those are polled, and a realm
   created later never appears. A tenant given its own `configuration` through
