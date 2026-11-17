@@ -103,6 +103,11 @@ polling worker` line shows it, the setting did not apply.
   They cover every enabled tenant, including one added in the interface after
   the deploy, which gets them as soon as it is saved. An alert about newly
   collected events can take one more cycle.
+- Keycloak does not know when an identity provider's client secret expires.
+  To be warned before one does, list each secret's last valid day under
+  `keycloak.global.config_checker.checks.identity_provider_secret_expiry.secrets`
+  (tenant ID, realm, provider alias, `expires_on`). The warning starts 30 days
+  before, and a changed date takes effect after a restart.
 - These times apply to tenants on the global settings. If
   `keycloak.global.realms` lists realms, only those are polled, and a realm
   created later never appears. A tenant given its own `configuration` through
