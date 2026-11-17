@@ -323,8 +323,9 @@ keycloak:
     # and generates alerts for misconfigurations or security issues.
     config_checker:
       # MASTER SWITCH - off by default; nothing below runs until it is on.
-      # When on, every tenant enabled at startup gets the checks enabled below
-      # (a tenant added later is checked after a restart); per-tenant
+      # When on, every enabled tenant, including one created in the interface,
+      # gets the checks enabled below; creating, enabling, disabling or deleting
+      # a tenant starts or stops its checks without a restart. Per-tenant
       # config_checker overrides are not applied yet. The realm and client
       # security checks are enabled by default and did not run in KMT 1.0.x,
       # so expect a first wave of alerts for existing misconfigurations.
@@ -489,6 +490,9 @@ keycloak:
     # occurrence, so operators opt in.
     event_checker:
       enabled: false            # MASTER SWITCH - off by default
+      # When on, every enabled tenant, including one created in the interface,
+      # gets the checks enabled below; creating, enabling, disabling or deleting
+      # a tenant starts or stops its checks without a restart.
       # How often to run event-based checks
       # Valid time units: ns, us/µs, ms, s, m, h
       # Recommended: 5m (balance between responsiveness and performance)

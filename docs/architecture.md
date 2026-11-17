@@ -399,7 +399,7 @@ The API is implemented in `internal/http/chi/` with handlers for each domain. Fu
 
 **Components**:
 
-- **Service**: Main configuration checker service with background worker
+- **Service**: Main configuration checker service with background worker, one per enabled tenant. The services follow tenant changes (`internal/fx/tenant_check_workers.go`), so creating, enabling, disabling or deleting a tenant starts or stops its checks without a restart.
 - **Realm Security Checker**: Validates realm security settings
   - SSL requirements
   - Brute force protection
@@ -863,6 +863,8 @@ All times are measured per occurrence: an alert that resolved and came back star
 - Monitor Keycloak events for IDP errors
 - Detect identity provider failures
 - Generate alerts for IDP issues
+
+Runs one service per enabled tenant, config.yaml and interface tenants alike, and follows tenant changes like the configuration checker (`internal/fx/tenant_check_workers.go`).
 
 ### 20. Metrics Check Package (`metricscheck/`)
 

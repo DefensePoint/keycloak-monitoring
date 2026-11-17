@@ -318,8 +318,9 @@ keycloak:
     # ========================================================================
     config_checker:
       # Master switch, off by default: nothing below runs until it is on.
-      # When on, every tenant enabled at startup gets the checks enabled below;
-      # a tenant added later is checked after a restart. Per-tenant
+      # When on, every enabled tenant, including one created in the interface,
+      # gets the checks enabled below; creating, enabling, disabling or deleting
+      # a tenant starts or stops its checks without a restart. Per-tenant
       # config_checker overrides are not applied yet. The realm and client
       # security checks are on by default and did not run in KMT 1.0.x, so
       # expect a first wave of alerts for existing misconfigurations.
