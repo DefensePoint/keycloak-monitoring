@@ -1463,6 +1463,7 @@ CREATE INDEX idx_operator_actions_alert ON operator_alert_actions(alert_id);
 **Components:**
 
 - `amfa.Registry` — per-tenant `Repository` registry built at startup by iterating `cfg.Keycloak.Tenants`. Tenants without `amfa.enabled = true` are absent; lookups for them return `ErrAmfaNotConfigured`.
+  Tenants stored in the database are added, replaced and removed as they change, by `amfaTenantSync` (`internal/fx/amfa_tenants.go`). Listeners added with `Subscribe` are told about each change, in order.
 - `amfa/postgres/` — read-only GORM client + repository. Uses the `gorm:"->"` read-only tag plus a dedicated least-privilege Postgres role (`kmt_ro`); `AutoMigrate` is never called on this connection. Per-tenant `EventsLookbackDays` (config) drives the default query window via `NewRepositoryWithLookback`; capped at 90 days regardless.
 - `amfa/postgres/errors.go` — translates low-level driver / pgconn / network errors into `amfa.ErrAmfaUnavailable` so DB outages surface as HTTP 503 rather than 500. Query/syntax errors continue to bubble up as 500.
 - `amfa/postgres/schema_check.go` — non-fatal `alembic_version` check at startup, with its own 5s deadline so a hung AMFA DB can never block KMT's monitoring boot. Logs WARN on drift, never returns a fatal error.
@@ -1475,7 +1476,7 @@ CREATE INDEX idx_operator_actions_alert ON operator_alert_actions(alert_id);
 
 **Existing AMFA codebase is not modified.** All integration is purely additive on the KMT monitoring side; the only AMFA-side change is the operator-run `CREATE USER ... GRANT SELECT` block documented in `docs/amfa-integration.md`.
 
-**Risk-alert checker (`amfacheck/`):** A per-tenant poll loop, sibling to `eventscheck/`, that turns high-risk AMFA login events into `domain.Alert`s routed through the existing alerts and notifications infrastructure (same lifecycle and notification fan-out as the Keycloak event checker). It reads AMFA's database through additive `amfa.Repository` methods, never modifying the AMFA schema. The package is deliberately kept parallel to `eventscheck/` rather than refactored behind a shared abstraction; see the design spec for the rationale. The checker is gated by the `keycloak.global.amfa_checker` config block (master switch off by default) and is documented operationally in `docs/amfa-integration.md`.
+**Risk-alert checker (`amfacheck/`):** A per-tenant poll loop, sibling to `eventscheck/`, that turns high-risk AMFA login events into `domain.Alert`s routed through the existing alerts and notifications infrastructure (same lifecycle and notification fan-out as the Keycloak event checker). It reads AMFA's database through additive `amfa.Repository` methods, never modifying the AMFA schema. The package is deliberately kept parallel to `eventscheck/` rather than refactored behind a shared abstraction; see the design spec for the rationale. The checker is gated by the `keycloak.global.amfa_checker` config block (master switch off by default) and is documented operationally in `docs/amfa-integration.md`. Its per-tenant services, and the AMFA mirror's, follow registry changes (`internal/fx/amfa_tenant_workers.go`), so a tenant's AMFA toggle starts or stops them without a restart.
 
 **Operator-facing setup guide:** [`docs/amfa-integration.md`](amfa-integration.md).
 

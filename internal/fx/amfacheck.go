@@ -17,10 +17,11 @@ import (
 )
 
 // AmfaCheckModule wires the AMFA risk-alert checker: one per-tenant
-// amfacheck.Service for every tenant that has amfa.enabled=true AND
+// amfacheck.Service for every tenant that has AMFA enabled, when
 // keycloak.global.amfa_checker.enabled=true. Each service owns one goroutine,
-// started/stopped via fx lifecycle hooks. Safe to install when no tenants
-// qualify: the slice is simply empty.
+// started/stopped via fx lifecycle hooks, and follows tenant changes made
+// through the API (see amfaTenantWorkers). Safe to install when no tenants
+// qualify: there are simply no services.
 var AmfaCheckModule = fx.Module("amfacheck",
 	fx.Provide(provideAmfaCheckRunner),
 	fx.Invoke(startAmfaCheckServices),
@@ -114,17 +115,47 @@ type AmfaCheckParams struct {
 	Logger   *logger.Logger
 }
 
-// provideAmfaCheckRunner builds the per-tenant services once and wraps them in a
-// Runner. The Runner is injected into the AMFA HTTP handlers for on-demand runs;
-// the lifecycle starter (below) starts/stops the same Service instances.
-func provideAmfaCheckRunner(p AmfaCheckParams) *amfacheck.Runner {
-	services := buildAmfaCheckServices(p.Config, p.Registry, p.Keycloak,
+// provideAmfaCheckRunner builds the per-tenant services and the Runner that
+// holds them. The Runner is injected into the AMFA HTTP handlers for on-demand
+// runs; the lifecycle starter (below) starts/stops the same Service instances.
+func provideAmfaCheckRunner(p AmfaCheckParams) (*amfacheck.Runner, *amfaTenantWorkers[amfacheck.Service]) {
+	return newAmfaCheckWorkers(p.Config, p.Registry, p.Keycloak,
 		amfaCheckAlertStore{repo: p.Alerts}, p.Notifier, p.Silences, p.Logger)
-	return amfacheck.NewRunner(services)
 }
 
-// buildAmfaCheckServices is the unit-testable core. log may be nil in tests.
-// It returns one Service per AMFA-enabled tenant, keyed by tenant ID.
+// newAmfaCheckWorkers is the unit-testable core of provideAmfaCheckRunner. It
+// builds the config.yaml tenants' services and, when the checker is globally
+// enabled, follows the registry for database tenants. log may be nil in tests.
+func newAmfaCheckWorkers(
+	cfg *config.AppConfig,
+	registry *amfa.Registry,
+	realms realmLister,
+	alertStore amfacheck.AlertStore,
+	notifier amfacheck.NotificationService,
+	silencer amfacheck.Silencer,
+	log *logger.Logger,
+) (*amfacheck.Runner, *amfaTenantWorkers[amfacheck.Service]) {
+	runner := amfacheck.NewRunner(nil)
+	workers := &amfaTenantWorkers[amfacheck.Service]{
+		component:     "amfacheck",
+		configTenants: cfg.Keycloak.Tenants,
+		onPut:         runner.Set,
+		onRemove:      runner.Remove,
+		log:           log,
+	}
+	for tenantID, svc := range buildAmfaCheckServices(cfg, registry, realms, alertStore, notifier, silencer, log) {
+		workers.put(tenantID, svc)
+	}
+	if cfg.Keycloak.Global.AmfaChecker.Enabled {
+		workers.build = amfaCheckBuilder(cfg, realms, alertStore, notifier, silencer, log)
+		workers.follow(registry)
+	}
+	return runner, workers
+}
+
+// buildAmfaCheckServices builds the config.yaml tenants' services. log may be
+// nil in tests. It returns one Service per AMFA-enabled tenant, keyed by
+// tenant ID.
 func buildAmfaCheckServices(
 	cfg *config.AppConfig,
 	registry *amfa.Registry,
@@ -134,24 +165,17 @@ func buildAmfaCheckServices(
 	silencer amfacheck.Silencer,
 	log *logger.Logger,
 ) map[string]amfacheck.Service {
-	amfaCfg := cfg.Keycloak.Global.AmfaChecker
-	if !amfaCfg.Enabled {
+	if !cfg.Keycloak.Global.AmfaChecker.Enabled {
 		logInfo(log, "AMFA checker globally disabled; no alert services constructed")
 		return nil
 	}
-	amfaCfg.ApplyDefaults()
-
-	adaptedLog := amfacheck.Logger(noopAmfacheckLogger{})
-	if log != nil {
-		adaptedLog = &amfacheckLoggerAdapter{log: log}
-	}
+	build := amfaCheckBuilder(cfg, realms, alertStore, notifier, silencer, log)
 
 	services := make(map[string]amfacheck.Service)
 	for tenantID, tcfg := range cfg.Keycloak.Tenants {
 		if tcfg.Amfa == nil || !tcfg.Amfa.Enabled {
 			continue
 		}
-		tenantID := tenantID // capture
 
 		repo, err := registry.RepositoryFor(tenantID)
 		if err != nil {
@@ -159,35 +183,46 @@ func buildAmfaCheckServices(
 				logger.Str("tenant_id", tenantID), logger.Err(err))
 			continue
 		}
+		services[tenantID] = build(tenantID, repo)
+	}
+	logInfo(log, "AMFA checker services constructed", logger.Int("count", len(services)))
+	return services
+}
 
-		realmsFn := func(ctx context.Context) ([]string, error) {
-			rows, lerr := realms.ListRealms(ctx, tenantID)
-			if lerr != nil {
-				return nil, lerr
-			}
-			out := make([]string, 0, len(rows))
-			for _, r := range rows {
-				out = append(out, r.RealmName)
-			}
-			return out, nil
-		}
+// amfaCheckBuilder returns the function that builds one tenant's checker from
+// its AMFA repository.
+func amfaCheckBuilder(
+	cfg *config.AppConfig,
+	realms realmLister,
+	alertStore amfacheck.AlertStore,
+	notifier amfacheck.NotificationService,
+	silencer amfacheck.Silencer,
+	log *logger.Logger,
+) func(tenantID string, repo amfa.Repository) amfacheck.Service {
+	amfaCfg := cfg.Keycloak.Global.AmfaChecker
+	amfaCfg.ApplyDefaults()
 
+	adaptedLog := amfacheck.Logger(noopAmfacheckLogger{})
+	if log != nil {
+		adaptedLog = &amfacheckLoggerAdapter{log: log}
+	}
+
+	return func(tenantID string, repo amfa.Repository) amfacheck.Service {
 		var resume amfacheck.ResumeFunc
 		if latest, ok := alertStore.(latestAlertFinder); ok {
 			resume = func(ctx context.Context, checkType, realm string) (time.Time, bool, error) {
 				return latest.LatestFirstDetected(ctx, tenantID, checkType, realm)
 			}
 		}
-		checks := buildAmfaChecks(tenantID, amfacheck.RealmsFunc(realmsFn), repo, amfaCfg, resume, adaptedLog)
-		services[tenantID] = amfacheck.NewService(tenantID, checks, alertStore, notifier, adaptedLog, amfaCfg.PollInterval,
-			amfacheck.WithResolveAfter(amfaCfg.ResolveAfter), amfacheck.WithSilencer(silencer))
+		realmsFn := amfacheck.RealmsFunc(tenantRealmsFunc(realms, tenantID))
+		checks := buildAmfaChecks(tenantID, realmsFn, repo, amfaCfg, resume, adaptedLog)
 		logInfo(log, "amfacheck service constructed",
 			logger.Str("tenant_id", tenantID),
 			logger.Int("checks", len(checks)),
 			logger.Str("poll_interval", amfaCfg.PollInterval.String()))
+		return amfacheck.NewService(tenantID, checks, alertStore, notifier, adaptedLog, amfaCfg.PollInterval,
+			amfacheck.WithResolveAfter(amfaCfg.ResolveAfter), amfacheck.WithSilencer(silencer))
 	}
-	logInfo(log, "AMFA checker services constructed", logger.Int("count", len(services)))
-	return services
 }
 
 // latestAlertFinder lets a restarted per-event check resume from the newest
@@ -243,30 +278,12 @@ func buildAmfaChecks(
 	return out
 }
 
-func startAmfaCheckServices(lc fx.Lifecycle, runner *amfacheck.Runner, log *logger.Logger) {
-	for _, s := range runner.Services() {
-		s := s
-		// The poll loop must run on a long-lived context, NOT fx's OnStart
-		// context: fx cancels the OnStart context once startup completes, which
-		// would immediately stop the ticker goroutine. We own a background
-		// context here and cancel it in OnStop (alongside Stop()'s graceful
-		// drain) so in-flight queries unwind on shutdown.
-		var cancel context.CancelFunc
-		lc.Append(fx.Hook{
-			OnStart: func(context.Context) error {
-				var runCtx context.Context
-				runCtx, cancel = context.WithCancel(context.Background())
-				return s.Start(runCtx)
-			},
-			OnStop: func(context.Context) error {
-				if cancel != nil {
-					cancel()
-				}
-				return s.Stop()
-			},
-		})
-	}
-	logInfo(log, "amfacheck lifecycle hooks registered", logger.Int("service_count", len(runner.Services())))
+// startAmfaCheckServices starts the checkers with the app and stops them with
+// it. Each poll loop runs on its own long-lived context, not fx's OnStart
+// context, which fx cancels once startup completes (see lifecycle.Pool).
+func startAmfaCheckServices(lc fx.Lifecycle, workers *amfaTenantWorkers[amfacheck.Service], log *logger.Logger) {
+	workers.hook(lc)
+	logInfo(log, "amfacheck lifecycle hooks registered", logger.Int("service_count", workers.pool.Len()))
 }
 
 // repeatedRiskyActiveWithin is how recent a user's last risky attempt must be

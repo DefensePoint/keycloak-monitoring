@@ -131,3 +131,82 @@ func TestRegistry_ConcurrentRegisterAndLookup(t *testing.T) {
 		t.Errorf("expected %d registered tenants, got %d", n, got)
 	}
 }
+
+// registryChange is one notification a Subscribe listener received.
+type registryChange struct {
+	tenantID string
+	repo     Repository
+}
+
+func TestRegistry_SubscribeReportsRegisterAndUnregister(t *testing.T) {
+	r := NewRegistry()
+	var got []registryChange
+	r.Subscribe(func(tenantID string, repo Repository) {
+		got = append(got, registryChange{tenantID, repo})
+	})
+
+	r.Register("a", fakeRepo{id: "a1"})
+	r.Register("a", fakeRepo{id: "a2"}) // replaced, e.g. a new endpoint
+	r.Unregister("a")
+
+	want := []registryChange{{"a", fakeRepo{id: "a1"}}, {"a", fakeRepo{id: "a2"}}, {"a", nil}}
+	if len(got) != len(want) {
+		t.Fatalf("got %d notifications %v, want %v", len(got), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("notification %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+// Unregister runs on every save of a tenant without AMFA, so it only reports
+// a tenant that had a repository.
+func TestRegistry_UnregisterOfUnknownTenantIsNotReported(t *testing.T) {
+	r := NewRegistry()
+	calls := 0
+	r.Subscribe(func(string, Repository) { calls++ })
+
+	r.Unregister("never-registered")
+
+	if calls != 0 {
+		t.Errorf("listener called %d times, want 0", calls)
+	}
+}
+
+// A listener sees the changes in the order they were made, even when they come
+// from different goroutines, so the last one it sees is the registry's state.
+func TestRegistry_ListenerSeesChangesInOrder(t *testing.T) {
+	r := NewRegistry()
+	var mu sync.Mutex
+	last := map[string]Repository{}
+	r.Subscribe(func(tenantID string, repo Repository) {
+		mu.Lock()
+		defer mu.Unlock()
+		last[tenantID] = repo
+	})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(2)
+		go func(i int) {
+			defer wg.Done()
+			r.Register("a", fakeRepo{id: fmt.Sprint(i)})
+		}(i)
+		go func() {
+			defer wg.Done()
+			r.Unregister("a")
+		}()
+	}
+	wg.Wait()
+
+	current, err := r.RepositoryFor("a")
+	if err != nil {
+		current = nil
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if last["a"] != current {
+		t.Errorf("listener's last view %v differs from the registry's %v", last["a"], current)
+	}
+}
