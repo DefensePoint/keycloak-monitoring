@@ -419,10 +419,11 @@ type ConfigCheckerConfig struct {
 
 // ConfigCheckerChecks contains settings for specific checks
 type ConfigCheckerChecks struct {
-	IdentityProviderMetadata IdentityProviderMetadataCheckConfig `mapstructure:"identity_provider_metadata"`
-	RealmSecurity            RealmSecurityCheckConfig            `mapstructure:"realm_security"`
-	ClientSecurity           ClientSecurityCheckConfig           `mapstructure:"client_security"`
-	Health                   HealthCheckConfig                   `mapstructure:"health"`
+	IdentityProviderMetadata     IdentityProviderMetadataCheckConfig     `mapstructure:"identity_provider_metadata"`
+	IdentityProviderSecretExpiry IdentityProviderSecretExpiryCheckConfig `mapstructure:"identity_provider_secret_expiry"`
+	RealmSecurity                RealmSecurityCheckConfig                `mapstructure:"realm_security"`
+	ClientSecurity               ClientSecurityCheckConfig               `mapstructure:"client_security"`
+	Health                       HealthCheckConfig                       `mapstructure:"health"`
 }
 
 // IdentityProviderMetadataCheckConfig represents settings for IDP metadata check
@@ -433,6 +434,31 @@ type IdentityProviderMetadataCheckConfig struct {
 	ExcludedProviders                []string      `mapstructure:"excluded_providers"`
 	CertificateExpirationWarningDays int           `mapstructure:"certificate_expiration_warning_days"` // Days before expiration to create warning (default: 30)
 	CertificateCheckTimeout          time.Duration `mapstructure:"certificate_check_timeout"`           // HTTP timeout for fetching metadata (default: 30s)
+}
+
+// IdentityProviderSecretExpiryCheckConfig lists when the client secrets of
+// identity providers expire. Keycloak does not know: the provider that issued
+// the secret (Entra, Okta, ...) does, so an operator writes the date here.
+type IdentityProviderSecretExpiryCheckConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// WarningDays is how many days before expiry the warning starts.
+	WarningDays int                      `mapstructure:"warning_days"`
+	Secrets     []IdentityProviderSecret `mapstructure:"secrets"`
+}
+
+// IdentityProviderSecret is when one identity provider's client secret
+// expires. The tenant is the KMT tenant ID, from config.yaml or the interface.
+type IdentityProviderSecret struct {
+	Tenant           string `mapstructure:"tenant"`
+	Realm            string `mapstructure:"realm"`
+	IdentityProvider string `mapstructure:"identity_provider"`
+	// ExpiresOn is the last day the secret is valid, as YYYY-MM-DD (UTC).
+	ExpiresOn string `mapstructure:"expires_on"`
+}
+
+// ExpiryDate returns ExpiresOn as midnight UTC of that day.
+func (s IdentityProviderSecret) ExpiryDate() (time.Time, error) {
+	return time.Parse(time.DateOnly, s.ExpiresOn)
 }
 
 // RealmSecurityCheckConfig represents settings for realm security check

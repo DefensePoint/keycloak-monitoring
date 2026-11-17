@@ -399,6 +399,7 @@ The API is implemented in `internal/http/chi/` with handlers for each domain. Fu
 
 **Components**:
 
+- **Identity provider secret expiry**: Warns before an identity provider's client secret expires, from the dates listed under `config_checker.checks.identity_provider_secret_expiry.secrets` (Keycloak does not store them).
 - **Service**: Main configuration checker service with background worker, one per enabled tenant. The services follow tenant changes (`internal/fx/tenant_check_workers.go`), so creating, enabling, disabling or deleting a tenant starts or stops its checks without a restart.
 - **Realm Security Checker**: Validates realm security settings
   - SSL requirements

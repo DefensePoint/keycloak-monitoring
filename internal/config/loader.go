@@ -147,10 +147,13 @@ func loadConfig(configPath string, out io.Writer) (*AppConfig, error) {
 
 	// Unmarshal
 	var config AppConfig
-	if err := v.Unmarshal(&config); err != nil {
+	if err := v.Unmarshal(&config, viper.DecodeHook(decodeHooks())); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 	if err := checkTenantOverrides(&config.Keycloak); err != nil {
+		return nil, err
+	}
+	if err := config.Keycloak.Global.ConfigChecker.Checks.IdentityProviderSecretExpiry.Validate(); err != nil {
 		return nil, err
 	}
 	config.MCP.RemovedKeys = removedMCPKeysInFile(v)
@@ -341,6 +344,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("keycloak.global.config_checker.checks.identity_provider_metadata.excluded_providers", []string{})
 	v.SetDefault("keycloak.global.config_checker.checks.identity_provider_metadata.certificate_expiration_warning_days", 30)
 	v.SetDefault("keycloak.global.config_checker.checks.identity_provider_metadata.certificate_check_timeout", "30s")
+
+	// Identity Provider Secret Expiry Check defaults: on, but it does nothing
+	// until a secret is listed.
+	v.SetDefault("keycloak.global.config_checker.checks.identity_provider_secret_expiry.enabled", true)
+	v.SetDefault("keycloak.global.config_checker.checks.identity_provider_secret_expiry.warning_days", 30)
 
 	// Realm Security Check defaults
 	v.SetDefault("keycloak.global.config_checker.checks.realm_security.enabled", true)

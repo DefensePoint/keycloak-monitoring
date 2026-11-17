@@ -192,9 +192,34 @@ func buildConfigChecks(
 				ProductionEnvironment:   c.ClientSecurity.ProductionEnvironment,
 			}))
 		}
+		if c.IdentityProviderSecretExpiry.Enabled {
+			// Also for a tenant with no listed secret, so the alerts of
+			// entries since removed resolve.
+			checks = append(checks, configcheck.NewIdentityProviderSecretExpiryCheck(kc, log, t.TenantID,
+				c.IdentityProviderSecretExpiry.WarningDays, tenantSecretExpiries(c.IdentityProviderSecretExpiry.Secrets, t.TenantID)))
+		}
 	}
 	logInfo(log, "Configuration checks constructed",
 		logger.Int("tenants", len(tenants)),
 		logger.Int("checks", len(checks)))
 	return checks
+}
+
+// tenantSecretExpiries returns the listed identity provider secrets of one
+// tenant. The dates were validated when the configuration was loaded.
+func tenantSecretExpiries(listed []config.IdentityProviderSecret, tenantID string) []configcheck.IdentityProviderSecretExpiry {
+	var out []configcheck.IdentityProviderSecretExpiry
+	for _, s := range listed {
+		if s.Tenant != tenantID {
+			continue
+		}
+		expiresOn, err := s.ExpiryDate()
+		if err != nil {
+			continue
+		}
+		out = append(out, configcheck.IdentityProviderSecretExpiry{
+			Realm: s.Realm, IdentityProvider: s.IdentityProvider, ExpiresOn: expiresOn,
+		})
+	}
+	return out
 }

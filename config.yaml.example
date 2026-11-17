@@ -373,6 +373,36 @@ keycloak:
           # Valid time units: ns, us/µs, ms, s, m, h
           certificate_check_timeout: 30s
 
+        # Identity Provider Client Secret Expiry Check
+        # Warns before the client secret of an identity provider (OIDC, social)
+        # expires. Keycloak does not know when a secret expires: the provider
+        # that issued it does (Entra ID, Okta, ...), so list the dates here.
+        # Changing a date takes effect after a restart.
+        identity_provider_secret_expiry:
+          # Enable or disable this specific check. It does nothing until a
+          # secret is listed below.
+          enabled: true
+
+          # A warning alert is raised this many days before expiry. From the
+          # day after expires_on, a separate critical alert is raised and
+          # notified, and the warning is resolved without a notification.
+          warning_days: 30
+
+          # One entry per identity provider:
+          #   tenant:            KMT tenant ID, from config.yaml or the interface
+          #   realm:             Keycloak realm of the provider
+          #   identity_provider: the provider's alias in Keycloak
+          #   expires_on:        last day the secret is valid, YYYY-MM-DD (UTC)
+          # An entry whose realm or provider Keycloak does not have raises a
+          # warning, so a renamed provider is not silently left unwatched.
+          # Example:
+          # secrets:
+          #   - tenant: prod
+          #     realm: customers
+          #     identity_provider: entra
+          #     expires_on: 2027-03-31
+          secrets: []
+
         # Realm Security Configuration Check
         # Validates realm-level security configurations including SSL, password policies,
         # brute force protection, and audit logging

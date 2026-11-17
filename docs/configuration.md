@@ -376,6 +376,33 @@ keycloak:
           #   - "legacy-saml-idp"
 
         # ====================================================================
+        # IDENTITY PROVIDER CLIENT SECRET EXPIRY
+        # ====================================================================
+        # Keycloak does not know when an identity provider's client secret
+        # expires: the provider that issued it does (Entra ID, Okta, ...), so
+        # the dates are listed here. Changing one takes effect after a restart.
+        identity_provider_secret_expiry:
+          enabled: true           # does nothing until a secret is listed
+
+          # A warning alert is raised this many days before expiry. From the
+          # day after expires_on, a separate critical alert is raised and
+          # notified, and the warning is resolved without a notification.
+          warning_days: 30
+
+          # tenant is the KMT tenant ID (config.yaml or interface tenant),
+          # identity_provider the provider's alias in Keycloak, and expires_on
+          # the last day the secret is valid, as YYYY-MM-DD (UTC). An entry
+          # whose realm or provider Keycloak does not have raises a warning.
+          # A malformed or duplicate entry stops startup.
+          secrets: []
+          # Example:
+          # secrets:
+          #   - tenant: prod
+          #     realm: customers
+          #     identity_provider: entra
+          #     expires_on: 2027-03-31
+
+        # ====================================================================
         # REALM SECURITY CHECKS
         # ====================================================================
         realm_security:
