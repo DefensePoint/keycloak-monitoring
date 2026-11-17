@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The AMFA geolocation map and event details place a failed login that AMFA stored without a risk decision, such as a wrong password or an unknown user, by the location AMFA recorded for its address. This needs an AMFA engine that stores coordinates for every login (engine migration `5ae8978564f9`); with an older engine these failures stay off the map, and KMT works as before.
+
 ### Fixed
 
 - AMFA events show the IP address, country and VPN flag of a failed login that AMFA stored without a risk decision, such as a wrong password or an unknown user, and a failed login from a VPN address counts as a flagged IP. In API mode this needs an AMFA engine that includes the same fix. These failures have no coordinates, so they are still not on the geolocation map.
