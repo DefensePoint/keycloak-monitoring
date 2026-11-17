@@ -386,6 +386,8 @@ keycloak:
           # A warning alert is raised this many days before expiry. From the
           # day after expires_on, a separate critical alert is raised and
           # notified, and the warning is resolved without a notification.
+          # Each is sent once per channel, not repeated while it stays open
+          # (a failed send is retried hourly).
           warning_days: 30
 
           # One entry per identity provider:
