@@ -70,6 +70,10 @@ func (l *cwLister) ListEnabledTenants(context.Context) ([]*domain.KeycloakTenant
 	return l.tenants, nil
 }
 
+func (l *cwLister) ListTenants(ctx context.Context) ([]*domain.KeycloakTenant, error) {
+	return l.ListEnabledTenants(ctx)
+}
+
 type cwHarness struct {
 	workers *tenantCheckWorkers[*cwService]
 	mu      sync.Mutex

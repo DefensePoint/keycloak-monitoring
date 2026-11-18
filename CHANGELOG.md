@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The configuration and event checks start and stop with tenant changes: a tenant created or enabled in the interface is checked without a restart, and one disabled or deleted stops being checked at once. Disabling a tenant also resolves its open configuration and event alerts, with a resolution notice saying it is no longer monitored; nothing would ever have resolved them. A tenant already disabled when the server starts, such as one disabled before the upgrade, gets the same at startup. Deleting a tenant removes its alerts, as before.
+- Upgrade note: with `event_checker.enabled: true`, the event checks now cover every enabled tenant, including tenants created in the interface, which before had them only if they were in `config.yaml`. Those tenants can raise event alerts from the first run after the upgrade. There is no per-tenant switch: to keep one tenant quiet, add an alert silence with its `tenant_id`, narrowed with `alert_type` (such as `LOGIN_ERROR`) if needed.
+
 ## [2.0.2] - 2026-10-20
 
 ### Fixed

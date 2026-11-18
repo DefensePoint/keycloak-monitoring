@@ -101,8 +101,14 @@ polling worker` line shows it, the setting did not apply.
   true, and configuration-check alerts only when
   `keycloak.global.config_checker.enabled` is true (both are off by default).
   They cover every enabled tenant, including one added in the interface after
-  the deploy, which gets them as soon as it is saved. An alert about newly
-  collected events can take one more cycle.
+  the deploy, which gets its checks as soon as it is saved. Its first
+  configuration run usually comes before its monitor has connected, finds no
+  Keycloak client and logs errors; the first real configuration check is one
+  `config_checker.poll_interval` later. An alert about newly collected events
+  can take one more cycle. Disabling a tenant stops its checks and resolves its
+  open configuration and event alerts, with a resolution notice saying it is
+  no longer monitored; a tenant already disabled when the new version starts
+  gets the same at startup. Deleting a tenant removes its alerts.
 - These times apply to tenants on the global settings. If
   `keycloak.global.realms` lists realms, only those are polled, and a realm
   created later never appears. A tenant given its own `configuration` through

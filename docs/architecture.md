@@ -399,7 +399,7 @@ The API is implemented in `internal/http/chi/` with handlers for each domain. Fu
 
 **Components**:
 
-- **Service**: Main configuration checker service with background worker, one per enabled tenant. The services follow tenant changes (`internal/fx/tenant_check_workers.go`), so creating, enabling, disabling or deleting a tenant starts or stops its checks without a restart.
+- **Service**: Main configuration checker service with background worker, one per enabled tenant. The services follow tenant changes (`internal/fx/tenant_check_workers.go`), so creating, enabling, disabling or deleting a tenant starts or stops its checks without a restart. Disabling a tenant also resolves its open alerts from those checks once they have stopped, and so does startup for every tenant already disabled, with a resolution notice saying it is no longer monitored, as the monitor pool does for health alerts.
 - **Realm Security Checker**: Validates realm security settings
   - SSL requirements
   - Brute force protection

@@ -2,7 +2,9 @@ package fx
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"time"
 
 	"go.uber.org/fx"
 
@@ -12,12 +14,34 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
 )
 
+// checkAlertStore is the alert store as the workers need it to resolve a
+// tenant's alerts. The configuration and event checkers' stores both have it.
+type checkAlertStore interface {
+	ListOpenAlertsByCheck(ctx context.Context, tenantID, checkType string) ([]*domain.Alert, error)
+	ResolveAlert(ctx context.Context, tenantID, alertID string) error
+}
+
+// checkTypes returns the check types of checks, in order, for alertTypes.
+func checkTypes[C interface{ GetCheckType() string }](checks []C) []string {
+	out := make([]string, 0, len(checks))
+	for _, c := range checks {
+		out = append(out, c.GetCheckType())
+	}
+	return out
+}
+
+// resolutionNotifier sends an alert's resolution notice.
+type resolutionNotifier interface {
+	NotifyAlertResolution(ctx context.Context, alert *domain.Alert) error
+}
+
 // tenantSource is the tenant service as the workers need it at startup.
 // It holds config.yaml and interface tenants alike: config.yaml tenants are
 // synced into the database at startup.
 type tenantSource interface {
 	LoadTenants(ctx context.Context) error
 	ListEnabledTenants(ctx context.Context) ([]*domain.KeycloakTenant, error)
+	ListTenants(ctx context.Context) ([]*domain.KeycloakTenant, error)
 }
 
 // tenantCheckWorkers runs one check service per enabled tenant (the
@@ -45,6 +69,16 @@ type tenantCheckWorkers[S lifecycle.Poller] struct {
 	loadTenants bool
 	log         *logger.Logger
 
+	// alertTypes are the check types of the alerts this worker's checks raise.
+	// When a tenant is disabled, its open alerts of these types are resolved
+	// once its checks have stopped, with a resolution notice, as the monitors
+	// do for health alerts: nothing would ever resolve them otherwise. A
+	// deleted tenant gets the same, though deleting a tenant normally removes
+	// its alerts before the change reaches the workers, leaving none open.
+	alertTypes  []string
+	alertStore  checkAlertStore
+	resolutions resolutionNotifier
+
 	mu sync.Mutex
 	// running holds the tenants that have a service.
 	running map[string]bool
@@ -55,6 +89,10 @@ type tenantCheckWorkers[S lifecycle.Poller] struct {
 	changed map[string]bool
 	// stopped is set by stop; later changes start nothing.
 	stopped bool
+	// sweep resolves, in the background after start, the open alerts of the
+	// tenants that were already disabled; stop cancels and waits for it.
+	sweepCancel context.CancelFunc
+	sweep       sync.WaitGroup
 
 	pool lifecycle.Pool[S]
 }
@@ -90,7 +128,47 @@ func (w *tenantCheckWorkers[S]) start(ctx context.Context, tenants tenantSource)
 	logInfo(w.log, w.component+" services constructed", logger.Int("tenants", len(w.running)))
 	w.mu.Unlock()
 
-	return w.pool.Start()
+	if err := w.pool.Start(); err != nil {
+		return err
+	}
+	w.sweepDisabled(tenants)
+	return nil
+}
+
+// sweepDisabled resolves, in the background, the open alerts of every tenant
+// that is disabled when the server starts. A tenant disabled before an
+// upgrade, or while the server was down, was never announced as disabled to
+// this version, and its alerts would stay open. A tenant enabled meanwhile is
+// left alone.
+func (w *tenantCheckWorkers[S]) sweepDisabled(tenants tenantSource) {
+	if w.alertStore == nil || len(w.alertTypes) == 0 {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	w.mu.Lock()
+	w.sweepCancel = cancel
+	w.mu.Unlock()
+	w.sweep.Add(1)
+	go func() {
+		defer w.sweep.Done()
+		defer cancel()
+		all, err := tenants.ListTenants(ctx)
+		if err != nil {
+			logWarn(w.log, w.component+": could not list the tenants to resolve the alerts of disabled ones",
+				logger.Err(err))
+			return
+		}
+		for _, t := range all {
+			if t == nil || t.Enabled || ctx.Err() != nil {
+				continue
+			}
+			w.mu.Lock()
+			if !w.running[t.TenantID] && !w.stopped {
+				w.resolveAlerts(ctx, t, "disabled")
+			}
+			w.mu.Unlock()
+		}
+	}()
 }
 
 // stop stops every service; a change that arrives afterwards starts nothing.
@@ -98,7 +176,12 @@ func (w *tenantCheckWorkers[S]) stop() error {
 	w.mu.Lock()
 	w.stopped = true
 	w.running = nil
+	cancel := w.sweepCancel
 	w.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	w.sweep.Wait()
 	return w.pool.Stop()
 }
 
@@ -115,6 +198,19 @@ func (w *tenantCheckWorkers[S]) tenantChanged(event tenant.Event, t *domain.Keyc
 	if t == nil {
 		return
 	}
+	// Resolved after the lock is released, and after removeLocked has
+	// drained the tenant's service, so no run still going reopens an alert.
+	if how := w.apply(event, t); how != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), resolveAlertsTimeout)
+		defer cancel()
+		w.resolveAlerts(ctx, t, how)
+	}
+}
+
+// apply starts or stops the tenant's service for one change. It reports why
+// the tenant is no longer checked ("disabled" or "removed"), or "" if it
+// still is.
+func (w *tenantCheckWorkers[S]) apply(event tenant.Event, t *domain.KeycloakTenant) string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if !w.loaded {
@@ -125,14 +221,67 @@ func (w *tenantCheckWorkers[S]) tenantChanged(event tenant.Event, t *domain.Keyc
 	}
 
 	switch event {
-	case tenant.EventRemoved, tenant.EventDisabled:
+	case tenant.EventRemoved:
 		w.removeLocked(t.TenantID)
+		return "removed"
+	case tenant.EventDisabled:
+		w.removeLocked(t.TenantID)
+		return "disabled"
 	case tenant.EventAdded, tenant.EventEnabled, tenant.EventUpdated:
 		if t.Enabled {
 			w.putLocked(t.TenantID)
-		} else {
-			w.removeLocked(t.TenantID)
+			return ""
 		}
+		w.removeLocked(t.TenantID)
+		return "disabled"
+	}
+	return ""
+}
+
+// resolveAlertsTimeout bounds closing one tenant's alerts, which runs on the
+// tenant change callback.
+const resolveAlertsTimeout = 30 * time.Second
+
+// resolveAlerts resolves the tenant's open alerts of the worker's check types
+// and sends each one's resolution notice, with a note that this is not a
+// recovery. Re-enabled, the tenant starts afresh: a condition still there
+// opens a new occurrence.
+func (w *tenantCheckWorkers[S]) resolveAlerts(ctx context.Context, t *domain.KeycloakTenant, how string) {
+	if w.alertStore == nil || len(w.alertTypes) == 0 {
+		return
+	}
+	note := fmt.Sprintf("Tenant %s: it is no longer monitored, so this alert was closed without a recovery.", how)
+	resolved := 0
+	for _, checkType := range w.alertTypes {
+		open, err := w.alertStore.ListOpenAlertsByCheck(ctx, t.TenantID, checkType)
+		if err != nil {
+			logWarn(w.log, w.component+": could not list the alerts of a tenant no longer monitored",
+				logger.Str("tenant_id", t.TenantID), logger.Str("check_type", checkType), logger.Err(err))
+			continue
+		}
+		for _, alert := range open {
+			if err := w.alertStore.ResolveAlert(ctx, t.TenantID, alert.AlertID); err != nil {
+				logWarn(w.log, w.component+": could not resolve an alert of a tenant no longer monitored",
+					logger.Str("tenant_id", t.TenantID), logger.Str("alert_id", alert.AlertID), logger.Err(err))
+				continue
+			}
+			resolved++
+			if w.resolutions == nil {
+				continue
+			}
+			now := time.Now()
+			alert.Status = domain.AlertStatusResolved
+			alert.ResolvedAt = &now
+			alert.ResolutionNote = note
+			if err := w.resolutions.NotifyAlertResolution(ctx, alert); err != nil {
+				logWarn(w.log, w.component+": could not send the resolution of an alert of a tenant no longer monitored",
+					logger.Str("tenant_id", t.TenantID), logger.Str("alert_id", alert.AlertID), logger.Err(err))
+			}
+		}
+	}
+	if resolved > 0 {
+		logInfo(w.log, w.component+": resolved the open alerts of a tenant no longer monitored",
+			logger.Str("tenant_id", t.TenantID), logger.Str("reason", how), logger.Int("alerts", resolved))
 	}
 }
 
