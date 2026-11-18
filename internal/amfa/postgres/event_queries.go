@@ -58,7 +58,8 @@ func (s eventRowScan) toEventRow() amfa.EventRow {
 // It is identical to the projection in ListEvents, including the COALESCE
 // fallback from the (unpopulated) auth_context table to auth_context_json for
 // client/IP/country/geo/VPN. See ListEvents for why the fallback is required.
-const eventRowSelect = `
+func eventRowSelect(c coordinates) string {
+	return `
         SELECT
             e.id              AS event_id,
             e.event_time      AS event_time,
@@ -68,8 +69,8 @@ const eventRowSelect = `
             ` + exprIP + `  AS ip_address,
             ` + exprCountry + `  AS country,
             ` + exprCity + `  AS city,
-            ` + exprLat + `  AS lat,
-            ` + exprLong + `  AS long,
+            ` + c.lat + `  AS lat,
+            ` + c.long + `  AS long,
             ` + exprIsVPN + `  AS is_vpn,
             p.pre_auth_risk_decision   AS risk_level,
             p.final_status    AS final_status,
@@ -83,6 +84,7 @@ const eventRowSelect = `
         LEFT JOIN auth_context ac  ON ac.hash = e.auth_context_hash
         ` + joinNetworkLocation + `
         WHERE ` + realmFilterExpr
+}
 
 // ListRejectedEventsSince returns risk-rejected (pre_auth_risk_decision = 4)
 // events newer than `since` for the realm, oldest first.
@@ -90,7 +92,9 @@ func (r *Repository) ListRejectedEventsSince(ctx context.Context, realm string, 
 	if realm == "" {
 		return nil, fmt.Errorf("amfa.ListRejectedEventsSince: realm is required")
 	}
-	sql := eventRowSelect + `
+	// Only a scored login has a risk decision, and location_network is joined
+	// only for a login without one, so its coordinates are never needed here.
+	sql := eventRowSelect(coordinatesFor(false)) + `
           AND p.pre_auth_risk_decision = 4
           AND e.event_time > ?
         ORDER BY e.event_time ASC`
@@ -115,7 +119,9 @@ func (r *Repository) ListVPNRiskyEventsSince(ctx context.Context, realm string, 
 	// The VPN flag must come through the auth_context_json fallback
 	// (context_expr.go). Filtering on ac.is_vpn alone matched nothing, so the
 	// vpn_risky alert rule could never fire against real AMFA data.
-	sql := eventRowSelect + `
+	// Scored logins only, as in ListRejectedEventsSince: no coordinates from
+	// location_network.
+	sql := eventRowSelect(coordinatesFor(false)) + `
           AND (` + exprIsVPN + `) = true
           AND p.pre_auth_risk_decision >= ?
           AND e.event_time > ?
@@ -143,13 +149,15 @@ func (r *Repository) ListEventsSince(ctx context.Context, realm string, since ti
 	if limit <= 0 {
 		limit = 500
 	}
-	sql := eventRowSelect + `
+	var rows []eventRowScan
+	err := r.withCoordinates(ctx, func(c coordinates) error {
+		sql := eventRowSelect(c) + `
           AND e.event_time > ?
         ORDER BY e.event_time ASC
         LIMIT ?`
-
-	var rows []eventRowScan
-	if err := r.db.WithContext(ctx).Raw(sql, realm, realm, since, limit).Scan(&rows).Error; err != nil {
+		return r.db.WithContext(ctx).Raw(sql, realm, realm, since, limit).Scan(&rows).Error
+	})
+	if err != nil {
 		return nil, classifyDBError(err, "amfa list events since")
 	}
 	out := make([]amfa.EventRow, 0, len(rows))

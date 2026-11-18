@@ -49,8 +49,8 @@ type service struct {
 
 	// runMu makes runs take turns. A manual run can overlap the poll loop, and
 	// two runs that each see an alert as new, or each see it cleared, would
-	// each announce it.
-	runMu sync.Mutex
+	// each announce it. It is the service's own unless WithRunLock shares one.
+	runMu *sync.Mutex
 	// workers tracks every goroutine Start launches, including the
 	// immediate first run, so Stop drains all of them.
 	workers lifecycle.Workers
@@ -74,6 +74,7 @@ func NewService(
 		logger:       log.WithComponent("amfa_checker"),
 		pollInterval: pollInterval,
 		resolveAfter: clearing.DefaultResolveAfter,
+		runMu:        &sync.Mutex{},
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -92,6 +93,19 @@ type Option func(*service)
 // open, unannounced, and resolves only once the condition really clears.
 func WithSilencer(silencer Silencer) Option {
 	return func(s *service) { s.silencer = silencer }
+}
+
+// WithRunLock makes the service's runs take turns with those of every other
+// service given the same lock. A tenant whose checker is replaced (a saved
+// tenant) shares one lock across its checkers, so a manual run still going on
+// the old checker and the new checker's first run cannot both announce an
+// alert. A nil lock keeps the service's own.
+func WithRunLock(mu *sync.Mutex) Option {
+	return func(s *service) {
+		if mu != nil {
+			s.runMu = mu
+		}
+	}
 }
 
 // WithResolveAfter sets how long a condition must go undetected before its
