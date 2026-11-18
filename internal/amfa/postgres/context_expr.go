@@ -13,15 +13,30 @@ package postgres
 // that KPI silently returned nothing no matter how much real traffic AMFA had
 // recorded.
 //
+// IP, country and VPN flag have one more source, location_network, read
+// last. A LOGIN_ERROR that AMFA stored without a risk decision (a wrong
+// password or an unknown user, which fail before AMFA's step runs) has no
+// auth_process and so no snapshot, but the engine still wrote its address,
+// country and VPN flag there. Reading only the first two sources showed such a
+// failure with no IP, no country and no VPN flag. location_network has no
+// coordinates, so these failures still cannot go on the map. The engine
+// stores a country it could not resolve as the text "None".
+//
 // Every query using them must join auth_event e -> auth_process p and
-// LEFT JOIN auth_context ac ON ac.hash = e.auth_context_hash.
+// LEFT JOIN auth_context ac ON ac.hash = e.auth_context_hash. A query using
+// exprIP, exprCountry or exprIsVPN must also add joinNetworkLocation.
 const (
 	exprClient  = `COALESCE(ac.client, p.auth_context_json->>'client', '')`
-	exprIP      = `COALESCE(ac.ip_address, p.auth_context_json->>'ip_address', '')`
-	exprCountry = `COALESCE(NULLIF(ac.country_name, ''), NULLIF(p.auth_context_json->>'country_name', ''))`
+	exprIP      = `COALESCE(ac.ip_address, NULLIF(p.auth_context_json->>'ip_address', ''), NULLIF(nl.ip_address, ''), '')`
+	exprCountry = `COALESCE(NULLIF(ac.country_name, ''), NULLIF(p.auth_context_json->>'country_name', ''), NULLIF(NULLIF(nl.country, ''), 'None'))`
 	exprLat     = `COALESCE(ac.lat, (p.auth_context_json->>'lat')::float8)`
 	exprLong    = `COALESCE(ac.long, (p.auth_context_json->>'long')::float8)`
-	exprIsVPN   = `COALESCE(ac.is_vpn, (p.auth_context_json->>'is_vpn')::boolean, false)`
+	exprIsVPN   = `COALESCE(ac.is_vpn, (p.auth_context_json->>'is_vpn')::boolean, nl.is_vpn_flag <> 0, false)`
+
+	// Joined only for an event with no auth_process: a scored event has its
+	// snapshot, which every expression reads first, and joining every row cost
+	// the stats query 70% to 140% more time on 300,000 events.
+	joinNetworkLocation = `LEFT JOIN location_network nl ON p.id IS NULL AND nl.hash = e.network_location_hash`
 
 	// Additional device/agent context. auth_context has no city column, so
 	// city has no table-first fallback to apply; the other four read the

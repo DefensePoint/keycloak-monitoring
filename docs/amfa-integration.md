@@ -148,7 +148,7 @@ AMFA has no page of its own. It appears on the Events page (`/{tenantId}/events`
 
 1. AMFA logins are listed in the events table with source `amfa:<realm>`, but only when the mirror is on (`keycloak.global.amfa_mirror.enabled: true`, off by default). Its first run logs `amfamirror: mirrored events` with a count per realm. On a tenant created or edited in the interface, the AMFA toggle starts and stops the tenant's mirror straight away, as it does the AMFA alert checker: see [Tenants created in the interface](#tenants-created-in-the-interface).
 2. The AMFA KPI cards and the Risk column appear only for realms where any top-level authentication flow contains an enabled AMFA authenticator, bound or not, and with "All Realms" when any realm of the tenant does. The geo map needs one such realm selected. KMT reads the flows to decide this (`GET /api/tenants/{tenantId}/keycloak/amfa-realms`), so a realm without such a flow shows the table only, even if AMFA has events for it.
-3. Map markers come from each login's coordinates: `auth_context.lat/long`, or the `auth_process.auth_context_json` snapshot that the engine writes.
+3. Map markers come from each login's coordinates: `auth_context.lat/long`, or the `auth_process.auth_context_json` snapshot that the engine writes. Only a login AMFA scored has coordinates. A failed login AMFA stored without a risk decision, such as a wrong password or an unknown user, shows its IP address, country and VPN flag from `location_network`, but is not on the map.
 
 ## Troubleshooting
 
