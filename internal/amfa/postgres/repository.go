@@ -54,7 +54,8 @@ var _ amfa.Repository = (*Repository)(nil)
 //
 // Client/IP/country/geo/VPN are read with a COALESCE fallback: the auth_context
 // table first (its intended source, which adaptive-auth never populates), then
-// auth_process.auth_context_json (what works currently). See context_expr.go.
+// auth_process.auth_context_json (what works currently), and for IP, country
+// and VPN, location_network last. See context_expr.go.
 func (r *Repository) ListEvents(ctx context.Context, opts amfa.ListEventsOptions) (*amfa.ListEventsResult, error) {
 	if opts.RealmID == "" {
 		return nil, fmt.Errorf("amfa.ListEvents: realm_id is required")
@@ -162,6 +163,7 @@ func (r *Repository) GetStats(ctx context.Context, opts amfa.StatsOptions) (amfa
         FROM auth_event e
         LEFT JOIN auth_process p   ON p.id   = e.auth_process
         LEFT JOIN auth_context ac  ON ac.hash = e.auth_context_hash
+        ` + joinNetworkLocation + `
         WHERE e.event_time BETWEEN ? AND ?
           ` + realmClause
 
@@ -204,6 +206,7 @@ func (r *Repository) GetGeoBuckets(ctx context.Context, opts amfa.GeoOptions) ([
         FROM auth_event e
         LEFT JOIN auth_process p   ON p.id   = e.auth_process
         LEFT JOIN auth_context ac  ON ac.hash = e.auth_context_hash
+        ` + joinNetworkLocation + `
         WHERE ` + realmFilterExpr + `
           AND e.event_time BETWEEN ? AND ?
           AND ` + exprHasGeo + `

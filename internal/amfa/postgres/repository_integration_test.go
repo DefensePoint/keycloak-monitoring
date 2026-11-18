@@ -771,3 +771,122 @@ func TestRepository_NewQueries_SmokeAgainstRealDB(t *testing.T) {
 		t.Errorf("CountByEventTypeByUser: %v", err)
 	}
 }
+
+// TestRepository_FailedLoginReadsItsNetworkLocation covers a LOGIN_ERROR that
+// AMFA stored without a risk decision: a wrong password or an unknown user,
+// which fail before AMFA's step runs. The event has no auth_process, so
+// neither auth_context nor the JSON snapshot has anything for it, but the
+// engine still wrote its IP, country and VPN flag to location_network.
+// Before that table was read, such a failure showed no IP, no country and no
+// VPN flag, and a failed login from a VPN never counted as a flagged IP.
+//
+// A second failure from an address the engine could not locate has the
+// country stored as the text "None" (the engine stringifies a missing
+// value), which must read as no country rather than a country called None.
+func TestRepository_FailedLoginReadsItsNetworkLocation(t *testing.T) {
+	db := openAmfaTestDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	const (
+		realm       = "tdd-failed-login-location-realm"
+		eventID     = "dddddddd-0000-0000-0000-000000000001"
+		unlocatedID = "dddddddd-0000-0000-0000-000000000002"
+		netHash     = "tdd-failed-login-location-network-hash"
+		unlocated   = "tdd-failed-login-unlocated-network-hash"
+	)
+	eventTime := time.Now().UTC()
+
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM auth_event WHERE id IN (?, ?)`, eventID, unlocatedID)
+		db.Exec(`DELETE FROM location_network WHERE hash IN (?, ?)`, netHash, unlocated)
+	})
+
+	for _, seed := range []struct {
+		hash, ip, country string
+		vpn               int
+	}{
+		{netHash, "198.51.100.77", "NL", 1},
+		{unlocated, "10.0.0.9", "None", 0},
+	} {
+		if err := db.Exec(`
+			INSERT INTO location_network (hash, geolocation_cluster_label, country, is_vpn_flag, ip_address)
+			VALUES (?, 0, ?, ?, ?)`,
+			seed.hash, seed.country, seed.vpn, seed.ip,
+		).Error; err != nil {
+			t.Fatalf("seed location_network: %v", err)
+		}
+	}
+	for _, seed := range []struct{ id, hash string }{{eventID, netHash}, {unlocatedID, unlocated}} {
+		if err := db.Exec(`
+			INSERT INTO auth_event (id, event_type, event_time, realm_id, network_location_hash)
+			VALUES (?, ?, ?, ?, ?)`,
+			seed.id, "LOGIN_ERROR", eventTime, realm, seed.hash,
+		).Error; err != nil {
+			t.Fatalf("seed auth_event: %v", err)
+		}
+	}
+
+	res, err := repo.ListEvents(ctx, amfa.ListEventsOptions{RealmID: realm, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	byID := map[string]amfa.EventRow{}
+	for _, item := range res.Items {
+		byID[item.EventID] = item
+	}
+
+	got, ok := byID[eventID]
+	if !ok {
+		t.Fatalf("failed login %s not returned (total=%d)", eventID, res.Total)
+	}
+	if got.IPAddress != "198.51.100.77" {
+		t.Errorf("IPAddress = %q, want %q (from location_network)", got.IPAddress, "198.51.100.77")
+	}
+	if got.Country == nil || *got.Country != "NL" {
+		t.Errorf("Country = %v, want %q (from location_network)", got.Country, "NL")
+	}
+	if !got.IsVPN {
+		t.Errorf("IsVPN = false, want true (from location_network)")
+	}
+	if got.Lat != nil || got.Long != nil {
+		t.Errorf("Lat/Long = %v/%v, want none: location_network has no coordinates", got.Lat, got.Long)
+	}
+
+	other, ok := byID[unlocatedID]
+	if !ok {
+		t.Fatalf("unlocated failed login %s not returned (total=%d)", unlocatedID, res.Total)
+	}
+	if other.IPAddress != "10.0.0.9" {
+		t.Errorf("unlocated IPAddress = %q, want %q", other.IPAddress, "10.0.0.9")
+	}
+	if other.Country != nil {
+		t.Errorf("unlocated Country = %q, want none (stored as the text None)", *other.Country)
+	}
+	if other.IsVPN {
+		t.Errorf("unlocated IsVPN = true, want false")
+	}
+
+	since, err := repo.ListEventsSince(ctx, realm, eventTime.Add(-time.Minute), 10)
+	if err != nil {
+		t.Fatalf("ListEventsSince: %v", err)
+	}
+	mirrored := false
+	for _, item := range since {
+		if item.EventID == eventID {
+			mirrored = item.IPAddress == "198.51.100.77" && item.Country != nil && *item.Country == "NL" && item.IsVPN
+		}
+	}
+	if !mirrored {
+		t.Errorf("ListEventsSince did not carry the failed login's IP, country and VPN flag: %+v", since)
+	}
+
+	start, end := eventTime.Add(-time.Minute), eventTime.Add(time.Minute)
+	stats, err := repo.GetStats(ctx, amfa.StatsOptions{RealmID: realm, StartTime: &start, EndTime: &end})
+	if err != nil {
+		t.Fatalf("GetStats: %v", err)
+	}
+	if stats.FlaggedIPs != 1 {
+		t.Errorf("FlaggedIPs = %d, want 1 (the failed login's VPN address)", stats.FlaggedIPs)
+	}
+}

@@ -81,6 +81,7 @@ const eventRowSelect = `
         FROM auth_event e
         LEFT JOIN auth_process p   ON p.id   = e.auth_process
         LEFT JOIN auth_context ac  ON ac.hash = e.auth_context_hash
+        ` + joinNetworkLocation + `
         WHERE ` + realmFilterExpr
 
 // ListRejectedEventsSince returns risk-rejected (pre_auth_risk_decision = 4)
