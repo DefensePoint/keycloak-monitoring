@@ -55,3 +55,46 @@ func TestRunner_Services(t *testing.T) {
 		t.Errorf("Services() len = %d, want 2", len(r.Services()))
 	}
 }
+
+func TestRunner_SetAndRemoveFollowTenantChanges(t *testing.T) {
+	r := NewRunner(nil)
+	old, replacement := &runnerFakeService{}, &runnerFakeService{}
+
+	r.Set("t1", old)
+	if !r.Enabled("t1") {
+		t.Fatal("expected t1 enabled after Set")
+	}
+	r.Set("t1", replacement)
+	if err := r.RunNow(context.Background(), "t1"); err != nil {
+		t.Fatalf("RunNow: %v", err)
+	}
+	if old.calls != 0 || replacement.calls != 1 {
+		t.Errorf("calls old=%d replacement=%d, want 0 and 1", old.calls, replacement.calls)
+	}
+
+	r.Remove("t1")
+	if r.Enabled("t1") {
+		t.Error("expected t1 not enabled after Remove")
+	}
+	if err := r.RunNow(context.Background(), "t1"); !errors.Is(err, ErrCheckerNotEnabled) {
+		t.Errorf("RunNow after Remove = %v, want ErrCheckerNotEnabled", err)
+	}
+}
+
+// The HTTP handlers read the Runner while tenant changes update it.
+func TestRunner_ConcurrentSetAndLookup(t *testing.T) {
+	r := NewRunner(nil)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 1000; i++ {
+			r.Set("t1", &runnerFakeService{})
+			r.Remove("t1")
+		}
+	}()
+	for i := 0; i < 1000; i++ {
+		_ = r.Enabled("t1")
+		_ = r.Services()
+	}
+	<-done
+}

@@ -1,7 +1,6 @@
 package fx
 
 import (
-	"context"
 	"time"
 
 	"go.uber.org/fx"
@@ -15,19 +14,14 @@ import (
 )
 
 // AmfaMirrorModule wires the AMFA events mirror: one per-tenant
-// amfamirror.Service for every tenant that has amfa.enabled=true AND
+// amfamirror.Service for every tenant that has AMFA enabled, when
 // keycloak.global.amfa_mirror.enabled=true. Each service owns one goroutine,
-// started/stopped via fx lifecycle hooks — same shape as AmfaCheckModule.
+// started/stopped via fx lifecycle hooks, and follows tenant changes made
+// through the API, the same shape as AmfaCheckModule.
 var AmfaMirrorModule = fx.Module("amfamirror",
 	fx.Provide(provideAmfaMirrorServices),
 	fx.Invoke(startAmfaMirrorServices),
 )
-
-// amfaMirrorServices is a named holder so fx can distinguish the map from
-// other providers.
-type amfaMirrorServices struct {
-	services map[string]amfamirror.Service
-}
 
 // amfamirrorLoggerAdapter adapts *logger.Logger to amfamirror.Logger.
 type amfamirrorLoggerAdapter struct{ log *logger.Logger }
@@ -81,13 +75,38 @@ type AmfaMirrorParams struct {
 	Logger     *logger.Logger
 }
 
-func provideAmfaMirrorServices(p AmfaMirrorParams) *amfaMirrorServices {
-	return &amfaMirrorServices{
-		services: buildAmfaMirrorServices(p.Config, p.Registry, p.Events, p.Enrichment, p.Keycloak, p.Logger),
-	}
+func provideAmfaMirrorServices(p AmfaMirrorParams) *amfaTenantWorkers[amfamirror.Service] {
+	return newAmfaMirrorWorkers(p.Config, p.Registry, p.Events, p.Enrichment, p.Keycloak, p.Logger)
 }
 
-// buildAmfaMirrorServices is the unit-testable core. log may be nil in tests.
+// newAmfaMirrorWorkers is the unit-testable core of provideAmfaMirrorServices.
+// It builds the config.yaml tenants' mirrors and, when the mirror is globally
+// enabled, follows the registry for database tenants. log may be nil in tests.
+func newAmfaMirrorWorkers(
+	cfg *config.AppConfig,
+	registry *amfa.Registry,
+	eventStore amfamirror.EventStore,
+	enricher amfamirror.Enricher,
+	realms realmLister,
+	log *logger.Logger,
+) *amfaTenantWorkers[amfamirror.Service] {
+	workers := &amfaTenantWorkers[amfamirror.Service]{
+		component:     "amfamirror",
+		configTenants: cfg.Keycloak.Tenants,
+		log:           log,
+	}
+	for tenantID, svc := range buildAmfaMirrorServices(cfg, registry, eventStore, enricher, realms, log) {
+		workers.put(tenantID, svc)
+	}
+	if cfg.Keycloak.Global.AmfaMirror.Enabled {
+		workers.build = amfaMirrorBuilder(cfg, eventStore, enricher, realms, log)
+		workers.follow(registry)
+	}
+	return workers
+}
+
+// buildAmfaMirrorServices builds the config.yaml tenants' mirrors. log may be
+// nil in tests.
 func buildAmfaMirrorServices(
 	cfg *config.AppConfig,
 	registry *amfa.Registry,
@@ -96,24 +115,17 @@ func buildAmfaMirrorServices(
 	realms realmLister,
 	log *logger.Logger,
 ) map[string]amfamirror.Service {
-	mirrorCfg := cfg.Keycloak.Global.AmfaMirror
-	if !mirrorCfg.Enabled {
+	if !cfg.Keycloak.Global.AmfaMirror.Enabled {
 		logInfo(log, "AMFA mirror globally disabled; no mirror services constructed")
 		return nil
 	}
-	mirrorCfg.ApplyDefaults()
-
-	adaptedLog := amfamirror.Logger(noopAmfamirrorLogger{})
-	if log != nil {
-		adaptedLog = &amfamirrorLoggerAdapter{log: log}
-	}
+	build := amfaMirrorBuilder(cfg, eventStore, enricher, realms, log)
 
 	services := make(map[string]amfamirror.Service)
 	for tenantID, tcfg := range cfg.Keycloak.Tenants {
 		if tcfg.Amfa == nil || !tcfg.Amfa.Enabled {
 			continue
 		}
-		tenantID := tenantID // capture
 
 		repo, err := registry.RepositoryFor(tenantID)
 		if err != nil {
@@ -121,51 +133,44 @@ func buildAmfaMirrorServices(
 				logger.Str("tenant_id", tenantID), logger.Err(err))
 			continue
 		}
-
-		realmsFn := func(ctx context.Context) ([]string, error) {
-			rows, lerr := realms.ListRealms(ctx, tenantID)
-			if lerr != nil {
-				return nil, lerr
-			}
-			out := make([]string, 0, len(rows))
-			for _, r := range rows {
-				out = append(out, r.RealmName)
-			}
-			return out, nil
-		}
-
-		backfill := time.Duration(mirrorCfg.BackfillDays) * 24 * time.Hour
-		services[tenantID] = amfamirror.NewService(
-			tenantID, realmsFn, repo, eventStore, enricher,
-			adaptedLog, mirrorCfg.PollInterval, backfill)
-		logInfo(log, "amfamirror service constructed",
-			logger.Str("tenant_id", tenantID),
-			logger.Str("poll_interval", mirrorCfg.PollInterval.String()),
-			logger.Int("backfill_days", mirrorCfg.BackfillDays))
+		services[tenantID] = build(tenantID, repo)
 	}
 	logInfo(log, "AMFA mirror services constructed", logger.Int("count", len(services)))
 	return services
 }
 
-func startAmfaMirrorServices(lc fx.Lifecycle, holder *amfaMirrorServices, log *logger.Logger) {
-	for _, s := range holder.services {
-		s := s
-		// Long-lived context, not fx's OnStart context (which is cancelled once
-		// startup completes) — same rationale as startAmfaCheckServices.
-		var cancel context.CancelFunc
-		lc.Append(fx.Hook{
-			OnStart: func(context.Context) error {
-				var runCtx context.Context
-				runCtx, cancel = context.WithCancel(context.Background())
-				return s.Start(runCtx)
-			},
-			OnStop: func(context.Context) error {
-				if cancel != nil {
-					cancel()
-				}
-				return s.Stop()
-			},
-		})
+// amfaMirrorBuilder returns the function that builds one tenant's mirror from
+// its AMFA repository.
+func amfaMirrorBuilder(
+	cfg *config.AppConfig,
+	eventStore amfamirror.EventStore,
+	enricher amfamirror.Enricher,
+	realms realmLister,
+	log *logger.Logger,
+) func(tenantID string, repo amfa.Repository) amfamirror.Service {
+	mirrorCfg := cfg.Keycloak.Global.AmfaMirror
+	mirrorCfg.ApplyDefaults()
+
+	adaptedLog := amfamirror.Logger(noopAmfamirrorLogger{})
+	if log != nil {
+		adaptedLog = &amfamirrorLoggerAdapter{log: log}
 	}
-	logInfo(log, "amfamirror lifecycle hooks registered", logger.Int("service_count", len(holder.services)))
+	backfill := time.Duration(mirrorCfg.BackfillDays) * 24 * time.Hour
+
+	return func(tenantID string, repo amfa.Repository) amfamirror.Service {
+		logInfo(log, "amfamirror service constructed",
+			logger.Str("tenant_id", tenantID),
+			logger.Str("poll_interval", mirrorCfg.PollInterval.String()),
+			logger.Int("backfill_days", mirrorCfg.BackfillDays))
+		return amfamirror.NewService(
+			tenantID, tenantRealmsFunc(realms, tenantID), repo, eventStore, enricher,
+			adaptedLog, mirrorCfg.PollInterval, backfill)
+	}
+}
+
+// startAmfaMirrorServices starts the mirrors with the app and stops them with
+// it, on their own long-lived contexts, as startAmfaCheckServices does.
+func startAmfaMirrorServices(lc fx.Lifecycle, workers *amfaTenantWorkers[amfamirror.Service], log *logger.Logger) {
+	workers.hook(lc)
+	logInfo(log, "amfamirror lifecycle hooks registered", logger.Int("service_count", workers.pool.Len()))
 }

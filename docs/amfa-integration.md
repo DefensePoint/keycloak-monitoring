@@ -146,7 +146,7 @@ AMFA module ready           enabled_tenant_count=1
 
 AMFA has no page of its own. It appears on the Events page (`/{tenantId}/events`):
 
-1. AMFA logins are listed in the events table with source `amfa:<realm>`, but only when the mirror is on (`keycloak.global.amfa_mirror.enabled: true`, off by default). Its first run logs `amfamirror: mirrored events` with a count per realm.
+1. AMFA logins are listed in the events table with source `amfa:<realm>`, but only when the mirror is on (`keycloak.global.amfa_mirror.enabled: true`, off by default). Its first run logs `amfamirror: mirrored events` with a count per realm. On a tenant created or edited in the interface, the AMFA toggle starts and stops the tenant's mirror straight away, as it does the AMFA alert checker: see [Tenants created in the interface](#tenants-created-in-the-interface).
 2. The AMFA KPI cards and the Risk column appear only for realms where any top-level authentication flow contains an enabled AMFA authenticator, bound or not, and with "All Realms" when any realm of the tenant does. The geo map needs one such realm selected. KMT reads the flows to decide this (`GET /api/tenants/{tenantId}/keycloak/amfa-realms`), so a realm without such a flow shows the table only, even if AMFA has events for it.
 3. Map markers come from each login's coordinates: `auth_context.lat/long`, or the `auth_process.auth_context_json` snapshot that the engine writes. Only a login AMFA scored has coordinates. A failed login AMFA stored without a risk decision, such as a wrong password or an unknown user, shows its IP address, country and VPN flag from `location_network`, but is not on the map.
 
@@ -379,9 +379,19 @@ AMFA checker globally disabled; no alert services constructed
 amfacheck lifecycle hooks registered service_count=0
 ```
 
+### Tenants created in the interface
+
+A tenant created or edited in the interface gets the whole AMFA integration from its AMFA toggle, as a `config.yaml` tenant does: the statistics and map, the mirror and the alert checker. No restart is needed:
+
+- Turning AMFA on, with an AMFA endpoint, starts the tenant's mirror and checker. The mirror backfills `backfill_days` the first time it reads a realm for that tenant.
+- Changing the AMFA endpoint, or any other setting of the tenant, restarts both with the new settings.
+- Turning AMFA off, disabling the tenant or deleting it stops both. Nothing more is written for it.
+
+The global switches stay the master on/off and are read at startup only: with `keycloak.global.amfa_checker.enabled` or `keycloak.global.amfa_mirror.enabled` off, no tenant runs that feature, whatever its toggle says. A started or stopped service logs `amfacheck service starting` or `amfamirror service starting`, and `Stopping amfacheck service` or `Stopping amfamirror service`, with the tenant ID.
+
 ### Manual smoke test
 
-1. Set `amfa_checker.enabled: true` for a tenant whose `amfa:` block is enabled, and restart KMT.
+1. Set `keycloak.global.amfa_checker.enabled: true` and restart KMT. Every tenant whose AMFA is enabled gets a checker.
 2. Trigger one risk-engine rejection via AMFA's `/decision` endpoint (a login that AMFA's risk engine rejects).
 3. Wait one poll interval (default 1m).
 4. Confirm the alert appears on KMT's Alerts page and that a notification lands in the configured Slack channel.
@@ -390,7 +400,8 @@ amfacheck lifecycle hooks registered service_count=0
 
 The Alerts page shows a **Reload AMFA alerts** button next to Refresh, but only
 for tenants where the AMFA checker is enabled (both the tenant's `amfa.enabled`
-and the global `amfa_checker.enabled`). Clicking it runs the AMFA checker for
+and the global `amfa_checker.enabled`). It follows the tenant's AMFA toggle
+without a restart, as the checker does. Clicking it runs the AMFA checker for
 that tenant immediately - the same checks the background poller runs - then
 reloads the list, so new AMFA alerts appear without waiting for the next poll
 interval. It does not touch the other checkers, and it never removes alerts
@@ -422,8 +433,8 @@ To disable the checker, set `enabled: false` on the `amfa_checker` block and res
 
 ### Implementation notes
 
-- **Per-tenant lifecycle.** One `amfacheck.Service` goroutine is constructed per tenant whose `amfa.enabled: true` AND `keycloak.global.amfa_checker.enabled: true`. The fx module starts each on `OnStart` and stops it on `OnStop`.
-- **Poll-loop context.** The poll loop runs on a long-lived background context owned by the fx hook, NOT fx's `OnStart` context. fx cancels the `OnStart` context once startup finishes, so passing it to the loop would stop polling moments after boot (the loop would log `amfacheck polling cancelled`). Shutdown happens via `OnStop`, which cancels the background context and calls `Stop()` for a graceful drain.
+- **Per-tenant lifecycle.** One `amfacheck.Service` goroutine runs per tenant whose AMFA is enabled, while `keycloak.global.amfa_checker.enabled: true`. `config.yaml` tenants get theirs at startup. Tenants stored in the database follow the AMFA registry, which `amfaTenantSync` updates on every tenant change and which tells its listeners (`amfa.Registry.Subscribe`): a tenant that gets an AMFA repository gets a checker, a new repository replaces it, and a tenant that loses its repository has it stopped. A save that leaves the AMFA connection as it was (the AMFA settings and the Keycloak server, admin realm and client that issue its tokens) keeps the repository and the running services. Every checker built for a tenant shares the tenant's run lock, so a "Reload AMFA alerts" run still going on a replaced checker and the new checker's first run take turns and cannot both announce an alert. If the database tenants cannot be loaded at startup, startup fails, as it does for the monitoring module's load of the same tenants. When a tenant's AMFA stops being checked (AMFA turned off, or the tenant disabled or deleted), its checker is stopped and then its open AMFA alerts are resolved, with a resolution notice saying AMFA is no longer checked for it; nothing would ever resolve them otherwise. Startup does the same for every tenant without a checker, such as one whose AMFA was turned off before the upgrade. The mirror follows the same rules; both use `amfaTenantWorkers` (`internal/fx/amfa_tenant_workers.go`). The fx module starts the services on `OnStart` and stops them on `OnStop`; one started before then waits for `OnStart`.
+- **Poll-loop context.** Each poll loop runs on its own long-lived background context (`lifecycle.Pool`), NOT fx's `OnStart` context. fx cancels the `OnStart` context once startup finishes, so passing it to the loop would stop polling moments after boot (the loop would log `amfacheck polling cancelled`). Stopping a tenant's checker, and shutdown via `OnStop`, cancels that context and calls `Stop()` for a graceful drain.
 - **Realm discovery.** Each tick the checker resolves the tenant's realms via `keycloak.Service.ListRealms` (the realms KMT has discovered/stored), so realms added or removed in Keycloak are picked up without a restart. AMFA events are matched by `auth_context_json->>'realm_id'`, so a realm only produces alerts if KMT has discovered a realm of that name.
 - **Checkpoints.** Per-event rules (1, 3) keep a per-realm cursor and query `event_time > cursor - 10m`, so an event that reaches AMFA up to 10 minutes after a newer one is still read. Events whose alert was already raised are skipped without being saved or notified again, including when an operator deleted that alert. The cursor moves only past events whose alerts were saved: a failed save, or a realm whose query failed, is read again on the next tick, and the other realms are not held back. After a restart each realm resumes from its newest alert (counting deleted ones) less one `poll_interval`; a realm with no alert yet starts one `poll_interval` back, so enabling the checker does not alert on old history. Known limits: an event that reaches AMFA more than 10 minutes late, or a downtime longer than AMFA keeps events, is not alerted.
 - **Threshold rules (4a, 4b) use a rolling window.** `login_error` and `client_login_error` count events of their type over a rolling `[now - window, now]` window (the same rolling style as rule 2), NOT a fixed clock-aligned bucket. This means a recent burst is always counted regardless of when the check runs, so a manual "Reload AMFA alerts" click (or a poll) reliably catches a burst even if it landed just before a clock boundary. The `AlertID` is stable per `(realm, eventType)`, so repeated polls and manual runs dedup to one alert row (the service bumps `LastSeen` on recurrence), mirroring how `eventscheck` handles its error-threshold alerts. (An earlier design used a fixed window-aligned bucket keyed into the `AlertID`; it was changed because a manual trigger could miss a burst that fell in the previous bucket.)

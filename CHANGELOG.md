@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - AMFA events show the IP address, country and VPN flag of a failed login that AMFA stored without a risk decision, such as a wrong password or an unknown user, and a failed login from a VPN address counts as a flagged IP. In API mode this needs an AMFA engine that includes the same fix. These failures have no coordinates, so they are still not on the geolocation map.
+- A tenant created or edited in the interface gets AMFA alerts and mirrored AMFA events when its AMFA toggle is on, and loses them when AMFA is turned off or the tenant is disabled or deleted, without a restart. Before, the AMFA checker and mirror only ran for `config.yaml` tenants. A save that leaves the tenant's AMFA connection as it was keeps them running. When AMFA is turned off, or the tenant is disabled or deleted, the tenant's open AMFA alerts are resolved with a notice saying AMFA is no longer checked for it, and startup does the same for every tenant without a checker. If the tenants cannot be loaded at startup for AMFA, startup now fails instead of logging a warning and running without AMFA alerts and mirroring.
 
 ## [2.0.2] - 2026-10-20
 
