@@ -54,21 +54,53 @@ func provideKeycloakRealmRepo(db *gorm.DB) keycloak.RealmRepository {
 
 // Service
 func provideKeycloakService(
+	cfg *config.AppConfig,
+	log *logger.Logger,
 	eventRepo keycloak.EventRepository,
 	metricsRepo keycloak.MetricsRepository,
 	healthRepo keycloak.HealthRepository,
 	realmRepo keycloak.RealmRepository,
-	cfg *config.AppConfig,
-	log *logger.Logger,
 ) keycloak.Service {
 	// A misspelled ID matches nothing and fails silently, as the realms that
 	// use it show no AMFA sections, so the IDs in effect are logged once.
 	extra := cfg.Keycloak.Global.AmfaAuthenticatorIDs
-	log.Info("AMFA authenticator IDs", logger.Strs("ids", keycloak.AmfaAuthenticatorIDs(extra)))
+	logInfo(log, "AMFA authenticator IDs", logger.Strs("ids", keycloak.AmfaAuthenticatorIDs(extra)))
 
-	// ClientProvider and VersionChecker are optional - pass nil for now
-	// These will be provided by the monitor pool when live Keycloak access is needed
-	return keycloak.NewService(eventRepo, metricsRepo, healthRepo, realmRepo, nil, nil, extra)
+	// The ClientProvider is set later by the monitor pool, when live Keycloak
+	// access is needed.
+	return keycloak.NewService(eventRepo, metricsRepo, healthRepo, realmRepo, nil,
+		newVersionChecker(cfg.Keycloak.Global.VersionChecker, log), extra)
+}
+
+// newVersionChecker builds the version checker from
+// keycloak.global.version_checker, or returns nil while it is disabled, the
+// default, so no request goes to GitHub. Settings left at zero keep the
+// checker's own defaults.
+func newVersionChecker(c config.VersionCheckerConfig, log *logger.Logger) *keycloak.VersionChecker {
+	if !c.Enabled {
+		return nil
+	}
+	vc := keycloak.DefaultVersionCheckerConfig()
+	vc.Enabled = true
+	vc.Logger = log
+	if c.CacheTTL > 0 {
+		vc.CacheTTL = c.CacheTTL
+	}
+	if c.HTTPTimeout > 0 {
+		vc.HTTPTimeout = c.HTTPTimeout
+	}
+	if c.GitHubAPIBaseURL != "" {
+		vc.GitHubAPIBaseURL = c.GitHubAPIBaseURL
+	}
+	if c.KeycloakOwner != "" {
+		vc.KeycloakOwner = c.KeycloakOwner
+	}
+	if c.KeycloakRepo != "" {
+		vc.KeycloakRepo = c.KeycloakRepo
+	}
+	logInfo(log, "Version checker enabled; it will contact the GitHub API for Keycloak releases",
+		logger.Str("github_api_base_url", vc.GitHubAPIBaseURL))
+	return keycloak.NewVersionChecker(vc)
 }
 
 // ============================================================================

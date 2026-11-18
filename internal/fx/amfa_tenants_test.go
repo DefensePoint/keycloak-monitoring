@@ -2,6 +2,7 @@ package fx
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -250,7 +251,12 @@ func TestRegisterAmfaTenantSyncLoadsDatabaseTenantsOnStart(t *testing.T) {
 	}
 }
 
-func TestRegisterAmfaTenantSyncSkipsWhenLoadTenantsFails(t *testing.T) {
+// TestRegisterAmfaTenantSyncFailsStartWhenLoadTenantsFails: the AMFA checker
+// and mirror follow the registry, so a load that is skipped would leave every
+// database tenant without AMFA alerts and mirrored events until each is saved
+// again, with only a warning in the log. Startup fails instead, as it does when
+// the monitoring module's own load of the same cache fails.
+func TestRegisterAmfaTenantSyncFailsStartWhenLoadTenantsFails(t *testing.T) {
 	svc := &fakeAmfaTenantService{
 		tenants:        []*domain.KeycloakTenant{dbTenant("t1", true, "https://amfa.internal")},
 		loadTenantsErr: context.DeadlineExceeded,
@@ -259,10 +265,15 @@ func TestRegisterAmfaTenantSyncSkipsWhenLoadTenantsFails(t *testing.T) {
 	lc := fxtest.NewLifecycle(t)
 
 	registerAmfaTenantSync(lc, registry, svc, &config.AppConfig{}, logger.NewNoop())
-	lc.RequireStart()
-	defer lc.RequireStop()
-
-	if _, err := registry.RepositoryFor("t1"); err == nil {
+	err := lc.Start(context.Background())
+	if err == nil {
+		_ = lc.Stop(context.Background())
+		t.Fatal("start must fail when the tenants cannot be loaded")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("start error = %v, want it to wrap the load error", err)
+	}
+	if _, rerr := registry.RepositoryFor("t1"); rerr == nil {
 		t.Error("a failed cache load must not be treated as an empty tenant list")
 	}
 }
