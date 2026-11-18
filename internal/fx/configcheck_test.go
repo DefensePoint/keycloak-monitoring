@@ -202,3 +202,49 @@ func TestConfigCheckWorkers_DoNotReloadTheTenantCache(t *testing.T) {
 		t.Fatal("config check workers reload the tenant cache")
 	}
 }
+
+// Every tenant gets the secret expiry check, each with its own entries: one
+// with none still needs it, so the alerts of entries since removed resolve.
+func TestBuildConfigChecks_SecretExpiryForEveryTenantWithItsOwnEntries(t *testing.T) {
+	var cfg config.ConfigCheckerConfig
+	cfg.Checks.IdentityProviderSecretExpiry.Enabled = true
+	cfg.Checks.IdentityProviderSecretExpiry.WarningDays = 30
+	cfg.Checks.IdentityProviderSecretExpiry.Secrets = []config.IdentityProviderSecret{
+		{Tenant: "a", Realm: "customers", IdentityProvider: "entra", ExpiresOn: "2020-03-31"},
+		{Tenant: "c", Realm: "customers", IdentityProvider: "okta", ExpiresOn: "2020-01-15"},
+	}
+	tenants := []*domain.KeycloakTenant{{TenantID: "a"}, {TenantID: "b"}}
+	kc := secretStubClient{stubConfigCheckClient{realms: []*keycloakadmin.RealmRepresentation{{ID: "r", Realm: "customers", Enabled: true}}}}
+	lookup := func(string) configcheck.KeycloakClient { return kc }
+
+	checks := buildConfigChecks(cfg, tenants, lookup, saferequest.Policy{}, logger.NewNoop())
+
+	if len(checks) != 2 {
+		t.Fatalf("got %d checks, want one per tenant", len(checks))
+	}
+	alerts, err := checks[0].Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(alerts) != 1 || alerts[0].TenantID != "a" || alerts[0].ResourceName != "entra" ||
+		alerts[0].Severity != domain.AlertSeverityCritical || !strings.Contains(alerts[0].Description, "2020-03-31") {
+		t.Fatalf("alerts = %+v, want one expired alert for tenant a's entra, valid until 2020-03-31", alerts)
+	}
+	if alerts, err := checks[1].Execute(context.Background()); err != nil || len(alerts) != 0 {
+		t.Fatalf("tenant b: alerts %+v, err %v; want none", alerts, err)
+	}
+
+	cfg.Checks.IdentityProviderSecretExpiry.Enabled = false
+	if checks := buildConfigChecks(cfg, tenants, lookup, saferequest.Policy{}, logger.NewNoop()); len(checks) != 0 {
+		t.Fatalf("switched off: got %d checks, want 0", len(checks))
+	}
+}
+
+type secretStubClient struct{ stubConfigCheckClient }
+
+func (secretStubClient) GetIdentityProviders(context.Context, string) ([]*keycloakadmin.IdentityProviderRepresentation, error) {
+	return []*keycloakadmin.IdentityProviderRepresentation{
+		{Alias: "entra", ProviderID: "oidc", InternalID: "idp-entra"},
+		{Alias: "okta", ProviderID: "oidc", InternalID: "idp-okta"},
+	}, nil
+}

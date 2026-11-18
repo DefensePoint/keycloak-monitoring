@@ -68,6 +68,9 @@ type tenantCheckWorkers[S lifecycle.Poller] struct {
 	// meanwhile would be cached stale.
 	loadTenants bool
 	log         *logger.Logger
+	// tenantsChanged, when set, is told the tenants with a service once the
+	// startup list is applied and after every change. It runs with w.mu held.
+	tenantsChanged func(running map[string]bool)
 
 	// alertTypes are the check types of the alerts this worker's checks raise.
 	// When a tenant is disabled, its open alerts of these types are resolved
@@ -126,6 +129,9 @@ func (w *tenantCheckWorkers[S]) start(ctx context.Context, tenants tenantSource)
 	w.loaded = true
 	w.changed = nil
 	logInfo(w.log, w.component+" services constructed", logger.Int("tenants", len(w.running)))
+	if w.tenantsChanged != nil {
+		w.tenantsChanged(w.running)
+	}
 	w.mu.Unlock()
 
 	if err := w.pool.Start(); err != nil {
@@ -220,22 +226,26 @@ func (w *tenantCheckWorkers[S]) apply(event tenant.Event, t *domain.KeycloakTena
 		w.changed[t.TenantID] = true
 	}
 
+	how := ""
 	switch event {
 	case tenant.EventRemoved:
 		w.removeLocked(t.TenantID)
-		return "removed"
+		how = "removed"
 	case tenant.EventDisabled:
 		w.removeLocked(t.TenantID)
-		return "disabled"
+		how = "disabled"
 	case tenant.EventAdded, tenant.EventEnabled, tenant.EventUpdated:
 		if t.Enabled {
 			w.putLocked(t.TenantID)
-			return ""
+		} else {
+			w.removeLocked(t.TenantID)
+			how = "disabled"
 		}
-		w.removeLocked(t.TenantID)
-		return "disabled"
 	}
-	return ""
+	if w.loaded && !w.stopped && w.tenantsChanged != nil {
+		w.tenantsChanged(w.running)
+	}
+	return how
 }
 
 // resolveAlertsTimeout bounds closing one tenant's alerts, which runs on the

@@ -109,6 +109,14 @@ polling worker` line shows it, the setting did not apply.
   open configuration and event alerts, with a resolution notice saying it is
   no longer monitored; a tenant already disabled when the new version starts
   gets the same at startup. Deleting a tenant removes its alerts.
+- Keycloak does not know when an identity provider's client secret expires.
+  To be warned before one does, list each secret's expiry date, as the
+  provider shows it, under
+  `keycloak.global.config_checker.checks.identity_provider_secret_expiry.secrets`
+  (tenant ID, realm, provider alias, `expires_on`). The warning starts 30 days
+  before, the error that email gets 7 days before, and a changed date takes
+  effect after a restart. An entry naming no enabled tenant is logged as a
+  warning at startup.
 - These times apply to tenants on the global settings. If
   `keycloak.global.realms` lists realms, only those are polled, and a realm
   created later never appears. A tenant given its own `configuration` through
