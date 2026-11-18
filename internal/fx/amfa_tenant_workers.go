@@ -17,7 +17,7 @@ import (
 // config.yaml tenants get their service once at startup, as before. Database
 // tenants follow the registry, which amfaTenantSync updates on every tenant
 // change: a tenant that gets an AMFA repository gets a service, a new
-// repository (a changed endpoint, or any other save) replaces it, and a tenant
+// repository (a save that changes its AMFA connection) replaces it, and a tenant
 // that loses its repository (deleted, disabled, AMFA switched off) has it
 // stopped. So the tenant's AMFA toggle takes effect without a restart.
 type amfaTenantWorkers[S lifecycle.Poller] struct {

@@ -2,6 +2,7 @@ package fx
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"go.uber.org/fx"
@@ -191,6 +192,11 @@ func buildAmfaCheckServices(
 
 // amfaCheckBuilder returns the function that builds one tenant's checker from
 // its AMFA repository.
+//
+// Every checker it builds for a tenant shares the tenant's run lock. A saved
+// tenant gets a new checker, which runs at once, while a manual run ("Reload
+// AMFA alerts") may still be going on the old one; with a lock each, both
+// could see an alert as new and both announce it.
 func amfaCheckBuilder(
 	cfg *config.AppConfig,
 	realms realmLister,
@@ -207,6 +213,17 @@ func amfaCheckBuilder(
 		adaptedLog = &amfacheckLoggerAdapter{log: log}
 	}
 
+	var locksMu sync.Mutex
+	runLocks := map[string]*sync.Mutex{}
+	runLockFor := func(tenantID string) *sync.Mutex {
+		locksMu.Lock()
+		defer locksMu.Unlock()
+		if runLocks[tenantID] == nil {
+			runLocks[tenantID] = &sync.Mutex{}
+		}
+		return runLocks[tenantID]
+	}
+
 	return func(tenantID string, repo amfa.Repository) amfacheck.Service {
 		var resume amfacheck.ResumeFunc
 		if latest, ok := alertStore.(latestAlertFinder); ok {
@@ -221,7 +238,8 @@ func amfaCheckBuilder(
 			logger.Int("checks", len(checks)),
 			logger.Str("poll_interval", amfaCfg.PollInterval.String()))
 		return amfacheck.NewService(tenantID, checks, alertStore, notifier, adaptedLog, amfaCfg.PollInterval,
-			amfacheck.WithResolveAfter(amfaCfg.ResolveAfter), amfacheck.WithSilencer(silencer))
+			amfacheck.WithResolveAfter(amfaCfg.ResolveAfter), amfacheck.WithSilencer(silencer),
+			amfacheck.WithRunLock(runLockFor(tenantID)))
 	}
 }
 

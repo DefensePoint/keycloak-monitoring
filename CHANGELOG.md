@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- A tenant created or edited in the interface gets AMFA alerts and mirrored AMFA events when its AMFA toggle is on, and loses them when AMFA is turned off or the tenant is disabled or deleted, without a restart. Before, the AMFA checker and mirror only ran for `config.yaml` tenants. A save that leaves the tenant's AMFA connection as it was keeps them running. If the tenants cannot be loaded at startup for AMFA, startup now fails instead of logging a warning and running without AMFA alerts and mirroring.
+
 ## [2.0.2] - 2026-10-20
 
 ### Fixed

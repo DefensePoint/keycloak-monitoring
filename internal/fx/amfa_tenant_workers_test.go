@@ -386,3 +386,77 @@ func TestAmfaMirror_ConfigTenantsStillStartAtBoot(t *testing.T) {
 		t.Errorf("config tenant mirrors = %d, want 1", workers.pool.Len())
 	}
 }
+
+// A save that leaves the tenant's AMFA settings as they were (a rename, a
+// change to something AMFA does not use, or no change at all) keeps the running
+// services: restarting them would re-run every check and the mirror for
+// nothing.
+func TestAmfaTenantWorkers_SaveWithoutAmfaChangesKeepsTheServices(t *testing.T) {
+	h := newTWHarness(t, &config.AppConfig{})
+	h.change(tenant.EventAdded, dbTenant("t1", true, "https://amfa.internal"))
+	first := h.wantOneRunningWithCurrentRepo(t, "t1")
+
+	renamed := dbTenant("t1", true, "https://amfa.internal")
+	renamed.Name = "Renamed"
+	h.change(tenant.EventUpdated, renamed)
+	h.change(tenant.EventUpdated, dbTenant("t1", true, "https://amfa.internal"))
+	h.change(tenant.EventEnabled, dbTenant("t1", true, "https://amfa.internal"))
+
+	if got := h.wantOneRunningWithCurrentRepo(t, "t1"); got != first || len(h.built) != 1 {
+		t.Errorf("services built = %d, want the first one kept", len(h.built))
+	}
+}
+
+// Anything the AMFA connection is built from restarts the services with a new
+// repository: the endpoint, its timeout and lookback, and the Keycloak client
+// that issues the AMFA tokens.
+func TestAmfaTenantWorkers_AmfaRelevantChangesRestart(t *testing.T) {
+	changes := map[string]func(*domain.KeycloakTenant){
+		"endpoint":      func(tn *domain.KeycloakTenant) { tn.Amfa.APIBaseURL = "https://amfa-2.internal" },
+		"timeout":       func(tn *domain.KeycloakTenant) { tn.Amfa.APITimeoutSeconds = 45 },
+		"lookback":      func(tn *domain.KeycloakTenant) { tn.Amfa.EventsLookbackDays = 14 },
+		"client secret": func(tn *domain.KeycloakTenant) { tn.ClientSecret = "rotated" },
+		"client id":     func(tn *domain.KeycloakTenant) { tn.ClientID = "other-client" },
+		"server url":    func(tn *domain.KeycloakTenant) { tn.ServerURL = "https://keycloak-2.example.com" },
+		"admin realm":   func(tn *domain.KeycloakTenant) { tn.AdminRealm = "ops" },
+	}
+	for name, change := range changes {
+		t.Run(name, func(t *testing.T) {
+			h := newTWHarness(t, &config.AppConfig{})
+			h.change(tenant.EventAdded, dbTenant("t1", true, "https://amfa.internal"))
+			first := h.wantOneRunningWithCurrentRepo(t, "t1")
+
+			tn := dbTenant("t1", true, "https://amfa.internal")
+			change(tn)
+			h.change(tenant.EventUpdated, tn)
+
+			if got := h.wantOneRunningWithCurrentRepo(t, "t1"); got == first {
+				t.Error("the service was kept after a change to its AMFA connection")
+			}
+		})
+	}
+}
+
+// Turning AMFA off and on again, or disabling and re-enabling the tenant,
+// starts the services again even though the settings end up as they were.
+func TestAmfaTenantWorkers_OffAndOnAgainRestarts(t *testing.T) {
+	h := newTWHarness(t, &config.AppConfig{})
+	h.change(tenant.EventAdded, dbTenant("t1", true, "https://amfa.internal"))
+
+	h.change(tenant.EventUpdated, dbTenant("t1", false, "https://amfa.internal"))
+	h.wantNoneRunning(t)
+	h.change(tenant.EventUpdated, dbTenant("t1", true, "https://amfa.internal"))
+	h.wantOneRunningWithCurrentRepo(t, "t1")
+
+	disabled := dbTenant("t1", true, "https://amfa.internal")
+	disabled.Enabled = false
+	h.change(tenant.EventDisabled, disabled)
+	h.wantNoneRunning(t)
+	h.change(tenant.EventEnabled, dbTenant("t1", true, "https://amfa.internal"))
+	h.wantOneRunningWithCurrentRepo(t, "t1")
+
+	h.change(tenant.EventRemoved, dbTenant("t1", true, "https://amfa.internal"))
+	h.wantNoneRunning(t)
+	h.change(tenant.EventAdded, dbTenant("t1", true, "https://amfa.internal"))
+	h.wantOneRunningWithCurrentRepo(t, "t1")
+}
