@@ -334,7 +334,7 @@ The AMFA risk-alert checker (`amfacheck/`) is a per-tenant poll loop that turns 
 | `repeated_risky` (rule 2) | A user accumulating repeated risky attempts within a window (default 3 within 24h at `min_risk_level` 2+) and still making them. | warning |
 | `vpn_risky` (rule 3) | A risky login originating from a VPN or anonymizing IP. | warning |
 | `login_error` (rule 4a) | A burst of `LOGIN_ERROR` events (default 5 within 5m). | warning |
-| `client_login_error` (rule 4b) | A burst of `CLIENT_LOGIN_ERROR` events (default 5 within 5m). | warning |
+| `client_login_error` (rule 4b) | A burst of `CLIENT_LOGIN_ERROR` events (default 5 within 5m). AMFA stores these only when the Keycloak side forwards them, and the open-source Adaptive MFA plugin does not, so with it this rule never fires. For client authentication failures, use the Keycloak event checker's `client_error` check (`keycloak.global.event_checker.checks.client_error`), which counts the same events from Keycloak without AMFA. | warning |
 
 ### Configuration
 
