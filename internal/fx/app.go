@@ -6,7 +6,14 @@ import (
 
 // NewApp creates a new Fx application with all modules
 func NewApp(configPath string, opts ...fx.Option) *fx.App {
-	baseOpts := []fx.Option{
+	return fx.New(append(appModules(configPath), opts...)...)
+}
+
+// appModules lists NewApp's modules. fx runs their start hooks in this order,
+// which TestNewApp_ModuleOrderTheTenantCheckersRelyOn pins where the tenant
+// checkers depend on it.
+func appModules(configPath string) []fx.Option {
+	return []fx.Option{
 		// Provide config path
 		fx.Supply(ConfigPath(configPath)),
 
@@ -54,11 +61,6 @@ func NewApp(configPath string, opts ...fx.Option) *fx.App {
 		// monitoring start hook loads, so they come after it.
 		ConfigCheckModule,
 	}
-
-	// Append any additional options
-	allOpts := append(baseOpts, opts...)
-
-	return fx.New(allOpts...)
 }
 
 // NewStandaloneApp creates a standalone app (current mode - server with all features)

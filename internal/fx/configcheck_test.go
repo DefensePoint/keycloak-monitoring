@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"go.uber.org/fx/fxtest"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/saferequest"
 )
@@ -138,5 +140,65 @@ func TestBuildConfigChecks_MetadataFetchIsGuarded(t *testing.T) {
 	}
 	if len(alerts) != 1 || !strings.Contains(alerts[0].Title, "metadata fetch failed") {
 		t.Fatalf("alerts = %+v, want one metadata fetch failure", alerts)
+	}
+}
+
+// realmsAskedClient reports, once per tenant, that a check listed its realms.
+type realmsAskedClient struct {
+	stubConfigCheckClient
+	tenantID string
+	asked    chan string
+}
+
+func (c realmsAskedClient) GetAllRealms(context.Context) ([]*keycloakadmin.RealmRepresentation, error) {
+	select {
+	case c.asked <- c.tenantID:
+	default:
+	}
+	return nil, nil
+}
+
+// The bug: the configuration checks were built once at startup, so a tenant
+// created in the interface went unchecked until a restart.
+func TestConfigCheckWorkers_TenantAddedAtRuntimeIsChecked(t *testing.T) {
+	var cfg config.ConfigCheckerConfig
+	cfg.Enabled = true
+	cfg.PollInterval = time.Hour
+	cfg.Checks.RealmSecurity.Enabled = true
+	asked := make(chan string, 1)
+	lookup := func(tenantID string) configcheck.KeycloakClient {
+		return realmsAskedClient{tenantID: tenantID, asked: asked}
+	}
+	w := newConfigCheckWorkers(cfg, lookup, saferequest.Policy{}, ecFakeAlertStore{}, ecFakeNotifier{}, nil, logger.NewNoop())
+	tenants := &fakeAmfaTenantService{}
+	lc := fxtest.NewLifecycle(t)
+	w.hook(lc, tenants)
+	lc.RequireStart()
+	t.Cleanup(func() { lc.RequireStop() })
+
+	tenants.callback(tenant.EventAdded, enabledTenant("new"))
+
+	wantChecked(t, asked, "new")
+}
+
+func TestConfigCheckWorkers_NoCheckEnabledStartsNothing(t *testing.T) {
+	var cfg config.ConfigCheckerConfig
+	cfg.Enabled = true
+	w := newConfigCheckWorkers(cfg, func(string) configcheck.KeycloakClient { return nil }, saferequest.Policy{},
+		ecFakeAlertStore{}, ecFakeNotifier{}, nil, logger.NewNoop())
+
+	if _, ok := w.build("a"); ok {
+		t.Fatal("built a service for a tenant with every check off")
+	}
+}
+
+// The config checker starts after the HTTP server and after the monitoring
+// module has loaded the tenant cache: it must not load it again.
+func TestConfigCheckWorkers_DoNotReloadTheTenantCache(t *testing.T) {
+	var cfg config.ConfigCheckerConfig
+	w := newConfigCheckWorkers(cfg, func(string) configcheck.KeycloakClient { return nil }, saferequest.Policy{},
+		ecFakeAlertStore{}, ecFakeNotifier{}, nil, logger.NewNoop())
+	if w.loadTenants {
+		t.Fatal("config check workers reload the tenant cache")
 	}
 }

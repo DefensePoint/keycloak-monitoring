@@ -12,17 +12,16 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/notifications"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
 )
 
 // EventsCheckModule wires the generic Keycloak-event alert checker: one
-// per-tenant eventscheck.Service for every enabled tenant when
-// keycloak.global.event_checker.enabled is true and at least one check is
-// enabled. Each service owns one goroutine, started/stopped via fx lifecycle
-// hooks. Safe to install when the master switch is off or no tenants qualify:
-// the slice is simply empty.
+// per-tenant eventscheck.Service for every enabled tenant, config.yaml and
+// interface tenants alike, when keycloak.global.event_checker.enabled is true
+// and at least one check is enabled. The services follow tenant changes: see
+// tenantCheckWorkers.
 var EventsCheckModule = fx.Module("eventscheck",
-	fx.Provide(provideEventsCheckRunner),
-	fx.Invoke(startEventsCheckServices),
+	fx.Invoke(registerEventsCheckHooks),
 )
 
 type eventsCheckAlertStore struct{ repo alerts.Repository }
@@ -84,40 +83,38 @@ func (n noopEventscheckLogger) WithComponent(string) eventscheck.Logger { return
 type EventsCheckParams struct {
 	fx.In
 
-	Config   *config.AppConfig
-	Alerts   alerts.Repository
-	Notifier notifications.Service
-	Keycloak keycloak.Service
-	Silences alerts.SilenceManager
-	Logger   *logger.Logger
+	Lifecycle fx.Lifecycle
+	Config    *config.AppConfig
+	Alerts    alerts.Repository
+	Notifier  notifications.Service
+	Keycloak  keycloak.Service
+	Silences  alerts.SilenceManager
+	Tenants   tenant.Service
+	Logger    *logger.Logger
 }
 
-type eventsCheckRunner struct {
-	services []eventscheck.Service
+func registerEventsCheckHooks(p EventsCheckParams) {
+	checkerCfg := p.Config.Keycloak.Global.EventChecker
+	if !checkerCfg.Enabled {
+		logInfo(p.Logger, "eventscheck globally disabled; no alert services constructed")
+		return
+	}
+
+	newEventsCheckWorkers(checkerCfg, p.Keycloak, p.Keycloak, eventsCheckAlertStore{repo: p.Alerts},
+		p.Notifier, p.Silences, p.Logger).hook(p.Lifecycle, p.Tenants)
 }
 
-func (r *eventsCheckRunner) Services() []eventscheck.Service { return r.services }
-
-func provideEventsCheckRunner(p EventsCheckParams) *eventsCheckRunner {
-	services := buildEventsCheckServices(p.Config, p.Keycloak, p.Keycloak,
-		eventsCheckAlertStore{repo: p.Alerts}, p.Notifier, p.Silences, p.Logger)
-	return &eventsCheckRunner{services: services}
-}
-
-func buildEventsCheckServices(
-	cfg *config.AppConfig,
+// newEventsCheckWorkers runs one event checker service per enabled tenant,
+// with the checks the configuration enables.
+func newEventsCheckWorkers(
+	checkerCfg config.EventCheckerConfig,
 	events eventscheck.KeycloakEventReader,
 	realms realmLister,
 	alertStore eventscheck.AlertStore,
 	notifier eventscheck.NotificationService,
 	silencer eventscheck.Silencer,
 	log *logger.Logger,
-) []eventscheck.Service {
-	checkerCfg := cfg.Keycloak.Global.EventChecker
-	if !checkerCfg.Enabled {
-		logInfo(log, "eventscheck globally disabled; no alert services constructed")
-		return nil
-	}
+) *tenantCheckWorkers[eventscheck.Service] {
 	checkerCfg.ApplyDefaults()
 
 	adaptedLog := eventscheck.Logger(noopEventscheckLogger{})
@@ -125,39 +122,25 @@ func buildEventsCheckServices(
 		adaptedLog = &eventscheckLoggerAdapter{log: log}
 	}
 
-	var services []eventscheck.Service
-	for tenantID, tcfg := range cfg.Keycloak.Tenants {
-		if !tcfg.Enabled {
-			continue
-		}
-		tenantID := tenantID
-
-		realmsFn := func(ctx context.Context) ([]string, error) {
-			rows, lerr := realms.ListRealms(ctx, tenantID)
-			if lerr != nil {
-				return nil, lerr
+	return &tenantCheckWorkers[eventscheck.Service]{
+		component: "eventscheck",
+		// The event checks start before the monitoring module loads the
+		// tenant cache, and before the HTTP server serves.
+		loadTenants: true,
+		log:         log,
+		alertTypes:  checkTypes(buildEventsChecks("", nil, events, checkerCfg, adaptedLog)),
+		alertStore:  alertStore,
+		resolutions: notifier,
+		build: func(tenantID string) (eventscheck.Service, bool) {
+			realmsFn := eventscheck.RealmsFunc(tenantRealmsFunc(realms, tenantID))
+			checks := buildEventsChecks(tenantID, realmsFn, events, checkerCfg, adaptedLog)
+			if len(checks) == 0 {
+				return nil, false
 			}
-			out := make([]string, 0, len(rows))
-			for _, r := range rows {
-				out = append(out, r.RealmName)
-			}
-			return out, nil
-		}
-
-		checks := buildEventsChecks(tenantID, eventscheck.RealmsFunc(realmsFn), events, checkerCfg, adaptedLog)
-		if len(checks) == 0 {
-			continue
-		}
-		svc := eventscheck.NewService(checks, alertStore, notifier, adaptedLog, checkerCfg.PollInterval,
-			eventscheck.WithResolveAfter(checkerCfg.ResolveAfter), eventscheck.WithSilencer(silencer))
-		services = append(services, svc)
-		logInfo(log, "eventscheck service constructed",
-			logger.Str("tenant_id", tenantID),
-			logger.Int("checks", len(checks)),
-			logger.Str("poll_interval", checkerCfg.PollInterval.String()))
+			return eventscheck.NewService(checks, alertStore, notifier, adaptedLog, checkerCfg.PollInterval,
+				eventscheck.WithResolveAfter(checkerCfg.ResolveAfter), eventscheck.WithSilencer(silencer)), true
+		},
 	}
-	logInfo(log, "eventscheck services constructed", logger.Int("count", len(services)))
-	return services
 }
 
 func buildEventsChecks(
@@ -185,29 +168,4 @@ func buildEventsChecks(
 		out = append(out, eventscheck.NewCommonErrorCheck(events, log, tenantID, realmsFn, c.CommonErrors.Threshold, c.CommonErrors.TimeWindow, c.CommonErrors.EventTypes))
 	}
 	return out
-}
-
-func startEventsCheckServices(lc fx.Lifecycle, runner *eventsCheckRunner, log *logger.Logger) {
-	for _, s := range runner.Services() {
-		s := s
-		// The poll loop must run on a long-lived context, not fx's OnStart
-		// context: fx cancels the OnStart context once startup completes, which
-		// would immediately stop the ticker goroutine.
-		var cancel context.CancelFunc
-		lc.Append(fx.Hook{
-			OnStart: func(context.Context) error {
-				var runCtx context.Context
-				runCtx, cancel = context.WithCancel(context.Background())
-				logInfo(log, "eventscheck service starting")
-				return s.Start(runCtx)
-			},
-			OnStop: func(context.Context) error {
-				if cancel != nil {
-					cancel()
-				}
-				return s.Stop()
-			},
-		})
-	}
-	logInfo(log, "eventscheck lifecycle hooks registered", logger.Int("service_count", len(runner.Services())))
 }

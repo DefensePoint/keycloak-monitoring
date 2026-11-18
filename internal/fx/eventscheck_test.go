@@ -8,6 +8,9 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/eventscheck"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
+
+	"go.uber.org/fx/fxtest"
 )
 
 type ecFakeAlertStore struct{}
@@ -47,47 +50,85 @@ var (
 	_ realmLister                     = ecRealmRepoStub{}
 )
 
-func TestBuildEventsCheckServices_OnePerEnabledTenant(t *testing.T) {
-	cfg := &config.AppConfig{}
-	cfg.Keycloak.Global.EventChecker.Enabled = true
-	cfg.Keycloak.Global.EventChecker.Checks.LoginError.Enabled = true
-	cfg.Keycloak.Tenants = map[string]config.TenantConfig{
-		"t1": {Enabled: true},
-		"t2": {Enabled: false},
-		"t3": {Enabled: true},
-	}
+// tenantEventReader reports, once per tenant, that a check read its events.
+type tenantEventReader struct{ asked chan string }
 
-	svcs := buildEventsCheckServices(cfg, ecEventReaderStub{}, ecRealmRepoStub{}, ecFakeAlertStore{}, ecFakeNotifier{}, nil, nil)
-	if len(svcs) != 2 {
-		t.Errorf("expected 2 services (t1, t3), got %d", len(svcs))
+func (r tenantEventReader) CountEventsByType(_ context.Context, tenantID, _, _ string, _, _ time.Time) (int64, error) {
+	select {
+	case r.asked <- tenantID:
+	default:
+	}
+	return 0, nil
+}
+
+func newEventsWorkersUnderTest(t *testing.T, checkerCfg config.EventCheckerConfig, events eventscheck.KeycloakEventReader, tenants *fakeAmfaTenantService) {
+	t.Helper()
+	checkerCfg.Enabled = true
+	checkerCfg.PollInterval = time.Hour
+	w := newEventsCheckWorkers(checkerCfg, events, ecRealmRepoStub{}, ecFakeAlertStore{}, ecFakeNotifier{}, nil, nil)
+	lc := fxtest.NewLifecycle(t)
+	w.hook(lc, tenants)
+	lc.RequireStart()
+	t.Cleanup(func() { lc.RequireStop() })
+}
+
+func wantChecked(t *testing.T, asked <-chan string, tenantID string) {
+	t.Helper()
+	select {
+	case got := <-asked:
+		if got != tenantID {
+			t.Fatalf("checked tenant %q, want %q", got, tenantID)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("tenant %q was never checked", tenantID)
 	}
 }
 
-func TestBuildEventsCheckServices_MasterSwitchOff(t *testing.T) {
+func TestRegisterEventsCheckHooks_MasterSwitchOffRegistersNothing(t *testing.T) {
+	lc := fxtest.NewLifecycle(t)
 	cfg := &config.AppConfig{}
 	cfg.Keycloak.Global.EventChecker.Checks.LoginError.Enabled = true
-	cfg.Keycloak.Global.EventChecker.Checks.IdpError.Enabled = true
-	cfg.Keycloak.Global.EventChecker.Checks.CodeToToken.Enabled = true
-	cfg.Keycloak.Tenants = map[string]config.TenantConfig{
-		"t1": {Enabled: true},
-	}
 
-	svcs := buildEventsCheckServices(cfg, ecEventReaderStub{}, ecRealmRepoStub{}, ecFakeAlertStore{}, ecFakeNotifier{}, nil, nil)
-	if len(svcs) != 0 {
-		t.Errorf("expected 0 services when the master switch is off, got %d", len(svcs))
-	}
+	registerEventsCheckHooks(EventsCheckParams{Lifecycle: lc, Config: cfg})
+
+	// Tenants is nil, so a registered hook would panic on start.
+	lc.RequireStart().RequireStop()
 }
 
-func TestBuildEventsCheckServices_SkipsWhenNoChecksEnabled(t *testing.T) {
-	cfg := &config.AppConfig{}
-	cfg.Keycloak.Global.EventChecker.Enabled = true
-	cfg.Keycloak.Tenants = map[string]config.TenantConfig{
-		"t1": {Enabled: true},
-	}
+// The bug: the event checks were built from config.yaml, so a tenant created
+// in the interface was never checked, not even after a restart.
+func TestEventsCheckWorkers_ChecksATenantFromTheDatabaseAtStartup(t *testing.T) {
+	var checkerCfg config.EventCheckerConfig
+	checkerCfg.Checks.LoginError.Enabled = true
+	asked := make(chan string, 1)
 
-	svcs := buildEventsCheckServices(cfg, ecEventReaderStub{}, ecRealmRepoStub{}, ecFakeAlertStore{}, ecFakeNotifier{}, nil, nil)
-	if len(svcs) != 0 {
-		t.Errorf("expected 0 services when no checks enabled, got %d", len(svcs))
+	newEventsWorkersUnderTest(t, checkerCfg, tenantEventReader{asked: asked},
+		&fakeAmfaTenantService{tenants: []*domain.KeycloakTenant{enabledTenant("from-ui")}})
+
+	wantChecked(t, asked, "from-ui")
+}
+
+func TestEventsCheckWorkers_TenantAddedAtRuntimeIsChecked(t *testing.T) {
+	var checkerCfg config.EventCheckerConfig
+	checkerCfg.Checks.LoginError.Enabled = true
+	asked := make(chan string, 1)
+	tenants := &fakeAmfaTenantService{}
+	newEventsWorkersUnderTest(t, checkerCfg, tenantEventReader{asked: asked}, tenants)
+
+	tenants.callback(tenant.EventAdded, enabledTenant("new"))
+
+	wantChecked(t, asked, "new")
+}
+
+func TestEventsCheckWorkers_NoCheckEnabledStartsNothing(t *testing.T) {
+	asked := make(chan string, 1)
+	newEventsWorkersUnderTest(t, config.EventCheckerConfig{}, tenantEventReader{asked: asked},
+		&fakeAmfaTenantService{tenants: []*domain.KeycloakTenant{enabledTenant("a")}})
+
+	select {
+	case got := <-asked:
+		t.Fatalf("tenant %q was checked with every check off", got)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 
@@ -133,5 +174,14 @@ func TestBuildEventsChecks_AbsentWhenDisabled(t *testing.T) {
 	checks := buildEventsChecks("tenant-1", realmsFn, ecEventReaderStub{}, checkerCfg, noopEventscheckLogger{})
 	if len(checks) != 0 {
 		t.Errorf("expected 0 checks when all disabled, got %d", len(checks))
+	}
+}
+
+// The event checker starts before the monitoring module loads the tenant
+// cache, and before the HTTP server serves, so it loads the cache itself.
+func TestEventsCheckWorkers_LoadTheTenantCache(t *testing.T) {
+	w := newEventsCheckWorkers(config.EventCheckerConfig{}, ecEventReaderStub{}, ecRealmRepoStub{}, ecFakeAlertStore{}, ecFakeNotifier{}, nil, nil)
+	if !w.loadTenants {
+		t.Fatal("event check workers do not load the tenant cache")
 	}
 }

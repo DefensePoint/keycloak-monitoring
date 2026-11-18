@@ -18,9 +18,11 @@ import (
 
 // ConfigCheckModule runs the Keycloak configuration checks (SAML identity
 // provider metadata and certificates, realm security, client security) for
-// every enabled tenant when keycloak.global.config_checker.enabled is true.
-// It must be installed after MonitoringModule: its start hook reads the
-// tenants and Keycloak clients that the monitoring start hook loads.
+// every enabled tenant when keycloak.global.config_checker.enabled is true,
+// and follows tenant changes: see tenantCheckWorkers. It is installed after
+// MonitoringModule, whose start hook creates the Keycloak clients the checks
+// use; a check that runs before its tenant's client exists finds it
+// unavailable and tries again on the next run.
 var ConfigCheckModule = fx.Module("configcheck",
 	fx.Invoke(registerConfigCheckHooks),
 )
@@ -118,35 +120,36 @@ func registerConfigCheckHooks(p ConfigCheckParams) {
 		return
 	}
 
-	var svc configcheck.Service
-	var cancel context.CancelFunc
-	p.Lifecycle.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			tenants, err := p.Tenants.ListEnabledTenants(ctx)
-			if err != nil {
-				return err
-			}
-			checks := buildConfigChecks(checkerCfg, tenants, poolKeycloakClient(p.Pool), keycloakSafeRequestPolicy(p.Config), p.Logger)
+	newConfigCheckWorkers(checkerCfg, poolKeycloakClient(p.Pool), keycloakSafeRequestPolicy(p.Config),
+		configCheckAlertStore{repo: p.Alerts}, p.Notifier, p.Silences, p.Logger).hook(p.Lifecycle, p.Tenants)
+}
+
+// newConfigCheckWorkers runs one configuration checker service per enabled
+// tenant, with the checks the configuration enables.
+func newConfigCheckWorkers(
+	checkerCfg config.ConfigCheckerConfig,
+	lookup func(tenantID string) configcheck.KeycloakClient,
+	policy saferequest.Policy,
+	store configcheck.AlertStore,
+	notifier configcheck.NotificationService,
+	silencer configcheck.Silencer,
+	log *logger.Logger,
+) *tenantCheckWorkers[configcheck.Service] {
+	return &tenantCheckWorkers[configcheck.Service]{
+		component:   "configcheck",
+		log:         log,
+		alertTypes:  checkTypes(buildConfigChecks(checkerCfg, []*domain.KeycloakTenant{{}}, lookup, policy, logger.NewNoop())),
+		alertStore:  store,
+		resolutions: notifier,
+		build: func(tenantID string) (configcheck.Service, bool) {
+			checks := buildConfigChecks(checkerCfg, []*domain.KeycloakTenant{{TenantID: tenantID}}, lookup, policy, log)
 			if len(checks) == 0 {
-				logInfo(p.Logger, "Configuration checker enabled but no checks apply")
-				return nil
+				return nil, false
 			}
-			svc = configcheck.NewService(checks, configCheckAlertStore{repo: p.Alerts}, p.Notifier, p.Logger, checkerCfg.PollInterval,
-				configcheck.WithSilencer(p.Silences))
-			// fx cancels the OnStart context once startup completes, which
-			// would stop the poll loop at once.
-			var runCtx context.Context
-			runCtx, cancel = context.WithCancel(context.Background())
-			return svc.Start(runCtx)
+			return configcheck.NewService(checks, store, notifier, log, checkerCfg.PollInterval,
+				configcheck.WithSilencer(silencer)), true
 		},
-		OnStop: func(context.Context) error {
-			if svc == nil {
-				return nil
-			}
-			cancel()
-			return svc.Stop()
-		},
-	})
+	}
 }
 
 func buildConfigChecks(
