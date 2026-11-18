@@ -148,7 +148,7 @@ AMFA has no page of its own. It appears on the Events page (`/{tenantId}/events`
 
 1. AMFA logins are listed in the events table with source `amfa:<realm>`, but only when the mirror is on (`keycloak.global.amfa_mirror.enabled: true`, off by default). Its first run logs `amfamirror: mirrored events` with a count per realm. On a tenant created or edited in the interface, the AMFA toggle starts and stops the tenant's mirror straight away, as it does the AMFA alert checker: see [Tenants created in the interface](#tenants-created-in-the-interface).
 2. The AMFA KPI cards and the Risk column appear only for realms where any top-level authentication flow contains an enabled AMFA authenticator, bound or not, and with "All Realms" when any realm of the tenant does. The geo map needs one such realm selected. KMT reads the flows to decide this (`GET /api/tenants/{tenantId}/keycloak/amfa-realms`), so a realm without such a flow shows the table only, even if AMFA has events for it.
-3. Map markers come from each login's coordinates: `auth_context.lat/long`, or the `auth_process.auth_context_json` snapshot that the engine writes.
+3. Map markers come from each login's coordinates: `auth_context.lat/long`, or the `auth_process.auth_context_json` snapshot that the engine writes. Only a login AMFA scored has coordinates. A failed login AMFA stored without a risk decision, such as a wrong password or an unknown user, shows its IP address, country and VPN flag from `location_network`, but is not on the map.
 
 ## Troubleshooting
 
@@ -334,7 +334,7 @@ The AMFA risk-alert checker (`amfacheck/`) is a per-tenant poll loop that turns 
 | `repeated_risky` (rule 2) | A user accumulating repeated risky attempts within a window (default 3 within 24h at `min_risk_level` 2+) and still making them. | warning |
 | `vpn_risky` (rule 3) | A risky login originating from a VPN or anonymizing IP. | warning |
 | `login_error` (rule 4a) | A burst of `LOGIN_ERROR` events (default 5 within 5m). | warning |
-| `client_login_error` (rule 4b) | A burst of `CLIENT_LOGIN_ERROR` events (default 5 within 5m). | warning |
+| `client_login_error` (rule 4b) | A burst of `CLIENT_LOGIN_ERROR` events (default 5 within 5m). AMFA stores these only when the Keycloak side forwards them, and the open-source Adaptive MFA plugin does not, so with it this rule never fires. For client authentication failures, use the Keycloak event checker's `client_error` check (`keycloak.global.event_checker.checks.client_error`), which counts the same events from Keycloak without AMFA. | warning |
 
 ### Configuration
 
