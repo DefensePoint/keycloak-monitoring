@@ -78,7 +78,7 @@ func (r *Repository) ListEvents(ctx context.Context, opts amfa.ListEventsOptions
 	// scans as NULL, indistinguishable from absent data, so the Events page
 	// showed those six as empty while the alert rules and events mirror read
 	// them from the same rows without trouble.
-	baseSelect := eventRowSelect(r.coords(ctx)) + `
+	baseSelect := `
           AND e.event_time BETWEEN ? AND ?`
 
 	args := []interface{}{opts.RealmID, opts.RealmID, start, end}
@@ -94,7 +94,9 @@ func (r *Repository) ListEvents(ctx context.Context, opts amfa.ListEventsOptions
 	args = append(args, opts.Limit, opts.Offset)
 
 	var rows []eventRowScan
-	if err := r.db.WithContext(ctx).Raw(baseSelect, args...).Scan(&rows).Error; err != nil {
+	if err := r.withCoordinates(ctx, func(c coordinates) error {
+		return r.db.WithContext(ctx).Raw(eventRowSelect(c)+baseSelect, args...).Scan(&rows).Error
+	}); err != nil {
 		return nil, classifyDBError(err, "amfa list events")
 	}
 
@@ -195,7 +197,9 @@ func (r *Repository) GetGeoBuckets(ctx context.Context, opts amfa.GeoOptions) ([
 	start, end := normalizeTimeWindow(opts.StartTime, opts.EndTime, r.lookbackDays)
 
 	var buckets []amfa.GeoBucket
-	if err := r.db.WithContext(ctx).Raw(geoQuery(r.coords(ctx)), opts.RealmID, opts.RealmID, start, end).Scan(&buckets).Error; err != nil {
+	if err := r.withCoordinates(ctx, func(c coordinates) error {
+		return r.db.WithContext(ctx).Raw(geoQuery(c), opts.RealmID, opts.RealmID, start, end).Scan(&buckets).Error
+	}); err != nil {
 		return nil, classifyDBError(err, "amfa geo query")
 	}
 	return buckets, nil

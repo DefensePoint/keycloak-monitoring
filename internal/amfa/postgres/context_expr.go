@@ -87,10 +87,10 @@ const realmAttributedExpr = `COALESCE(NULLIF(e.realm_id, ''), p.auth_context_jso
 // coordinates are the expressions a query reads a login's coordinates with.
 //
 // location_network has coordinates only from engine migration 5ae8978564f9 on.
-// On an older AMFA, Point's included, a query naming the columns fails
-// outright, so they are read only where they exist (Repository.coords). They
-// are the last source, like the other location_network fields: a scored login
-// keeps its snapshot's.
+// On an older AMFA, Point's included, or after the engine's downgrade drops
+// them, a query naming the columns fails outright, so they are read only where
+// they exist (Repository.withCoordinates). They are the last source, like the
+// other location_network fields: a scored login keeps its snapshot's.
 type coordinates struct {
 	lat, long string
 }
