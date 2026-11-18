@@ -15,6 +15,7 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
 	"github.com/DefensePoint/keycloak-monitoring/internal/notifications"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
 )
 
 // AmfaCheckModule wires the AMFA risk-alert checker: one per-tenant
@@ -113,6 +114,7 @@ type AmfaCheckParams struct {
 	Notifier notifications.Service
 	Keycloak keycloak.Service
 	Silences alerts.SilenceManager
+	Tenants  tenant.Service
 	Logger   *logger.Logger
 }
 
@@ -121,7 +123,7 @@ type AmfaCheckParams struct {
 // runs; the lifecycle starter (below) starts/stops the same Service instances.
 func provideAmfaCheckRunner(p AmfaCheckParams) (*amfacheck.Runner, *amfaTenantWorkers[amfacheck.Service]) {
 	return newAmfaCheckWorkers(p.Config, p.Registry, p.Keycloak,
-		amfaCheckAlertStore{repo: p.Alerts}, p.Notifier, p.Silences, p.Logger)
+		amfaCheckAlertStore{repo: p.Alerts}, p.Notifier, p.Silences, p.Tenants, p.Logger)
 }
 
 // newAmfaCheckWorkers is the unit-testable core of provideAmfaCheckRunner. It
@@ -134,6 +136,9 @@ func newAmfaCheckWorkers(
 	alertStore amfacheck.AlertStore,
 	notifier amfacheck.NotificationService,
 	silencer amfacheck.Silencer,
+	tenants interface {
+		ListTenants(ctx context.Context) ([]*domain.KeycloakTenant, error)
+	},
 	log *logger.Logger,
 ) (*amfacheck.Runner, *amfaTenantWorkers[amfacheck.Service]) {
 	runner := amfacheck.NewRunner(nil)
@@ -149,9 +154,23 @@ func newAmfaCheckWorkers(
 	}
 	if cfg.Keycloak.Global.AmfaChecker.Enabled {
 		workers.build = amfaCheckBuilder(cfg, realms, alertStore, notifier, silencer, log)
+		workers.closer = &amfaAlertCloser{types: amfaCheckTypes(cfg.Keycloak.Global.AmfaChecker),
+			store: alertStore, notifier: notifier, tenants: tenants}
 		workers.follow(registry)
 	}
 	return runner, workers
+}
+
+// amfaCheckTypes returns the check types of the AMFA checks the configuration
+// enables, the alerts a tenant's checker can raise.
+func amfaCheckTypes(amfaCfg config.AmfaCheckerConfig) []string {
+	amfaCfg.ApplyDefaults()
+	checks := buildAmfaChecks("", nil, nil, amfaCfg, nil, noopAmfacheckLogger{})
+	out := make([]string, 0, len(checks))
+	for _, c := range checks {
+		out = append(out, c.GetCheckType())
+	}
+	return out
 }
 
 // buildAmfaCheckServices builds the config.yaml tenants' services. log may be

@@ -257,7 +257,7 @@ func checkerConfig(enabled bool) *config.AppConfig {
 
 func newCheckerUnderTest(t *testing.T, cfg *config.AppConfig, reg *amfa.Registry) (*amfacheck.Runner, *amfaTenantWorkers[amfacheck.Service]) {
 	t.Helper()
-	runner, workers := newAmfaCheckWorkers(cfg, reg, acRealmRepoStub{}, acFakeAlertStore{}, acFakeNotifier{}, nil, nil)
+	runner, workers := newAmfaCheckWorkers(cfg, reg, acRealmRepoStub{}, acFakeAlertStore{}, acFakeNotifier{}, nil, nil, nil)
 	t.Cleanup(func() { _ = workers.pool.Stop() })
 	return runner, workers
 }
