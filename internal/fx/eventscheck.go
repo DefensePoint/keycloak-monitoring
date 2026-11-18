@@ -128,6 +128,9 @@ func newEventsCheckWorkers(
 		// tenant cache, and before the HTTP server serves.
 		loadTenants: true,
 		log:         log,
+		alertTypes:  checkTypes(buildEventsChecks("", nil, events, checkerCfg, adaptedLog)),
+		alertStore:  alertStore,
+		resolutions: notifier,
 		build: func(tenantID string) (eventscheck.Service, bool) {
 			realmsFn := eventscheck.RealmsFunc(tenantRealmsFunc(realms, tenantID))
 			checks := buildEventsChecks(tenantID, realmsFn, events, checkerCfg, adaptedLog)

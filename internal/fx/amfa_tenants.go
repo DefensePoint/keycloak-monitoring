@@ -2,6 +2,9 @@ package fx
 
 import (
 	"context"
+	"fmt"
+	"reflect"
+	"sync"
 	"time"
 
 	"go.uber.org/fx"
@@ -26,11 +29,17 @@ type amfaTenantSync struct {
 	service  tenant.Service
 	cfg      *config.AppConfig
 	log      *logger.Logger
+
+	// registeredMu guards registered: the settings each database tenant's
+	// current repository was built from, so a save that leaves them as they
+	// were keeps the repository, and with it the AMFA checker and mirror that
+	// follow the registry.
+	registeredMu sync.Mutex
+	registered   map[string]config.TenantConfig
 }
 
 // startupLoadTimeout bounds the initial database read so a slow or unreachable
-// database cannot hold up boot. AMFA is an optional add-on: a tenant missed
-// here is picked up by the next tenant change or the next restart.
+// database cannot hold up boot indefinitely.
 const startupLoadTimeout = 15 * time.Second
 
 // registerAmfaTenantSync loads database tenants into the registry and
@@ -60,8 +69,7 @@ func registerAmfaTenantSync(
 		OnStart: func(ctx context.Context) error {
 			loadCtx, cancel := context.WithTimeout(ctx, startupLoadTimeout)
 			defer cancel()
-			s.loadExisting(loadCtx)
-			return nil
+			return s.loadExisting(loadCtx)
 		},
 	})
 
@@ -69,18 +77,19 @@ func registerAmfaTenantSync(
 }
 
 // loadExisting registers every database tenant that has AMFA configured.
-func (s *amfaTenantSync) loadExisting(ctx context.Context) {
+//
+// A failure fails startup rather than being logged and skipped. The AMFA
+// checker and mirror follow the registry, so a skipped load would leave every
+// database tenant without AMFA endpoints, alerts and mirrored events until each
+// is saved again. The monitoring module fails startup on the same load.
+func (s *amfaTenantSync) loadExisting(ctx context.Context) error {
 	if err := s.service.LoadTenants(ctx); err != nil {
-		logWarn(s.log, "Could not load tenants for AMFA; API-configured tenants will not expose AMFA endpoints until the next change",
-			logger.Err(err))
-		return
+		return fmt.Errorf("load tenants for AMFA endpoints, alerts and mirroring: %w", err)
 	}
 
 	tenants, err := s.service.ListTenants(ctx)
 	if err != nil {
-		logWarn(s.log, "Could not list tenants for AMFA; API-configured tenants will not expose AMFA endpoints until the next change",
-			logger.Err(err))
-		return
+		return fmt.Errorf("list tenants for AMFA endpoints, alerts and mirroring: %w", err)
 	}
 
 	loaded := 0
@@ -92,6 +101,7 @@ func (s *amfaTenantSync) loadExisting(ctx context.Context) {
 	if loaded > 0 {
 		logInfo(s.log, "AMFA registered for database tenants", logger.Int("count", loaded))
 	}
+	return nil
 }
 
 // handleTenantChange re-evaluates one tenant's AMFA repository.
@@ -105,6 +115,9 @@ func (s *amfaTenantSync) handleTenantChange(event tenant.Event, t *domain.Keyclo
 	}
 	switch event {
 	case tenant.EventRemoved, tenant.EventDisabled:
+		s.registeredMu.Lock()
+		delete(s.registered, t.TenantID)
+		s.registeredMu.Unlock()
 		s.registry.Unregister(t.TenantID)
 		logInfo(s.log, "AMFA unregistered for tenant", logger.Str("tenant_id", t.TenantID))
 	case tenant.EventAdded, tenant.EventUpdated, tenant.EventEnabled:
@@ -113,9 +126,45 @@ func (s *amfaTenantSync) handleTenantChange(event tenant.Event, t *domain.Keyclo
 }
 
 // apply registers or unregisters one tenant based on its current settings, and
-// reports whether it ended up registered.
+// reports whether it ended up registered. A tenant already registered with the
+// same AMFA connection settings is left as it is.
 func (s *amfaTenantSync) apply(t *domain.KeycloakTenant) bool {
-	return applyAmfaTenant(s.registry, t, s.cfg, s.log)
+	if t == nil {
+		return false
+	}
+	s.registeredMu.Lock()
+	defer s.registeredMu.Unlock()
+
+	var settings config.TenantConfig
+	eligible := !t.IsConfigDefined && t.Enabled && t.Amfa != nil && t.Amfa.Enabled && t.Amfa.APIBaseURL != ""
+	if eligible {
+		settings = amfaConnectionSettings(t)
+		if prev, ok := s.registered[t.TenantID]; ok && reflect.DeepEqual(prev, settings) {
+			if _, err := s.registry.RepositoryFor(t.TenantID); err == nil {
+				return true
+			}
+		}
+	}
+
+	ok := applyAmfaTenant(s.registry, t, s.cfg, s.log)
+	if s.registered == nil {
+		s.registered = map[string]config.TenantConfig{}
+	}
+	if ok {
+		s.registered[t.TenantID] = settings
+	} else {
+		delete(s.registered, t.TenantID)
+	}
+	return ok
+}
+
+// amfaConnectionSettings is what a tenant's AMFA repository is built from: the
+// AMFA settings and the Keycloak client that issues its tokens. The display
+// name is left out, so a rename does not restart anything.
+func amfaConnectionSettings(t *domain.KeycloakTenant) config.TenantConfig {
+	c := amfaTenantConfigFrom(t)
+	c.Name = ""
+	return c
 }
 
 // applyAmfaTenant registers or unregisters one database tenant based on its

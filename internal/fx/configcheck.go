@@ -178,8 +178,11 @@ func newConfigCheckWorkers(
 	log *logger.Logger,
 ) *tenantCheckWorkers[configcheck.Service] {
 	w := &tenantCheckWorkers[configcheck.Service]{
-		component: "configcheck",
-		log:       log,
+		component:   "configcheck",
+		log:         log,
+		alertTypes:  checkTypes(buildConfigChecks(checkerCfg, []*domain.KeycloakTenant{{}}, lookup, policy, logger.NewNoop())),
+		alertStore:  store,
+		resolutions: notifier,
 		build: func(tenantID string) (configcheck.Service, bool) {
 			checks := buildConfigChecks(checkerCfg, []*domain.KeycloakTenant{{TenantID: tenantID}}, lookup, policy, log)
 			if len(checks) == 0 {

@@ -320,7 +320,8 @@ keycloak:
       # Master switch, off by default: nothing below runs until it is on.
       # When on, every enabled tenant, including one created in the interface,
       # gets the checks enabled below; creating, enabling, disabling or deleting
-      # a tenant starts or stops its checks without a restart. Per-tenant
+      # a tenant starts or stops its checks without a restart, and disabling one
+      # resolves its open alerts from these checks. Per-tenant
       # config_checker overrides are not applied yet. The realm and client
       # security checks are on by default and did not run in KMT 1.0.x, so
       # expect a first wave of alerts for existing misconfigurations.
@@ -477,6 +478,15 @@ keycloak:
     # Check for newer Keycloak versions
     # ========================================================================
     version_checker:
+      # Off by default; the only setting that contacts a host outside your
+      # infrastructure (api.github.com). Only a server reporting a plain
+      # release number, such as 26.4.2, is compared: a vendor or distribution
+      # build, such as Red Hat build of Keycloak (26.4.2.redhat-00001), follows
+      # its own release line and is never shown as behind. The Health page then
+      # says the update check does not apply to that build, and the server logs
+      # it once per tenant.
+      enabled: false
+
       # Cache duration for version information
       cache_ttl: 24h
 

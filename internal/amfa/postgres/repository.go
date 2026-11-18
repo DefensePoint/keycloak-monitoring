@@ -15,6 +15,8 @@ import (
 type Repository struct {
 	db           *gorm.DB
 	lookbackDays int // 0 means use defaultLookbackDays
+
+	schema networkCoordinatesCheck
 }
 
 // defaultLookbackDays is applied when no per-tenant lookback is configured.
@@ -54,7 +56,8 @@ var _ amfa.Repository = (*Repository)(nil)
 //
 // Client/IP/country/geo/VPN are read with a COALESCE fallback: the auth_context
 // table first (its intended source, which adaptive-auth never populates), then
-// auth_process.auth_context_json (what works currently). See context_expr.go.
+// auth_process.auth_context_json (what works currently), and for IP, country
+// and VPN, location_network last. See context_expr.go.
 func (r *Repository) ListEvents(ctx context.Context, opts amfa.ListEventsOptions) (*amfa.ListEventsResult, error) {
 	if opts.RealmID == "" {
 		return nil, fmt.Errorf("amfa.ListEvents: realm_id is required")
@@ -75,7 +78,7 @@ func (r *Repository) ListEvents(ctx context.Context, opts amfa.ListEventsOptions
 	// scans as NULL, indistinguishable from absent data, so the Events page
 	// showed those six as empty while the alert rules and events mirror read
 	// them from the same rows without trouble.
-	baseSelect := eventRowSelect + `
+	baseSelect := `
           AND e.event_time BETWEEN ? AND ?`
 
 	args := []interface{}{opts.RealmID, opts.RealmID, start, end}
@@ -91,7 +94,9 @@ func (r *Repository) ListEvents(ctx context.Context, opts amfa.ListEventsOptions
 	args = append(args, opts.Limit, opts.Offset)
 
 	var rows []eventRowScan
-	if err := r.db.WithContext(ctx).Raw(baseSelect, args...).Scan(&rows).Error; err != nil {
+	if err := r.withCoordinates(ctx, func(c coordinates) error {
+		return r.db.WithContext(ctx).Raw(eventRowSelect(c)+baseSelect, args...).Scan(&rows).Error
+	}); err != nil {
 		return nil, classifyDBError(err, "amfa list events")
 	}
 
@@ -162,6 +167,7 @@ func (r *Repository) GetStats(ctx context.Context, opts amfa.StatsOptions) (amfa
         FROM auth_event e
         LEFT JOIN auth_process p   ON p.id   = e.auth_process
         LEFT JOIN auth_context ac  ON ac.hash = e.auth_context_hash
+        ` + joinNetworkLocation + `
         WHERE e.event_time BETWEEN ? AND ?
           ` + realmClause
 
@@ -190,33 +196,39 @@ func (r *Repository) GetGeoBuckets(ctx context.Context, opts amfa.GeoOptions) ([
 	}
 	start, end := normalizeTimeWindow(opts.StartTime, opts.EndTime, r.lookbackDays)
 
-	// Country and coordinates go through the auth_context_json fallback
-	// (context_expr.go). Reading ac.lat / ac.long alone returned zero buckets
-	// for every realm, because adaptive-auth never writes auth_context rows -
-	// the map was empty no matter how much geolocated traffic AMFA had.
-	sql := `
+	var buckets []amfa.GeoBucket
+	if err := r.withCoordinates(ctx, func(c coordinates) error {
+		return r.db.WithContext(ctx).Raw(geoQuery(c), opts.RealmID, opts.RealmID, start, end).Scan(&buckets).Error
+	}); err != nil {
+		return nil, classifyDBError(err, "amfa geo query")
+	}
+	return buckets, nil
+}
+
+// geoQuery is the map aggregate. Country and coordinates go through the
+// auth_context_json fallback (context_expr.go). Reading ac.lat / ac.long alone
+// returned zero buckets for every realm, because adaptive-auth never writes
+// auth_context rows - the map was empty no matter how much geolocated traffic
+// AMFA had.
+func geoQuery(c coordinates) string {
+	return `
         SELECT
             ` + exprCountry + `                        AS country,
-            ROUND((` + exprLat + `)::numeric, 1)::float8   AS lat,
-            ROUND((` + exprLong + `)::numeric, 1)::float8  AS long,
+            ROUND((` + c.lat + `)::numeric, 1)::float8   AS lat,
+            ROUND((` + c.long + `)::numeric, 1)::float8  AS long,
             COUNT(*)                                                       AS count,
             COUNT(*) FILTER (WHERE p.pre_auth_risk_decision >= 3)          AS risky_count
         FROM auth_event e
         LEFT JOIN auth_process p   ON p.id   = e.auth_process
         LEFT JOIN auth_context ac  ON ac.hash = e.auth_context_hash
+        ` + joinNetworkLocation + `
         WHERE ` + realmFilterExpr + `
           AND e.event_time BETWEEN ? AND ?
-          AND ` + exprHasGeo + `
+          AND ` + c.hasGeo() + `
         GROUP BY ` + exprCountry + `,
-                 ROUND((` + exprLat + `)::numeric, 1),
-                 ROUND((` + exprLong + `)::numeric, 1)
+                 ROUND((` + c.lat + `)::numeric, 1),
+                 ROUND((` + c.long + `)::numeric, 1)
         ORDER BY count DESC`
-
-	var buckets []amfa.GeoBucket
-	if err := r.db.WithContext(ctx).Raw(sql, opts.RealmID, opts.RealmID, start, end).Scan(&buckets).Error; err != nil {
-		return nil, classifyDBError(err, "amfa geo query")
-	}
-	return buckets, nil
 }
 
 // normalizeTimeWindow applies sensible defaults:
