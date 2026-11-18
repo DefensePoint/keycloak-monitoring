@@ -890,3 +890,59 @@ func TestRepository_FailedLoginReadsItsNetworkLocation(t *testing.T) {
 		t.Errorf("FlaggedIPs = %d, want 1 (the failed login's VPN address)", stats.FlaggedIPs)
 	}
 }
+
+// TestRepository_FailedLoginOnTheMap covers a failed login AMFA stored without
+// a risk decision, on an AMFA whose location_network has coordinates (engine
+// migration 5ae8978564f9). Its coordinates are only there, so before this the
+// map could not place a wrong password or an unknown user at all. On an older
+// AMFA the columns do not exist, the queries must not name them, and the test
+// is skipped: the rest of this suite covers that schema.
+func TestRepository_FailedLoginOnTheMap(t *testing.T) {
+	db := openAmfaTestDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	if !repo.networkCoordinates(ctx) {
+		t.Skip("location_network has no lat/long on this AMFA database; run against a migrated engine")
+	}
+
+	const (
+		realm   = "tdd-failed-login-map-realm"
+		eventID = "eeeeeeee-0000-0000-0000-000000000001"
+		netHash = "tdd-failed-login-map-network-hash"
+	)
+	eventTime := time.Now().UTC()
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM auth_event WHERE id = ?`, eventID)
+		db.Exec(`DELETE FROM location_network WHERE hash = ?`, netHash)
+	})
+	if err := db.Exec(`
+		INSERT INTO location_network (hash, geolocation_cluster_label, country, is_vpn_flag, ip_address, lat, long)
+		VALUES (?, 0, 'NL', 0, '198.51.100.78', 52.3676, 4.9041)`, netHash).Error; err != nil {
+		t.Fatalf("seed location_network: %v", err)
+	}
+	if err := db.Exec(`
+		INSERT INTO auth_event (id, event_type, event_time, realm_id, network_location_hash)
+		VALUES (?, 'LOGIN_ERROR', ?, ?, ?)`, eventID, eventTime, realm, netHash).Error; err != nil {
+		t.Fatalf("seed auth_event: %v", err)
+	}
+
+	res, err := repo.ListEvents(ctx, amfa.ListEventsOptions{RealmID: realm, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if len(res.Items) != 1 || res.Items[0].Lat == nil || *res.Items[0].Lat != 52.3676 ||
+		res.Items[0].Long == nil || *res.Items[0].Long != 4.9041 {
+		t.Fatalf("failed login coordinates not read from location_network: %+v", res.Items)
+	}
+
+	start, end := eventTime.Add(-time.Minute), eventTime.Add(time.Minute)
+	buckets, err := repo.GetGeoBuckets(ctx, amfa.GeoOptions{RealmID: realm, StartTime: &start, EndTime: &end})
+	if err != nil {
+		t.Fatalf("GetGeoBuckets: %v", err)
+	}
+	if len(buckets) != 1 || buckets[0].Lat != 52.4 || buckets[0].Long != 4.9 ||
+		buckets[0].Count != 1 || buckets[0].Country == nil || *buckets[0].Country != "NL" {
+		t.Fatalf("failed login not on the map: %+v", buckets)
+	}
+}
