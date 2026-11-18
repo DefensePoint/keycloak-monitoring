@@ -44,6 +44,9 @@ type tenantCheckWorkers[S lifecycle.Poller] struct {
 	// meanwhile would be cached stale.
 	loadTenants bool
 	log         *logger.Logger
+	// tenantsChanged, when set, is told the tenants with a service once the
+	// startup list is applied and after every change. It runs with w.mu held.
+	tenantsChanged func(running map[string]bool)
 
 	mu sync.Mutex
 	// running holds the tenants that have a service.
@@ -88,6 +91,9 @@ func (w *tenantCheckWorkers[S]) start(ctx context.Context, tenants tenantSource)
 	w.loaded = true
 	w.changed = nil
 	logInfo(w.log, w.component+" services constructed", logger.Int("tenants", len(w.running)))
+	if w.tenantsChanged != nil {
+		w.tenantsChanged(w.running)
+	}
 	w.mu.Unlock()
 
 	return w.pool.Start()
@@ -133,6 +139,9 @@ func (w *tenantCheckWorkers[S]) tenantChanged(event tenant.Event, t *domain.Keyc
 		} else {
 			w.removeLocked(t.TenantID)
 		}
+	}
+	if w.loaded && !w.stopped && w.tenantsChanged != nil {
+		w.tenantsChanged(w.running)
 	}
 }
 

@@ -2,6 +2,8 @@ package fx
 
 import (
 	"context"
+	"strings"
+	"sync"
 
 	"go.uber.org/fx"
 
@@ -124,8 +126,48 @@ func registerConfigCheckHooks(p ConfigCheckParams) {
 		configCheckAlertStore{repo: p.Alerts}, p.Notifier, p.Silences, p.Logger).hook(p.Lifecycle, p.Tenants)
 }
 
+// unmatchedSecretEntries warns about identity provider secret entries whose
+// tenant is not one the checker runs for, a typo or a disabled or deleted
+// tenant: their expiry is not watched. It warns once per entry, and again if
+// the entry matches a tenant for a while and then stops matching.
+type unmatchedSecretEntries struct {
+	listed []config.IdentityProviderSecret
+	log    *logger.Logger
+
+	mu     sync.Mutex
+	warned map[int]bool
+}
+
+func (u *unmatchedSecretEntries) report(running map[string]bool) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.warned == nil {
+		u.warned = map[int]bool{}
+	}
+	for i, s := range u.listed {
+		matched := false
+		for tenantID := range running {
+			if strings.EqualFold(s.Tenant, tenantID) {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			delete(u.warned, i)
+			continue
+		}
+		if !u.warned[i] {
+			u.warned[i] = true
+			logWarn(u.log, "identity_provider_secret_expiry: secrets entry names no enabled tenant, so its expiry is not watched",
+				logger.Str("tenant", s.Tenant), logger.Str("realm", s.Realm),
+				logger.Str("identity_provider", s.IdentityProvider), logger.Int("entry", i))
+		}
+	}
+}
+
 // newConfigCheckWorkers runs one configuration checker service per enabled
-// tenant, with the checks the configuration enables.
+// tenant, with the checks the configuration enables, and warns about identity
+// provider secret entries that name none of those tenants.
 func newConfigCheckWorkers(
 	checkerCfg config.ConfigCheckerConfig,
 	lookup func(tenantID string) configcheck.KeycloakClient,
@@ -135,7 +177,7 @@ func newConfigCheckWorkers(
 	silencer configcheck.Silencer,
 	log *logger.Logger,
 ) *tenantCheckWorkers[configcheck.Service] {
-	return &tenantCheckWorkers[configcheck.Service]{
+	w := &tenantCheckWorkers[configcheck.Service]{
 		component: "configcheck",
 		log:       log,
 		build: func(tenantID string) (configcheck.Service, bool) {
@@ -147,6 +189,10 @@ func newConfigCheckWorkers(
 				configcheck.WithSilencer(silencer)), true
 		},
 	}
+	if expiry := checkerCfg.Checks.IdentityProviderSecretExpiry; expiry.Enabled && len(expiry.Secrets) > 0 {
+		w.tenantsChanged = (&unmatchedSecretEntries{listed: expiry.Secrets, log: log}).report
+	}
+	return w
 }
 
 func buildConfigChecks(
@@ -196,7 +242,8 @@ func buildConfigChecks(
 			// Also for a tenant with no listed secret, so the alerts of
 			// entries since removed resolve.
 			checks = append(checks, configcheck.NewIdentityProviderSecretExpiryCheck(kc, log, t.TenantID,
-				c.IdentityProviderSecretExpiry.WarningDays, tenantSecretExpiries(c.IdentityProviderSecretExpiry.Secrets, t.TenantID)))
+				c.IdentityProviderSecretExpiry.WarningDays, c.IdentityProviderSecretExpiry.ErrorDays,
+				tenantSecretExpiries(c.IdentityProviderSecretExpiry.Secrets, t.TenantID)))
 		}
 	}
 	logInfo(log, "Configuration checks constructed",
@@ -206,11 +253,13 @@ func buildConfigChecks(
 }
 
 // tenantSecretExpiries returns the listed identity provider secrets of one
-// tenant. The dates were validated when the configuration was loaded.
+// tenant. The dates were validated when the configuration was loaded. The
+// tenant is compared without case: viper lower-cases the tenant IDs of
+// config.yaml, so a tenant written Prod: there has the ID prod.
 func tenantSecretExpiries(listed []config.IdentityProviderSecret, tenantID string) []configcheck.IdentityProviderSecretExpiry {
 	var out []configcheck.IdentityProviderSecretExpiry
 	for _, s := range listed {
-		if s.Tenant != tenantID {
+		if !strings.EqualFold(s.Tenant, tenantID) {
 			continue
 		}
 		expiresOn, err := s.ExpiryDate()

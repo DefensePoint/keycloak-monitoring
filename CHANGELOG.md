@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- A configuration check warns before the client secret of an identity provider expires. Keycloak does not know the date, so it is listed per provider under `keycloak.global.config_checker.checks.identity_provider_secret_expiry.secrets`, as the provider shows it. A warning comes 30 days before, an error 7 days before, which email also gets with the default thresholds, and a critical alert from that day on. A listed provider or realm Keycloak does not have raises a warning, and an entry naming no enabled tenant is logged.
+
+### Fixed
+
+- The configuration checks read every identity provider of a realm; Keycloak lists only the first 100 unless asked for more, so SAML certificate and metadata checks skipped the rest
+
 ## [2.0.2] - 2026-10-20
 
 ### Fixed

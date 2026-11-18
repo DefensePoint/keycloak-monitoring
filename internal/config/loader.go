@@ -349,6 +349,7 @@ func setDefaults(v *viper.Viper) {
 	// until a secret is listed.
 	v.SetDefault("keycloak.global.config_checker.checks.identity_provider_secret_expiry.enabled", true)
 	v.SetDefault("keycloak.global.config_checker.checks.identity_provider_secret_expiry.warning_days", 30)
+	v.SetDefault("keycloak.global.config_checker.checks.identity_provider_secret_expiry.error_days", 7)
 
 	// Realm Security Check defaults
 	v.SetDefault("keycloak.global.config_checker.checks.realm_security.enabled", true)

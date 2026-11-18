@@ -57,6 +57,9 @@ func (c IdentityProviderSecretExpiryCheckConfig) Validate() error {
 	if c.WarningDays <= 0 {
 		return fmt.Errorf("%s.warning_days must be a positive number of days, got %d", key, c.WarningDays)
 	}
+	if c.ErrorDays <= 0 || c.ErrorDays > c.WarningDays {
+		return fmt.Errorf("%s.error_days must be a positive number of days, at most warning_days (%d), got %d", key, c.WarningDays, c.ErrorDays)
+	}
 	seen := make(map[IdentityProviderSecret]bool, len(c.Secrets))
 	for i, s := range c.Secrets {
 		where := fmt.Sprintf("%s.secrets[%d]", key, i)
@@ -73,7 +76,7 @@ func (c IdentityProviderSecretExpiryCheckConfig) Validate() error {
 		if _, err := s.ExpiryDate(); err != nil {
 			return fmt.Errorf("%s: expires_on %q is not a date written as YYYY-MM-DD", where, s.ExpiresOn)
 		}
-		id := IdentityProviderSecret{Tenant: s.Tenant, Realm: s.Realm, IdentityProvider: s.IdentityProvider}
+		id := IdentityProviderSecret{Tenant: strings.ToLower(s.Tenant), Realm: s.Realm, IdentityProvider: s.IdentityProvider}
 		if seen[id] {
 			return fmt.Errorf("%s: identity provider %q of tenant %q realm %q is listed more than once",
 				where, s.IdentityProvider, s.Tenant, s.Realm)

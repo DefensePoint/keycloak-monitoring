@@ -384,18 +384,23 @@ keycloak:
         identity_provider_secret_expiry:
           enabled: true           # does nothing until a secret is listed
 
-          # A warning alert is raised this many days before expiry. From the
-          # day after expires_on, a separate critical alert is raised and
-          # notified, and the warning is resolved without a notification.
+          # A warning alert is raised this many days before expires_on, an
+          # error alert error_days before it, and a critical alert from
+          # expires_on on; each replaces the one before. With the default
+          # thresholds Slack gets all three, email the error and the critical
+          # alert, GitLab the critical alert.
           warning_days: 30
+          error_days: 7           # at most warning_days
 
-          # tenant is the KMT tenant ID (config.yaml or interface tenant),
-          # identity_provider the provider's alias in Keycloak, and expires_on
-          # the last day the secret is valid, as YYYY-MM-DD (UTC). An entry
-          # whose realm or provider Keycloak does not have raises a warning.
-          # A malformed or duplicate entry stops startup. Each secret is
-          # notified at most twice, the warning and the expired alert; see
-          # "How Often an Alert Is Sent" below.
+          # tenant is the KMT tenant ID (config.yaml or interface tenant, in
+          # any case), identity_provider the provider's alias in Keycloak, and
+          # expires_on the secret's expiry date as the provider shows it,
+          # YYYY-MM-DD (UTC). An entry whose realm or provider Keycloak does
+          # not have raises a warning; one whose tenant is no enabled tenant
+          # is logged as a warning. When Keycloak cannot list a realm's
+          # providers, its secrets are still judged by date. A malformed or
+          # duplicate entry stops startup. See "How Often an Alert Is Sent"
+          # below.
           secrets: []
           # Example:
           # secrets:
@@ -854,7 +859,7 @@ For the configuration checks' alerts, including the identity provider secret exp
 - A channel is sent an alert once, when it is raised. While the alert stays active it is not sent again: once an hour the checker only resends it to a channel whose earlier send failed.
 - When the alert resolves, Slack gets a message and the GitLab issue is commented on and closed. Email gets no resolution message.
 - An alert that resolves and is found again later is a new occurrence, and is sent again.
-- An identity provider secret is sent at most twice: a warning `warning_days` before `expires_on`, and, if it is not renewed, a critical alert from the day after. The critical alert replaces the warning, which resolves without a message of its own. Changing `expires_on` while its warning is open raises a new warning, sent once.
+- For one `expires_on` date, an identity provider secret is sent at most three alerts: a warning `warning_days` before it, an error `error_days` before it, and a critical alert from that day on, each only to the channels whose `min_severity` it reaches. Each replaces the one before, which resolves without a message of its own. A renewed secret with a new `expires_on` starts over, so a renewal inside the window is sent again when the new date comes near.
 - The first time the configuration checker runs, it sends one alert for every misconfiguration it finds, for each tenant and realm, all at once. After that, only new problems are sent.
 
 ### Alert Silences

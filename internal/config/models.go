@@ -442,17 +442,22 @@ type IdentityProviderMetadataCheckConfig struct {
 type IdentityProviderSecretExpiryCheckConfig struct {
 	Enabled bool `mapstructure:"enabled"`
 	// WarningDays is how many days before expiry the warning starts.
-	WarningDays int                      `mapstructure:"warning_days"`
-	Secrets     []IdentityProviderSecret `mapstructure:"secrets"`
+	WarningDays int `mapstructure:"warning_days"`
+	// ErrorDays is how many days before expiry the warning becomes an error,
+	// which email gets with the default thresholds.
+	ErrorDays int                      `mapstructure:"error_days"`
+	Secrets   []IdentityProviderSecret `mapstructure:"secrets"`
 }
 
 // IdentityProviderSecret is when one identity provider's client secret
-// expires. The tenant is the KMT tenant ID, from config.yaml or the interface.
+// expires. The tenant is the KMT tenant ID, from config.yaml or the
+// interface, in any case: viper lower-cases config.yaml's tenant IDs.
 type IdentityProviderSecret struct {
 	Tenant           string `mapstructure:"tenant"`
 	Realm            string `mapstructure:"realm"`
 	IdentityProvider string `mapstructure:"identity_provider"`
-	// ExpiresOn is the last day the secret is valid, as YYYY-MM-DD (UTC).
+	// ExpiresOn is the expiry date the provider shows for the secret, as
+	// YYYY-MM-DD (UTC). From that day on it counts as expired.
 	ExpiresOn string `mapstructure:"expires_on"`
 }
 

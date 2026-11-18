@@ -14,7 +14,8 @@ import (
 )
 
 // IdentityProviderSecretExpiry is when one identity provider's client secret
-// expires: ExpiresOn is midnight UTC of the last day it is valid.
+// expires: ExpiresOn is midnight UTC of the expiry date the provider shows,
+// the first day the secret may no longer work.
 type IdentityProviderSecretExpiry struct {
 	Realm            string
 	IdentityProvider string
@@ -25,11 +26,17 @@ type IdentityProviderSecretExpiry struct {
 // identity provider expires, and alerts once it has. Keycloak does not know
 // when a secret expires: the provider that issued it does, so the dates come
 // from the configuration.
+//
+// The alert grows with the date: a warning from warningDays before it, an
+// error from errorDays before it, which email gets with the default
+// thresholds, and a critical alert from the date on. Each replaces the one
+// before.
 type IdentityProviderSecretExpiryCheck struct {
 	keycloakClient KeycloakClient
 	logger         *logger.Logger
 	tenantID       string
 	warningDays    int
+	errorDays      int
 	secrets        []IdentityProviderSecretExpiry
 	now            func() time.Time
 }
@@ -41,16 +48,21 @@ func NewIdentityProviderSecretExpiryCheck(
 	log *logger.Logger,
 	tenantID string,
 	warningDays int,
+	errorDays int,
 	secrets []IdentityProviderSecretExpiry,
 ) *IdentityProviderSecretExpiryCheck {
 	if warningDays <= 0 {
 		warningDays = 30
+	}
+	if errorDays <= 0 {
+		errorDays = 7
 	}
 	return &IdentityProviderSecretExpiryCheck{
 		keycloakClient: keycloakClient,
 		logger:         log.WithComponent("idp_secret_expiry_check"),
 		tenantID:       tenantID,
 		warningDays:    warningDays,
+		errorDays:      errorDays,
 		secrets:        secrets,
 		now:            time.Now,
 	}
@@ -73,12 +85,16 @@ func (c *IdentityProviderSecretExpiryCheck) Execute(ctx context.Context) ([]*dom
 }
 
 // Evaluate judges every listed secret whose realm is enabled, and reports the
-// realms whose identity providers it read, and those with no listed secret. A secret whose realm or provider
-// Keycloak does not have raises an alert, since its expiry is no longer
-// watched; only a 404 says a realm does not exist, since Keycloak lists only
-// the realms the monitoring client can see. A disabled realm is skipped, so
-// its alerts resolve with it, and one whose providers could not be listed,
-// or that the client cannot see, keeps its alerts as they are.
+// realms whose identity providers it read, and those with no listed secret. A
+// secret whose realm or provider Keycloak does not have raises an alert, since
+// its expiry is no longer watched; only a 404 says a realm does not exist,
+// since Keycloak lists only the realms the monitoring client can see. A
+// disabled realm is skipped, so its alerts resolve with it.
+//
+// The date comes from the configuration, so a secret is judged even when
+// Keycloak cannot say whether its provider exists: in a realm whose providers
+// could not be listed, or that the client cannot see. Such a realm is not
+// marked as read, so its other alerts stay as they are.
 func (c *IdentityProviderSecretExpiryCheck) Evaluate(ctx context.Context) (Evaluation, error) {
 	eval := Evaluation{Evaluation: clearing.Evaluation{TenantID: c.tenantID}}
 
@@ -105,8 +121,9 @@ func (c *IdentityProviderSecretExpiryCheck) Evaluate(ctx context.Context) (Evalu
 		case scope.checked[realm]:
 			idps, err := c.keycloakClient.GetIdentityProviders(ctx, realm)
 			if err != nil {
-				c.logger.Error("Failed to list identity providers",
+				c.logger.Error("Failed to list identity providers; judging their secrets by date only",
 					logger.Str("realm", realm), logger.Err(err))
+				eval.Alerts = append(eval.Alerts, c.judgeByDate(realm, byRealm[realm], today)...)
 				continue
 			}
 			byAlias := make(map[string]*keycloakadmin.IdentityProviderRepresentation, len(idps))
@@ -123,15 +140,19 @@ func (c *IdentityProviderSecretExpiryCheck) Evaluate(ctx context.Context) (Evalu
 				}
 			}
 			eval.MarkRealmEvaluated(realm)
-		case scope.visible[realm] || scope.unreadable[realm]:
-			// Disabled, or not readable by the monitoring client.
+		case scope.visible[realm]:
+			// Disabled.
+		case scope.unreadable[realm]:
+			// Not readable by the monitoring client.
+			eval.Alerts = append(eval.Alerts, c.judgeByDate(realm, byRealm[realm], today)...)
 		case scope.deleted(realm):
 			for _, s := range byRealm[realm] {
 				eval.Alerts = append(eval.Alerts, c.createNotFoundAlert(s, "Keycloak has no realm with this name"))
 			}
 		default:
 			// Not listed, yet it exists or could not be asked about: the
-			// client cannot see it, so its alerts stay as they are.
+			// client cannot see it.
+			eval.Alerts = append(eval.Alerts, c.judgeByDate(realm, byRealm[realm], today)...)
 		}
 	}
 
@@ -148,9 +169,22 @@ func (c *IdentityProviderSecretExpiryCheck) Evaluate(ctx context.Context) (Evalu
 	return eval, nil
 }
 
+// judgeByDate judges a realm's secrets without their providers, which
+// Keycloak did not list: by alias and date only.
+func (c *IdentityProviderSecretExpiryCheck) judgeByDate(realm string, secrets []IdentityProviderSecretExpiry, today time.Time) []*domain.Alert {
+	var alerts []*domain.Alert
+	for _, s := range secrets {
+		if alert := c.judge(realm, &keycloakadmin.IdentityProviderRepresentation{Alias: s.IdentityProvider}, s, today); alert != nil {
+			alerts = append(alerts, alert)
+		}
+	}
+	return alerts
+}
+
 // judge returns the alert for one secret, or nil while it is outside the
-// warning window. ExpiresOn is the last valid day: on it the secret still
-// warns, and from the next day on it has expired.
+// warning window. ExpiresOn is the expiry date the provider shows: from that
+// day on the secret counts as expired, since it may stop working at any hour
+// of it.
 func (c *IdentityProviderSecretExpiryCheck) judge(
 	realm string,
 	idp *keycloakadmin.IdentityProviderRepresentation,
@@ -159,10 +193,12 @@ func (c *IdentityProviderSecretExpiryCheck) judge(
 ) *domain.Alert {
 	days := int(s.ExpiresOn.Sub(today).Hours() / 24)
 	switch {
-	case days < 0:
+	case days <= 0:
 		return c.createExpiredAlert(realm, idp, s, -days)
+	case days <= c.errorDays:
+		return c.createExpiringSoonAlert(realm, idp, s, days, domain.AlertSeverityError)
 	case days <= c.warningDays:
-		return c.createExpiringSoonAlert(realm, idp, s, days)
+		return c.createExpiringSoonAlert(realm, idp, s, days, domain.AlertSeverityWarning)
 	default:
 		return nil
 	}
@@ -173,26 +209,34 @@ func (c *IdentityProviderSecretExpiryCheck) createExpiringSoonAlert(
 	idp *keycloakadmin.IdentityProviderRepresentation,
 	s IdentityProviderSecretExpiry,
 	days int,
+	severity domain.AlertSeverity,
 ) *domain.Alert {
 	name := idpDisplayName(idp)
 	date := s.ExpiresOn.Format(time.DateOnly)
 	when := fmt.Sprintf("in %d days", days)
-	if days == 0 {
-		when = "today"
+	if days == 1 {
+		when = "tomorrow"
 	}
 	metadataJSON, _ := json.Marshal(c.metadata(realm, idp, s, map[string]any{
 		"days_until_expiry": days,
 		"warning_threshold": c.warningDays,
+		"error_threshold":   c.errorDays,
 	}))
 
+	alertID := c.warningAlertID(realm, idp.Alias, s.ExpiresOn)
+	var supersedes []string
+	if severity == domain.AlertSeverityError {
+		alertID = c.errorAlertID(realm, idp.Alias, s.ExpiresOn)
+		supersedes = []string{c.warningAlertID(realm, idp.Alias, s.ExpiresOn)}
+	}
 	return &domain.Alert{
 		TenantID:       c.tenantID,
-		AlertID:        c.warningAlertID(realm, idp.Alias, s.ExpiresOn),
+		AlertID:        alertID,
 		Type:           domain.AlertTypeIdentityProvider,
-		Severity:       domain.AlertSeverityWarning,
+		Severity:       severity,
 		Status:         domain.AlertStatusActive,
 		Title:          fmt.Sprintf("Identity Provider '%s' client secret expires %s", name, when),
-		Description:    fmt.Sprintf("The client secret of identity provider '%s' (alias: %s) in realm '%s' is valid until %s, the last day, which is %s. After that, logins through this provider fail until a new secret is set.", name, idp.Alias, realm, date, when),
+		Description:    fmt.Sprintf("The client secret of identity provider '%s' (alias: %s) in realm '%s' expires on %s, %s. From then on, logins through this provider fail until a new secret is set.", name, idp.Alias, realm, date, when),
 		ResourceType:   "identity_provider",
 		ResourceID:     idp.InternalID,
 		ResourceName:   idp.Alias,
@@ -200,6 +244,7 @@ func (c *IdentityProviderSecretExpiryCheck) createExpiringSoonAlert(
 		CheckType:      c.GetCheckType(),
 		Recommendation: fmt.Sprintf("Create a new client secret for '%s' at the identity provider that issued it, set it in Keycloak under Identity Providers > %s, then update this provider's expires_on in the KMT configuration.", name, idp.Alias),
 		Metadata:       string(metadataJSON),
+		Supersedes:     supersedes,
 	}
 }
 
@@ -213,6 +258,12 @@ func (c *IdentityProviderSecretExpiryCheck) createExpiredAlert(
 	metadataJSON, _ := json.Marshal(c.metadata(realm, idp, s, map[string]any{
 		"days_since_expiry": daysSince,
 	}))
+	title := fmt.Sprintf("Identity Provider '%s' client secret has expired", name)
+	when := fmt.Sprintf("expired on %s, %d days ago", s.ExpiresOn.Format(time.DateOnly), daysSince)
+	if daysSince == 0 {
+		title = fmt.Sprintf("Identity Provider '%s' client secret expires today", name)
+		when = fmt.Sprintf("expires today, %s, and may already have", s.ExpiresOn.Format(time.DateOnly))
+	}
 
 	return &domain.Alert{
 		TenantID:       c.tenantID,
@@ -220,8 +271,8 @@ func (c *IdentityProviderSecretExpiryCheck) createExpiredAlert(
 		Type:           domain.AlertTypeIdentityProvider,
 		Severity:       domain.AlertSeverityCritical,
 		Status:         domain.AlertStatusActive,
-		Title:          fmt.Sprintf("Identity Provider '%s' client secret has expired", name),
-		Description:    fmt.Sprintf("The client secret of identity provider '%s' (alias: %s) in realm '%s' was valid until %s, %d days ago. Logins through this provider fail until a new secret is set.", name, idp.Alias, realm, s.ExpiresOn.Format(time.DateOnly), daysSince),
+		Title:          title,
+		Description:    fmt.Sprintf("The client secret of identity provider '%s' (alias: %s) in realm '%s' %s. Logins through this provider fail until a new secret is set.", name, idp.Alias, realm, when),
 		ResourceType:   "identity_provider",
 		ResourceID:     idp.InternalID,
 		ResourceName:   idp.Alias,
@@ -229,7 +280,7 @@ func (c *IdentityProviderSecretExpiryCheck) createExpiredAlert(
 		CheckType:      c.GetCheckType(),
 		Recommendation: fmt.Sprintf("Create a new client secret for '%s' at the identity provider that issued it, set it in Keycloak under Identity Providers > %s, then update this provider's expires_on in the KMT configuration.", name, idp.Alias),
 		Metadata:       string(metadataJSON),
-		Supersedes:     []string{c.warningAlertID(realm, idp.Alias, s.ExpiresOn)},
+		Supersedes:     []string{c.warningAlertID(realm, idp.Alias, s.ExpiresOn), c.errorAlertID(realm, idp.Alias, s.ExpiresOn)},
 	}
 }
 
@@ -284,7 +335,14 @@ func (c *IdentityProviderSecretExpiryCheck) warningAlertID(realm, alias string, 
 	return c.alertID("idp-secret-", "secret", realm, alias, expiresOn.Format(time.DateOnly))
 }
 
-// expiredAlertID differs from the warning's, so expiry is a new alert, not an
+// errorAlertID is the ID of the alert of the last errorDays. It differs from
+// the warning's, so the step up is a new alert, sent to the channels that
+// take errors, not an update of a warning that may have been acknowledged.
+func (c *IdentityProviderSecretExpiryCheck) errorAlertID(realm, alias string, expiresOn time.Time) string {
+	return c.alertID("idp-secret-due-", "secret-due", realm, alias, expiresOn.Format(time.DateOnly))
+}
+
+// expiredAlertID differs from the others, so expiry is a new alert, not an
 // update of a warning that may have been acknowledged or resolved.
 func (c *IdentityProviderSecretExpiryCheck) expiredAlertID(realm, alias string, expiresOn time.Time) string {
 	return c.alertID("idp-secret-expired-", "secret-expired", realm, alias, expiresOn.Format(time.DateOnly))

@@ -383,20 +383,29 @@ keycloak:
           # secret is listed below.
           enabled: true
 
-          # A warning alert is raised this many days before expiry. From the
-          # day after expires_on, a separate critical alert is raised and
-          # notified, and the warning is resolved without a notification.
-          # Each is sent once per channel, not repeated while it stays open
-          # (a failed send is retried hourly).
+          # A warning alert is raised this many days before expires_on. With
+          # the default notification thresholds only Slack gets warnings.
           warning_days: 30
+
+          # This many days before expires_on the warning becomes an error,
+          # which email also gets with the default thresholds. On expires_on
+          # a critical alert follows, which GitLab also gets. Each replaces
+          # the one before, which resolves without a notification. Each is
+          # sent once per channel, not repeated while it stays open (a failed
+          # send is retried hourly). At most warning_days.
+          error_days: 7
 
           # One entry per identity provider:
           #   tenant:            KMT tenant ID, from config.yaml or the interface
+          #                      (case does not matter)
           #   realm:             Keycloak realm of the provider
           #   identity_provider: the provider's alias in Keycloak
-          #   expires_on:        last day the secret is valid, YYYY-MM-DD (UTC)
+          #   expires_on:        the secret's expiry date as the provider shows
+          #                      it, YYYY-MM-DD (UTC); from that day on the
+          #                      secret counts as expired
           # An entry whose realm or provider Keycloak does not have raises a
-          # warning, so a renamed provider is not silently left unwatched.
+          # warning, so a renamed provider is not silently left unwatched. An
+          # entry naming no enabled tenant is logged as a warning at startup.
           # Example:
           # secrets:
           #   - tenant: prod

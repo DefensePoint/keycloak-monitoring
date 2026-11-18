@@ -31,6 +31,9 @@ func TestIdentityProviderSecretExpiry_Defaults(t *testing.T) {
 	if c.WarningDays != 30 {
 		t.Errorf("warning_days = %d, want 30", c.WarningDays)
 	}
+	if c.ErrorDays != 7 {
+		t.Errorf("error_days = %d, want 7", c.ErrorDays)
+	}
 	if len(c.Secrets) != 0 {
 		t.Errorf("secrets = %v, want none", c.Secrets)
 	}
@@ -111,6 +114,16 @@ func TestIdentityProviderSecretExpiry_InvalidEntriesStopStartup(t *testing.T) {
               identity_provider: entra
               expires_on: 2028-03-31
 `},
+		{name: "same provider twice, tenant in another case", want: "more than once", entries: `
+            - tenant: prod
+              realm: customers
+              identity_provider: entra
+              expires_on: 2027-03-31
+            - tenant: Prod
+              realm: customers
+              identity_provider: entra
+              expires_on: 2028-03-31
+`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := LoadConfigQuiet(writeConfig(t, secretExpiryYAML(tc.entries)))
@@ -135,6 +148,23 @@ keycloak:
 `))
 	if err == nil || !strings.Contains(err.Error(), "warning_days") {
 		t.Fatalf("error = %v, want one about warning_days", err)
+	}
+}
+
+func TestIdentityProviderSecretExpiry_ErrorDaysOutsideTheWarningWindowStopsStartup(t *testing.T) {
+	for _, days := range []string{"0", "31"} {
+		_, err := LoadConfigQuiet(writeConfig(t, `
+keycloak:
+  global:
+    config_checker:
+      checks:
+        identity_provider_secret_expiry:
+          warning_days: 30
+          error_days: `+days+`
+`))
+		if err == nil || !strings.Contains(err.Error(), "error_days") {
+			t.Fatalf("error_days %s: error = %v, want one about error_days", days, err)
+		}
 	}
 }
 
