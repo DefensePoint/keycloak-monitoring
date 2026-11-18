@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- AMFA events show the IP address, country and VPN flag of a failed login that AMFA stored without a risk decision, such as a wrong password or an unknown user, and a failed login from a VPN address counts as a flagged IP. In API mode this needs an AMFA engine that includes the same fix. These failures have no coordinates, so they are still not on the geolocation map.
+
 ## [2.0.2] - 2026-10-20
 
 ### Fixed
