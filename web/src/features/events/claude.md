@@ -87,9 +87,9 @@ risk-scored: `amfa_event_id`, `risk_level`, `is_vpn`, `country`, `city`, `lat`,
 
 Treat every AMFA field as possibly absent. The detail dialog gates the AMFA
 section on `amfa_event_id || risk_level != null`, and the VPN chip on
-`is_vpn != null`, because the open-source Adaptive MFA SPI does not stamp
-`amfa_event_id` onto the login event — an event can carry a risk level and
-nothing else.
+`is_vpn != null`, because the open-source Adaptive MFA plugin up to 1.0.1
+does not stamp `amfa_event_id` onto the login event: an event can carry a
+risk level and nothing else.
 
 ## Event Types (Keycloak)
 Common event types:
