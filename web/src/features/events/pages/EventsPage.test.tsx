@@ -818,9 +818,9 @@ describe("EventsPage", () => {
 
   describe("AMFA Details section in the event dialog", () => {
     // Regression coverage for the amfa_event_id-only gate: an event carrying
-    // just a risk_level (the OSS SPI case, where no mirror join stamps an
-    // amfa_event_id) must still surface the section, not just events with an
-    // amfa_event_id.
+    // just a risk_level (the case of the OSS plugin up to 1.0.1, where no
+    // mirror join stamps an amfa_event_id) must still surface the section, not
+    // just events with an amfa_event_id.
     it("shows AMFA Details for an event with a risk_level but no amfa_event_id", async () => {
       mockSearchParams = new URLSearchParams("event=event-risk-only");
       mockUseEvents.mockReturnValue({
