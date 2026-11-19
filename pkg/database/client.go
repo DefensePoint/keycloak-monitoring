@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -225,6 +226,11 @@ func (c *Client) AutoMigrate() error {
 	// A database from a single-tenant release has no tenant_id anywhere, which
 	// AutoMigrate cannot add on its own.
 	if err := c.migratePreTenantSchema(); err != nil {
+		return err
+	}
+
+	// Before AutoMigrate, which would build a missing one over the whole column.
+	if err := c.createMissingUserUniqueIndexes(); err != nil {
 		return err
 	}
 
@@ -461,16 +467,21 @@ func (c *Client) migrateUsernameIndex() error {
 		return nil
 	}
 
-	// Drop the old index and create the new partial index
-	c.logger.Info("Dropping old username index")
-	if err := c.db.Exec("DROP INDEX IF EXISTS idx_users_username").Error; err != nil {
-		return fmt.Errorf("failed to drop old index: %w", err)
-	}
-
-	c.logger.Info("Creating partial username index")
+	// Drop the old index and create the new partial index, in one transaction
+	// so a process that dies in between leaves the old index rather than none
+	c.logger.Info("Replacing username index with a partial index")
 	createIndexSQL := `CREATE UNIQUE INDEX idx_users_username ON users(username) WHERE username IS NOT NULL AND username != ''`
-	if err := c.db.Exec(createIndexSQL).Error; err != nil {
-		return fmt.Errorf("failed to create partial index: %w", err)
+	err := c.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DROP INDEX IF EXISTS idx_users_username").Error; err != nil {
+			return fmt.Errorf("failed to drop old index: %w", err)
+		}
+		if err := tx.Exec(createIndexSQL).Error; err != nil {
+			return fmt.Errorf("failed to create partial index: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	c.logger.Info("Successfully migrated username index to partial index")
@@ -898,7 +909,9 @@ func (c *Client) removeDeletedRoleAssignments() error {
 //
 // Narrowing a unique index can never fail on data that satisfied the wider one,
 // so this is safe to apply to any existing database: every row that fits the
-// plain index still fits the partial one.
+// plain index still fits the partial one. The DROP and the CREATE run in one
+// transaction, so a process that dies in between leaves the old index rather
+// than none (createMissingUserUniqueIndexes covers an index missing anyway).
 //
 // Idempotent. An index already carrying a predicate is left alone, so the
 // common case is three catalogue reads and no writes.
@@ -918,16 +931,73 @@ func (c *Client) migrateUserUniqueIndexes() error {
 		if indexDef != "" {
 			c.logger.Info("Rewriting a unique index on users to cover live rows only",
 				logger.Str("index", idx.name))
-			if err := c.db.Exec("DROP INDEX IF EXISTS " + idx.name).Error; err != nil {
-				return fmt.Errorf("failed to drop %s: %w", idx.name, err)
-			}
 		}
-
-		if err := c.db.Exec(idx.createSQL()).Error; err != nil {
-			return fmt.Errorf("failed to create %s: %w", idx.name, err)
+		err := c.db.Transaction(func(tx *gorm.DB) error {
+			if indexDef != "" {
+				if err := tx.Exec("DROP INDEX IF EXISTS " + idx.name).Error; err != nil {
+					return fmt.Errorf("failed to drop %s: %w", idx.name, err)
+				}
+			}
+			if err := tx.Exec(idx.createSQL()).Error; err != nil {
+				return fmt.Errorf("failed to create %s: %w", idx.name, err)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// createMissingUserUniqueIndexes creates any unique index on users that is
+// missing, with its final predicate, before AutoMigrate runs.
+//
+// AutoMigrate builds a missing index from the struct tag, over the whole
+// column, and that fails as soon as two accounts are blank in it, on every
+// start. An index can go missing when an operator drops it, or when a process
+// running an older release dies between the DROP and the CREATE of a rewrite.
+// Built here instead, it fails only on live accounts that really share a
+// value, and the error says how to find them. AutoMigrate then finds the index
+// by name and leaves it alone.
+//
+// A fresh database has no users table yet, and an older one may lack a column;
+// both are left to AutoMigrate, which has nothing to reject there.
+func (c *Client) createMissingUserUniqueIndexes() error {
+	m := c.db.Migrator()
+	if !m.HasTable(&User{}) || !m.HasColumn(&User{}, "deleted_at") {
+		return nil
+	}
+	for _, idx := range userUniqueIndexes {
+		if !m.HasColumn(&User{}, idx.column) {
+			continue
+		}
+		var exists bool
+		if err := c.db.Raw(`SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = ?)`, idx.name).
+			Scan(&exists).Error; err != nil {
+			return fmt.Errorf("failed to inspect %s: %w", idx.name, err)
+		}
+		if exists {
+			continue
+		}
+		c.logger.Warn("A unique index on users is missing, creating it",
+			logger.Str("index", idx.name))
+		if err := c.db.Exec(idx.createSQL()).Error; err != nil {
+			if isUniqueViolation(err) {
+				return fmt.Errorf("%s is missing and cannot be created: live users share a value in "+
+					"users.%s. List them with deployments/postgres/users-index-preflight.sql, resolve "+
+					"the duplicates, then start again: %w", idx.name, idx.column, err)
+			}
+			return fmt.Errorf("failed to create missing %s: %w", idx.name, err)
+		}
+	}
+	return nil
+}
+
+// isUniqueViolation reports whether err is PostgreSQL's unique_violation.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // assertUserUniqueIndexesAreSafe refuses to start when a unique index on users

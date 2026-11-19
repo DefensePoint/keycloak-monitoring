@@ -21,6 +21,11 @@ In the **master realm**:
 
 - assign the master `admin` realm
 role.
+- On RHBK 26.6.9 and later, add the `kc-admin-api` client scope to the client
+as a **Default** scope (Client scopes tab). Without it every Admin API call
+returns 401. Upgrading Keycloak to such a build does not add it to an existing
+client. See
+[Admin API client scope](keycloak-setup.md#admin-api-client-scope-rhbk-2669-and-later).
 
 1. **Advanced tab of the client → Access Token Lifespan = 3 minutes to avoid login bursts.**
 2. **Credentials tab → copy the client secret**
@@ -93,8 +98,25 @@ polling worker` line shows it, the setting did not apply.
   users and sessions show within one more 5 min metrics poll, about 22.5 min.
   A realm deleted in Keycloak drops off within 15 min.
 - Event-check alerts run only when `keycloak.global.event_checker.enabled` is
-  true (it is off by default), and only for tenants defined in the config
-  file. An alert about newly collected events can take one more cycle.
+  true, and configuration-check alerts only when
+  `keycloak.global.config_checker.enabled` is true (both are off by default).
+  They cover every enabled tenant, including one added in the interface after
+  the deploy, which gets its checks as soon as it is saved. Its first
+  configuration run usually comes before its monitor has connected, finds no
+  Keycloak client and logs errors; the first real configuration check is one
+  `config_checker.poll_interval` later. An alert about newly collected events
+  can take one more cycle. Disabling a tenant stops its checks and resolves its
+  open configuration and event alerts, with a resolution notice saying it is
+  no longer monitored; a tenant already disabled when the new version starts
+  gets the same at startup. Deleting a tenant removes its alerts.
+- Keycloak does not know when an identity provider's client secret expires.
+  To be warned before one does, list each secret's expiry date, as the
+  provider shows it, under
+  `keycloak.global.config_checker.checks.identity_provider_secret_expiry.secrets`
+  (tenant ID, realm, provider alias, `expires_on`). The warning starts 30 days
+  before, the error that email gets 7 days before, and a changed date takes
+  effect after a restart. An entry naming no enabled tenant is logged as a
+  warning at startup.
 - These times apply to tenants on the global settings. If
   `keycloak.global.realms` lists realms, only those are polled, and a realm
   created later never appears. A tenant given its own `configuration` through

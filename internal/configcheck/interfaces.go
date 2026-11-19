@@ -122,4 +122,5 @@ var (
 	_ Evaluator = (*RealmSecurityCheck)(nil)
 	_ Evaluator = (*ClientSecurityCheck)(nil)
 	_ Evaluator = (*IdentityProviderMetadataCheck)(nil)
+	_ Evaluator = (*IdentityProviderSecretExpiryCheck)(nil)
 )

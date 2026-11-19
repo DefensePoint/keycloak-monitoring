@@ -248,7 +248,7 @@ keycloak:
       # Another instance
 ```
 
-A tenant's `config:` block takes the same keys as `keycloak.global`. Settings it leaves out keep the global value, and a list in it replaces the global list. These apply per tenant: `default_realm`, `realms`, `polling`, `events`, `connection` and `infinispan_port`. These are only read from `keycloak.global`: `config_checker`, `event_checker`, `amfa_checker`, `amfa_mirror`, `version_checker`, `infinispan_enabled` and `connection.allow_private_ranges`. Setting one of them for a tenant logs a warning at startup and has no effect. A value of the wrong type, such as `events_interval: soon`, stops startup; an unknown key is logged as a warning when the tenant's monitor starts.
+A tenant's `config:` block takes the same keys as `keycloak.global`. Settings it leaves out keep the global value, and a list in it replaces the global list. These apply per tenant: `default_realm`, `realms`, `polling`, `events`, `connection` and `infinispan_port`. These are only read from `keycloak.global`: `config_checker`, `event_checker`, `amfa_checker`, `amfa_mirror`, `amfa_authenticator_ids`, `version_checker`, `infinispan_enabled` and `connection.allow_private_ranges`. Setting one of them for a tenant logs a warning at startup and has no effect. A value of the wrong type, such as `events_interval: soon`, stops startup; an unknown key is logged as a warning when the tenant's monitor starts.
 
 **Complete Multi-Tenant Example:**
 
@@ -318,8 +318,10 @@ keycloak:
     # ========================================================================
     config_checker:
       # Master switch, off by default: nothing below runs until it is on.
-      # When on, every tenant enabled at startup gets the checks enabled below;
-      # a tenant added later is checked after a restart. Per-tenant
+      # When on, every enabled tenant, including one created in the interface,
+      # gets the checks enabled below; creating, enabling, disabling or deleting
+      # a tenant starts or stops its checks without a restart, and disabling one
+      # resolves its open alerts from these checks. Per-tenant
       # config_checker overrides are not applied yet. The realm and client
       # security checks are on by default and did not run in KMT 1.0.x, so
       # expect a first wave of alerts for existing misconfigurations.
@@ -373,6 +375,40 @@ keycloak:
           # Example:
           # excluded_providers:
           #   - "legacy-saml-idp"
+
+        # ====================================================================
+        # IDENTITY PROVIDER CLIENT SECRET EXPIRY
+        # ====================================================================
+        # Keycloak does not know when an identity provider's client secret
+        # expires: the provider that issued it does (Entra ID, Okta, ...), so
+        # the dates are listed here. Changing one takes effect after a restart.
+        identity_provider_secret_expiry:
+          enabled: true           # does nothing until a secret is listed
+
+          # A warning alert is raised this many days before expires_on, an
+          # error alert error_days before it, and a critical alert from
+          # expires_on on; each replaces the one before. With the default
+          # thresholds Slack gets all three, email the error and the critical
+          # alert, GitLab the critical alert.
+          warning_days: 30
+          error_days: 7           # at most warning_days
+
+          # tenant is the KMT tenant ID (config.yaml or interface tenant, in
+          # any case), identity_provider the provider's alias in Keycloak, and
+          # expires_on the secret's expiry date as the provider shows it,
+          # YYYY-MM-DD (UTC). An entry whose realm or provider Keycloak does
+          # not have raises a warning; one whose tenant is no enabled tenant
+          # is logged as a warning. When Keycloak cannot list a realm's
+          # providers, its secrets are still judged by date. A malformed or
+          # duplicate entry stops startup. See "How Often an Alert Is Sent"
+          # below.
+          secrets: []
+          # Example:
+          # secrets:
+          #   - tenant: prod
+          #     realm: customers
+          #     identity_provider: entra
+          #     expires_on: 2027-03-31
 
         # ====================================================================
         # REALM SECURITY CHECKS
@@ -442,6 +478,15 @@ keycloak:
     # Check for newer Keycloak versions
     # ========================================================================
     version_checker:
+      # Off by default; the only setting that contacts a host outside your
+      # infrastructure (api.github.com). Only a server reporting a plain
+      # release number, such as 26.4.2, is compared: a vendor or distribution
+      # build, such as Red Hat build of Keycloak (26.4.2.redhat-00001), follows
+      # its own release line and is never shown as behind. The Health page then
+      # says the update check does not apply to that build, and the server logs
+      # it once per tenant.
+      enabled: false
+
       # Cache duration for version information
       cache_ttl: 24h
 
@@ -704,7 +749,8 @@ notifications:
     channel: "#security-alerts"
 
     # Optional: Custom bot username
-    username: "Keycloak Monitoring Tool"
+    # Default: branding.name
+    username: "Security Alerts"
 
     # Optional: Bot icon emoji
     icon_emoji: ":shield:"
@@ -747,8 +793,9 @@ notifications:
     skip_verify: false
 
     # Optional: Custom email subject template
-    # Default: "[Keycloak Monitoring Tool] {severity} Alert: {check_name}"
-    subject: "[Keycloak Security] {severity}: {check_name}"
+    # Placeholders: {{product}} (branding.name), {{severity}}, {{title}}, {{resource}}
+    # Default: "[{{severity}}] {{product}} Alert: {{title}}"
+    subject: "[Keycloak Security] {{severity}}: {{title}}"
 
     # Minimum severity level to send emails
     # Options: info, warning, error, critical
@@ -814,6 +861,16 @@ This configuration ensures:
 - **Warning** alerts go to Slack for team awareness
 - **Error** alerts go to both Slack and Email for attention
 - **Critical** alerts trigger all channels including GitLab issue tracking
+
+**How Often an Alert Is Sent:**
+
+For the configuration checks' alerts, including the identity provider secret expiry check:
+
+- A channel is sent an alert once, when it is raised. While the alert stays active it is not sent again: once an hour the checker only resends it to a channel whose earlier send failed.
+- When the alert resolves, Slack gets a message and the GitLab issue is commented on and closed. Email gets no resolution message.
+- An alert that resolves and is found again later is a new occurrence, and is sent again.
+- For one `expires_on` date, an identity provider secret is sent at most three alerts: a warning `warning_days` before it, an error `error_days` before it, and a critical alert from that day on, each only to the channels whose `min_severity` it reaches. Each replaces the one before, which resolves without a message of its own. A renewed secret with a new `expires_on` starts over, so a renewal inside the window is sent again when the new date comes near.
+- The first time the configuration checker runs, it sends one alert for every misconfiguration it finds, for each tenant and realm, all at once. After that, only new problems are sent.
 
 ### Alert Silences
 
@@ -1359,6 +1416,56 @@ export MONITORING_MCP_RATE_BURST=30
 export MONITORING_MCP_MAX_RESPONSE_BYTES=1048576
 ```
 
+### Branding
+
+The product name in everything a user sees: the web UI (sign-in page, header, page title, settings page), alert emails, Slack messages, GitLab issues and notes, PDF reports and their file names, and the name the MCP server gives clients. A deployment that runs KMT under its own name sets it here; with nothing set, KMT looks as it always has.
+
+```yaml
+branding:
+  # Full product name
+  # Default: "Keycloak Monitoring Tool"
+  name: "Keycloak Monitoring Tool"
+
+  # Short name, used where the full name is too long ("Can't reach the KMT
+  # server.", the realm page link) and, in lower case with dashes, at the
+  # start of report file names: kmt-report-<tenant>-<from>-to-<to>.pdf
+  # Default: "KMT"
+  short_name: "KMT"
+
+  # Word shown next to the logo. When the full name starts with it, the rest
+  # of the name is shown under it ("Monitoring Tool").
+  # Default: "Keycloak"
+  logo_text: "Keycloak"
+
+  # Credited in PDF reports as the author ("<vendor> Team") and the contact
+  # ("<vendor> Security Team")
+  # Default: "DefensePoint"
+  vendor: "DefensePoint"
+
+  # Contact address in PDF reports. The default goes with the default vendor
+  # only: with a vendor set and no address, reports give none.
+  # Default: "security@defensepoint.com"
+  contact_email: "security@defensepoint.com"
+```
+
+- The MCP server identifies itself as the full name in lower case with dashes (`keycloak-monitoring-tool`), with the full name as its title. Report file names start with the short name written the same way. Accents are dropped ("Überwachung" gives `uberwachung`); a name with nothing that can be written in ASCII, as one in Cyrillic or Chinese, gives `monitoring`.
+- `notifications.slack.username` and the `{{product}}` placeholder in `notifications.email.subject` follow `branding.name` unless set.
+- A value left empty falls back to its default, and line breaks are removed.
+- The web UI remembers the last names the server sent, so the page shown while the server cannot be reached carries them too.
+- `vendor` and `contact_email` appear only in PDF reports; `/auth/config` does not publish them.
+- Rebranding takes `vendor` and `contact_email` too: with only `name` changed, PDF reports still credit DefensePoint. The server then logs a warning at startup naming the two settings, including when `vendor` was copied unchanged from `config.yaml.example`.
+- The logo is not part of the branding. The web UI shows `web/public/defensepoint-logo.svg` (with "DefensePoint" as its alternative text), and PDF reports use `assets/logo.png` and `assets/cover.png`. To change them, replace those files in the image you build.
+
+**Environment Variables:**
+
+```bash
+export MONITORING_BRANDING_NAME="Keycloak Monitoring Tool"
+export MONITORING_BRANDING_SHORT_NAME=KMT
+export MONITORING_BRANDING_LOGO_TEXT=Keycloak
+export MONITORING_BRANDING_VENDOR=DefensePoint
+export MONITORING_BRANDING_CONTACT_EMAIL=security@defensepoint.com
+```
+
 ## Configuration Examples
 
 ### Development Configuration
@@ -1550,7 +1657,6 @@ notifications:
     enabled: true
     # Use environment variable: MONITORING_NOTIFICATIONS_SLACK_WEBHOOK_URL
     channel: "#security-alerts"
-    username: "Keycloak Monitoring Tool"
     min_severity: "warning"
 
   email:

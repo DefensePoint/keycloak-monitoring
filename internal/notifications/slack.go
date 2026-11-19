@@ -24,6 +24,8 @@ type SlackNotifier struct {
 	baseURL    string
 	httpClient *http.Client
 	logger     *logger.Logger
+	// product is the product name the message is signed with.
+	product string
 }
 
 // NewSlackNotifier creates a new Slack notifier.
@@ -126,7 +128,7 @@ func (s *SlackNotifier) NotifyResolution(ctx context.Context, alert *domain.Aler
 			Title:     slackText(alert.Title),
 			Text:      resolutionText(alert, resolvedAt),
 			Fields:    fields,
-			Footer:    "Keycloak Monitoring Tool",
+			Footer:    productName(s.product),
 			Timestamp: resolvedAt.Unix(),
 		}},
 	}
@@ -208,7 +210,7 @@ func (s *SlackNotifier) buildSlackMessage(alert *domain.Alert) *slackMessage {
 		TitleLink: titleLink,
 		Text:      slackText(alert.Description),
 		Timestamp: alert.FirstDetected.Unix(),
-		Footer:    "Keycloak Monitoring Tool",
+		Footer:    productName(s.product),
 		Fields: []slackField{
 			{
 				Title: "Severity",
@@ -263,10 +265,11 @@ func (s *SlackNotifier) buildSlackMessage(alert *domain.Alert) *slackMessage {
 
 	// Add quick link button if base URL is configured
 	if s.baseURL != "" {
-		quickLinkText := fmt.Sprintf("<%s/%s/alerts/%s|View Alert in Keycloak Monitoring Tool>",
+		quickLinkText := fmt.Sprintf("<%s/%s/alerts/%s|View Alert in %s>",
 			strings.TrimSuffix(s.baseURL, "/"),
 			alert.TenantID,
-			alert.AlertID)
+			alert.AlertID,
+			slackText(productName(s.product)))
 		attachment.Fields = append(attachment.Fields, slackField{
 			Title: "Quick Actions",
 			Value: quickLinkText,

@@ -2,6 +2,8 @@ package fx
 
 import (
 	"context"
+	"strings"
+	"sync"
 
 	"go.uber.org/fx"
 
@@ -18,9 +20,11 @@ import (
 
 // ConfigCheckModule runs the Keycloak configuration checks (SAML identity
 // provider metadata and certificates, realm security, client security) for
-// every enabled tenant when keycloak.global.config_checker.enabled is true.
-// It must be installed after MonitoringModule: its start hook reads the
-// tenants and Keycloak clients that the monitoring start hook loads.
+// every enabled tenant when keycloak.global.config_checker.enabled is true,
+// and follows tenant changes: see tenantCheckWorkers. It is installed after
+// MonitoringModule, whose start hook creates the Keycloak clients the checks
+// use; a check that runs before its tenant's client exists finds it
+// unavailable and tries again on the next run.
 var ConfigCheckModule = fx.Module("configcheck",
 	fx.Invoke(registerConfigCheckHooks),
 )
@@ -118,35 +122,80 @@ func registerConfigCheckHooks(p ConfigCheckParams) {
 		return
 	}
 
-	var svc configcheck.Service
-	var cancel context.CancelFunc
-	p.Lifecycle.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			tenants, err := p.Tenants.ListEnabledTenants(ctx)
-			if err != nil {
-				return err
+	newConfigCheckWorkers(checkerCfg, poolKeycloakClient(p.Pool), keycloakSafeRequestPolicy(p.Config),
+		configCheckAlertStore{repo: p.Alerts}, p.Notifier, p.Silences, p.Logger).hook(p.Lifecycle, p.Tenants)
+}
+
+// unmatchedSecretEntries warns about identity provider secret entries whose
+// tenant is not one the checker runs for, a typo or a disabled or deleted
+// tenant: their expiry is not watched. It warns once per entry, and again if
+// the entry matches a tenant for a while and then stops matching.
+type unmatchedSecretEntries struct {
+	listed []config.IdentityProviderSecret
+	log    *logger.Logger
+
+	mu     sync.Mutex
+	warned map[int]bool
+}
+
+func (u *unmatchedSecretEntries) report(running map[string]bool) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.warned == nil {
+		u.warned = map[int]bool{}
+	}
+	for i, s := range u.listed {
+		matched := false
+		for tenantID := range running {
+			if strings.EqualFold(s.Tenant, tenantID) {
+				matched = true
+				break
 			}
-			checks := buildConfigChecks(checkerCfg, tenants, poolKeycloakClient(p.Pool), keycloakSafeRequestPolicy(p.Config), p.Logger)
+		}
+		if matched {
+			delete(u.warned, i)
+			continue
+		}
+		if !u.warned[i] {
+			u.warned[i] = true
+			logWarn(u.log, "identity_provider_secret_expiry: secrets entry names no enabled tenant, so its expiry is not watched",
+				logger.Str("tenant", s.Tenant), logger.Str("realm", s.Realm),
+				logger.Str("identity_provider", s.IdentityProvider), logger.Int("entry", i))
+		}
+	}
+}
+
+// newConfigCheckWorkers runs one configuration checker service per enabled
+// tenant, with the checks the configuration enables, and warns about identity
+// provider secret entries that name none of those tenants.
+func newConfigCheckWorkers(
+	checkerCfg config.ConfigCheckerConfig,
+	lookup func(tenantID string) configcheck.KeycloakClient,
+	policy saferequest.Policy,
+	store configcheck.AlertStore,
+	notifier configcheck.NotificationService,
+	silencer configcheck.Silencer,
+	log *logger.Logger,
+) *tenantCheckWorkers[configcheck.Service] {
+	w := &tenantCheckWorkers[configcheck.Service]{
+		component:   "configcheck",
+		log:         log,
+		alertTypes:  checkTypes(buildConfigChecks(checkerCfg, []*domain.KeycloakTenant{{}}, lookup, policy, logger.NewNoop())),
+		alertStore:  store,
+		resolutions: notifier,
+		build: func(tenantID string) (configcheck.Service, bool) {
+			checks := buildConfigChecks(checkerCfg, []*domain.KeycloakTenant{{TenantID: tenantID}}, lookup, policy, log)
 			if len(checks) == 0 {
-				logInfo(p.Logger, "Configuration checker enabled but no checks apply")
-				return nil
+				return nil, false
 			}
-			svc = configcheck.NewService(checks, configCheckAlertStore{repo: p.Alerts}, p.Notifier, p.Logger, checkerCfg.PollInterval,
-				configcheck.WithSilencer(p.Silences))
-			// fx cancels the OnStart context once startup completes, which
-			// would stop the poll loop at once.
-			var runCtx context.Context
-			runCtx, cancel = context.WithCancel(context.Background())
-			return svc.Start(runCtx)
+			return configcheck.NewService(checks, store, notifier, log, checkerCfg.PollInterval,
+				configcheck.WithSilencer(silencer)), true
 		},
-		OnStop: func(context.Context) error {
-			if svc == nil {
-				return nil
-			}
-			cancel()
-			return svc.Stop()
-		},
-	})
+	}
+	if expiry := checkerCfg.Checks.IdentityProviderSecretExpiry; expiry.Enabled && len(expiry.Secrets) > 0 {
+		w.tenantsChanged = (&unmatchedSecretEntries{listed: expiry.Secrets, log: log}).report
+	}
+	return w
 }
 
 func buildConfigChecks(
@@ -192,9 +241,37 @@ func buildConfigChecks(
 				ProductionEnvironment:   c.ClientSecurity.ProductionEnvironment,
 			}))
 		}
+		if c.IdentityProviderSecretExpiry.Enabled {
+			// Also for a tenant with no listed secret, so the alerts of
+			// entries since removed resolve.
+			checks = append(checks, configcheck.NewIdentityProviderSecretExpiryCheck(kc, log, t.TenantID,
+				c.IdentityProviderSecretExpiry.WarningDays, c.IdentityProviderSecretExpiry.ErrorDays,
+				tenantSecretExpiries(c.IdentityProviderSecretExpiry.Secrets, t.TenantID)))
+		}
 	}
 	logInfo(log, "Configuration checks constructed",
 		logger.Int("tenants", len(tenants)),
 		logger.Int("checks", len(checks)))
 	return checks
+}
+
+// tenantSecretExpiries returns the listed identity provider secrets of one
+// tenant. The dates were validated when the configuration was loaded. The
+// tenant is compared without case: viper lower-cases the tenant IDs of
+// config.yaml, so a tenant written Prod: there has the ID prod.
+func tenantSecretExpiries(listed []config.IdentityProviderSecret, tenantID string) []configcheck.IdentityProviderSecretExpiry {
+	var out []configcheck.IdentityProviderSecretExpiry
+	for _, s := range listed {
+		if !strings.EqualFold(s.Tenant, tenantID) {
+			continue
+		}
+		expiresOn, err := s.ExpiryDate()
+		if err != nil {
+			continue
+		}
+		out = append(out, configcheck.IdentityProviderSecretExpiry{
+			Realm: s.Realm, IdentityProvider: s.IdentityProvider, ExpiresOn: expiresOn,
+		})
+	}
+	return out
 }

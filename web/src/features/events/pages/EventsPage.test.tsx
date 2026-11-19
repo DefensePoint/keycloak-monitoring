@@ -8,6 +8,9 @@ const mockSetSearchParams = vi.fn();
 const mockUseKeycloakDashboard = vi.fn();
 const mockUseEvents = vi.fn();
 const mockUseEvent = vi.fn();
+const mockUseEventStats = vi.fn<() => { data: unknown }>(() => ({
+  data: undefined,
+}));
 const mockUseAmfaRealms = vi.fn<() => { data: string[] }>(() => ({ data: [] }));
 const mockUseAmfaStats = vi.fn<() => { data: unknown; error: unknown }>(() => ({
   data: undefined,
@@ -48,6 +51,7 @@ vi.mock("@/shared/hooks", () => ({
   }),
   useEvents: (args: unknown) => mockUseEvents(args),
   useEvent: (...args: unknown[]) => mockUseEvent(...args),
+  useEventStats: (args: unknown) => mockUseEventStats(args),
   isEventNotFoundError: (error: unknown) =>
     error instanceof Error && error.message === "Event not found",
   useAmfaStats: () => mockUseAmfaStats(),
@@ -261,6 +265,7 @@ describe("EventsPage", () => {
     mockUseAmfaRealms.mockReturnValue({ data: [] });
     mockUseEvent.mockReturnValue({ data: undefined, isError: false });
     mockUseAmfaStats.mockReturnValue({ data: undefined, error: undefined });
+    mockUseEventStats.mockReturnValue({ data: undefined });
     mockIsAllRealmsUnsupportedError.mockReturnValue(false);
     mockIsRealmScopeRequiresRealmError.mockReturnValue(false);
   });
@@ -488,6 +493,62 @@ describe("EventsPage", () => {
         ).not.toBeInTheDocument();
       });
       expect(lastEventsQuery().minRisk).toBeUndefined();
+    });
+
+    it("suggests every type in the time range, not only the loaded page's", async () => {
+      const user = userEvent.setup();
+      mockUseEventStats.mockReturnValue({
+        data: {
+          total_events: 9,
+          by_type: { LOGIN: 4, LOGOUT: 3, CODE_TO_TOKEN: 2 },
+          by_severity: {},
+        },
+      });
+      render(<EventsPage />);
+
+      await user.click(screen.getByRole("combobox", { name: /event type/i }));
+      const options = within(screen.getByRole("listbox"))
+        .getAllByRole("option")
+        .map((option) => option.textContent);
+      expect(options).toEqual(["CODE_TO_TOKEN", "LOGIN", "LOGOUT"]);
+      expect(mockUseEventStats).toHaveBeenLastCalledWith(
+        expect.objectContaining({ tenantId: "tenant-1", realm: undefined }),
+      );
+    });
+
+    it("keeps the other types on offer after one is chosen", async () => {
+      const user = userEvent.setup();
+      mockUseEventStats.mockReturnValue({
+        data: {
+          total_events: 6,
+          by_type: { LOGIN: 3, LOGIN_ERROR: 1, LOGOUT: 2 },
+          by_severity: {},
+        },
+      });
+      // Like the server, return only rows of the chosen type.
+      mockUseEvents.mockImplementation(({ type }: { type?: string }) => ({
+        data: {
+          ...mockEventsResponse,
+          events: mockEventsResponse.events.filter(
+            (event) => !type || event.type === type,
+          ),
+        },
+        isLoading: false,
+        isError: false,
+      }));
+      render(<EventsPage />);
+
+      await user.click(screen.getByRole("combobox", { name: /event type/i }));
+      await user.click(screen.getByRole("option", { name: "LOGIN" }));
+      await waitFor(() => {
+        expect(lastEventsQuery()).toMatchObject({ type: "LOGIN", offset: 0 });
+      });
+
+      await user.click(screen.getByRole("combobox", { name: /event type/i }));
+      const options = within(screen.getByRole("listbox"))
+        .getAllByRole("option")
+        .map((option) => option.textContent);
+      expect(options).toEqual(["LOGIN", "LOGIN_ERROR", "LOGOUT"]);
     });
   });
 
@@ -757,9 +818,9 @@ describe("EventsPage", () => {
 
   describe("AMFA Details section in the event dialog", () => {
     // Regression coverage for the amfa_event_id-only gate: an event carrying
-    // just a risk_level (the OSS SPI case, where no mirror join stamps an
-    // amfa_event_id) must still surface the section, not just events with an
-    // amfa_event_id.
+    // just a risk_level (the case of the OSS plugin up to 1.0.1, where no
+    // mirror join stamps an amfa_event_id) must still surface the section, not
+    // just events with an amfa_event_id.
     it("shows AMFA Details for an event with a risk_level but no amfa_event_id", async () => {
       mockSearchParams = new URLSearchParams("event=event-risk-only");
       mockUseEvents.mockReturnValue({

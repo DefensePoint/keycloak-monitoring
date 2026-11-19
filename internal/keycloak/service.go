@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -74,9 +76,11 @@ type ClientProvider interface {
 
 // Provider IDs of the Adaptive MFA (AMFA) authenticators, as registered by the
 // Adaptive MFA Keycloak SPI in AdaptiveAuthAuthenticatorFactory.PROVIDER_ID
-// and ConditionalUserConfiguredAdaptiveAuthAuthenticatorFactory.PROVIDER_ID. A
-// realm "uses AMFA" when any of its top-level flows contains one of these
-// executions and it is not DISABLED.
+// and ConditionalUserConfiguredAdaptiveAuthAuthenticatorFactory.PROVIDER_ID.
+// They are always matched; keycloak.global.amfa_authenticator_ids adds the IDs
+// of extensions that register these authenticators under other names. A realm
+// "uses AMFA" when any of its top-level flows contains one of these executions
+// and it is not DISABLED.
 //
 // Note "any top-level flow", not just the bound browser flow, which is what
 // realmUsesAdaptiveAuth actually walks. That is deliberately the permissive
@@ -85,9 +89,9 @@ type ClientProvider interface {
 // sections than silently treated as a plain realm. False negatives here are
 // the costlier failure, since the UI fail-closes on this endpoint and gives
 // no indication that a realm was misjudged.
-var amfaAuthenticatorProviderIDs = map[string]struct{}{
-	"adaptive-auth":             {},
-	"conditional-adaptive-auth": {},
+var builtinAmfaAuthenticatorIDs = []string{
+	"adaptive-auth",
+	"conditional-adaptive-auth",
 }
 
 // amfaRealmsCacheTTL bounds how often we walk each realm's Keycloak flow.
@@ -107,11 +111,13 @@ type service struct {
 	clientProvider ClientProvider
 	versionChecker *VersionChecker
 
-	amfaRealmsMu    sync.Mutex
-	amfaRealmsCache map[string]amfaRealmsCacheEntry
+	amfaAuthenticatorIDs map[string]struct{}
+	amfaRealmsMu         sync.Mutex
+	amfaRealmsCache      map[string]amfaRealmsCacheEntry
 }
 
-// NewService creates a new keycloak service.
+// NewService creates a new keycloak service. extraAmfaAuthenticatorIDs are
+// matched as AMFA authenticators in addition to builtinAmfaAuthenticatorIDs.
 func NewService(
 	eventRepo EventRepository,
 	metricsRepo MetricsRepository,
@@ -119,16 +125,44 @@ func NewService(
 	realmRepo RealmRepository,
 	clientProvider ClientProvider,
 	versionChecker *VersionChecker,
+	extraAmfaAuthenticatorIDs []string,
 ) Service {
 	return &service{
-		eventRepo:       eventRepo,
-		metricsRepo:     metricsRepo,
-		healthRepo:      healthRepo,
-		realmRepo:       realmRepo,
-		clientProvider:  clientProvider,
-		versionChecker:  versionChecker,
-		amfaRealmsCache: make(map[string]amfaRealmsCacheEntry),
+		eventRepo:            eventRepo,
+		metricsRepo:          metricsRepo,
+		healthRepo:           healthRepo,
+		realmRepo:            realmRepo,
+		clientProvider:       clientProvider,
+		versionChecker:       versionChecker,
+		amfaAuthenticatorIDs: amfaAuthenticatorIDSet(extraAmfaAuthenticatorIDs),
+		amfaRealmsCache:      make(map[string]amfaRealmsCacheEntry),
 	}
+}
+
+// amfaAuthenticatorIDSet returns the built-in AMFA authenticator IDs plus the
+// non-blank extra ones.
+func amfaAuthenticatorIDSet(extra []string) map[string]struct{} {
+	ids := make(map[string]struct{}, len(builtinAmfaAuthenticatorIDs)+len(extra))
+	for _, id := range builtinAmfaAuthenticatorIDs {
+		ids[id] = struct{}{}
+	}
+	for _, id := range extra {
+		if id = strings.TrimSpace(id); id != "" {
+			ids[id] = struct{}{}
+		}
+	}
+	return ids
+}
+
+// AmfaAuthenticatorIDs returns the provider IDs matched as AMFA, the built-in
+// ones plus the non-blank extra ones, sorted, for logging what is in effect.
+func AmfaAuthenticatorIDs(extra []string) []string {
+	ids := make([]string, 0, len(builtinAmfaAuthenticatorIDs)+len(extra))
+	for id := range amfaAuthenticatorIDSet(extra) {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids
 }
 
 // SetClientProvider sets the client provider for live Keycloak access.
@@ -339,7 +373,7 @@ func (s *service) realmUsesAdaptiveAuth(ctx context.Context, client AdminAPI, re
 		if err != nil {
 			continue
 		}
-		if flowUsesAdaptiveAuth(execs) {
+		if flowUsesAdaptiveAuth(execs, s.amfaAuthenticatorIDs) {
 			return true
 		}
 	}
@@ -347,13 +381,13 @@ func (s *service) realmUsesAdaptiveAuth(ctx context.Context, client AdminAPI, re
 }
 
 // flowUsesAdaptiveAuth reports whether a flow's executions include an enabled
-// Adaptive MFA authenticator.
-func flowUsesAdaptiveAuth(execs []keycloakadmin.AuthenticationExecutionInfoRepresentation) bool {
+// authenticator from ids.
+func flowUsesAdaptiveAuth(execs []keycloakadmin.AuthenticationExecutionInfoRepresentation, ids map[string]struct{}) bool {
 	for _, e := range execs {
 		if e.Requirement == "DISABLED" {
 			continue
 		}
-		if _, ok := amfaAuthenticatorProviderIDs[e.ProviderID]; ok {
+		if _, ok := ids[e.ProviderID]; ok {
 			return true
 		}
 	}
@@ -368,11 +402,12 @@ func (s *service) GetDashboard(ctx context.Context, tenantID string, realmName s
 	health, _ := s.healthRepo.GetLatestHealth(ctx, tenantID)
 	dashboard.Health = health
 
-	// Get version info if health has version
+	// Get version info if health has version. The dashboard does not wait for
+	// GitHub: it shows the last fetched release, if any, and a stale or missing
+	// one is fetched in the background.
 	if health != nil && health.ServerVersion != "" && s.versionChecker != nil {
-		versionInfo, err := s.GetVersionInfo(ctx, tenantID)
-		if err == nil {
-			dashboard.VersionInfo = versionInfo
+		if latest := s.versionChecker.CachedVersions(ctx); latest != nil {
+			dashboard.VersionInfo = s.versionResult(tenantID, health.ServerVersion, latest)
 		}
 	}
 
@@ -449,19 +484,30 @@ func (s *service) GetVersionInfo(ctx context.Context, tenantID string) (*Version
 		return nil, err
 	}
 
+	return s.versionResult(tenantID, currentVersion, latestVersions), nil
+}
+
+// versionResult compares the server version with the latest upstream release.
+// Only a plain release number is compared, see isUpstreamRelease.
+func (s *service) versionResult(tenantID, currentVersion string, latest *VersionInfo) *VersionCheckResult {
+	comparable := isUpstreamRelease(currentVersion)
+	if !comparable && currentVersion != "" {
+		s.versionChecker.noteNotComparable(tenantID, currentVersion)
+	}
 	isKeycloakOutdated := false
-	if currentVersion != "" && latestVersions != nil && latestVersions.LatestKeycloakVersion != "" {
-		isKeycloakOutdated = IsVersionOutdated(currentVersion, latestVersions.LatestKeycloakVersion)
+	if comparable && latest.LatestKeycloakVersion != "" {
+		isKeycloakOutdated = IsVersionOutdated(currentVersion, latest.LatestKeycloakVersion)
 	}
 
 	return &VersionCheckResult{
 		CurrentVersion:        currentVersion,
-		LatestKeycloakVersion: latestVersions.LatestKeycloakVersion,
-		KeycloakReleaseURL:    latestVersions.KeycloakReleaseURL,
+		LatestKeycloakVersion: latest.LatestKeycloakVersion,
+		KeycloakReleaseURL:    latest.KeycloakReleaseURL,
 		IsKeycloakOutdated:    isKeycloakOutdated,
-		HasSecurityUpdates:    latestVersions.HasSecurityUpdates,
-		LastChecked:           latestVersions.LastChecked,
-	}, nil
+		VersionComparable:     comparable,
+		HasSecurityUpdates:    latest.HasSecurityUpdates,
+		LastChecked:           latest.LastChecked,
+	}
 }
 
 // GetUsers returns users from a Keycloak realm.

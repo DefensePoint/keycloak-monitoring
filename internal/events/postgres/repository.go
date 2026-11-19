@@ -213,22 +213,45 @@ func (r *Repository) Stats(ctx context.Context, opts *events.ListOptions) (*even
 		{"severity", stats.BySeverity},
 		{"source", stats.BySource},
 	} {
-		var rows []struct {
-			Key   string
-			Count int64
-		}
-		query := r.applyFilters(r.db.WithContext(ctx).Model(&database.Event{}), opts)
-		if err := query.
-			Select(group.column + ` AS key, count(*) AS count`).
-			Group(group.column).
-			Find(&rows).Error; err != nil {
-			return nil, fmt.Errorf("failed to aggregate events by %s: %w", group.column, err)
-		}
-		for _, row := range rows {
-			group.counts[row.Key] = row.Count
+		if err := r.countBy(ctx, opts, group.column, group.counts); err != nil {
+			return nil, err
 		}
 	}
 	return stats, nil
+}
+
+// CountByType returns event counts grouped by type under the same filter
+// scope as List. The counts add up to CountWithFilter's total.
+func (r *Repository) CountByType(ctx context.Context, opts *events.ListOptions) (map[string]int64, error) {
+	if opts == nil {
+		opts = &events.ListOptions{}
+	}
+
+	counts := map[string]int64{}
+	if err := r.countBy(ctx, opts, "type", counts); err != nil {
+		return nil, err
+	}
+	return counts, nil
+}
+
+// countBy fills counts with the number of matching events per value of
+// column. column is one of the fixed names above, never caller input.
+func (r *Repository) countBy(ctx context.Context, opts *events.ListOptions, column string, counts map[string]int64) error {
+	var rows []struct {
+		Key   string
+		Count int64
+	}
+	query := r.applyFilters(r.db.WithContext(ctx).Model(&database.Event{}), opts)
+	if err := query.
+		Select(column + ` AS key, count(*) AS count`).
+		Group(column).
+		Find(&rows).Error; err != nil {
+		return fmt.Errorf("failed to aggregate events by %s: %w", column, err)
+	}
+	for _, row := range rows {
+		counts[row.Key] = row.Count
+	}
+	return nil
 }
 
 // applyFilters adds every ListOptions predicate except pagination: tenant and
@@ -366,10 +389,27 @@ func (r *Repository) MergeAmfaEvent(ctx context.Context, event *domain.Event) er
 }
 
 // ReconcileAMFAMerges converges each login onto one row: it copies the AMFA
-// fields from every standalone AMFA row onto its Keycloak twin (matched by
-// amfa_event_id), then hard-deletes the now-absorbed AMFA rows. Idempotent and
-// order-independent, so safe to run every poll cycle. Returns the number of AMFA
-// rows absorbed. AMFA-only events (no Keycloak twin) are left untouched.
+// fields from every standalone AMFA row onto its Keycloak twin, then
+// hard-deletes the now-absorbed AMFA rows. Idempotent and order-independent, so
+// safe to run every poll cycle. Returns the number of AMFA rows absorbed.
+// AMFA-only events (no Keycloak twin) are left untouched.
+//
+// AMFA stores each event under the id the plugin sent it with, and the twin is
+// found in one of two ways:
+//
+//   - By the Keycloak event's own id. A LOGIN_ERROR (a refused login, a wrong
+//     code) reaches AMFA under the id of its Keycloak event, since the engine
+//     rejects a second event with a decision's id and would then lose the LOGIN
+//     that follows the right code. Its AMFA row names its twin exactly, whatever
+//     the Keycloak type: an SSO refusal is an IDENTITY_PROVIDER_POST_LOGIN_ERROR
+//     in Keycloak and a LOGIN_ERROR in AMFA.
+//   - By the AMFA decision id, which Keycloak stamps on the login's events as
+//     amfa_event_id and under which a LOGIN reaches AMFA. The twin is the
+//     Keycloak row of the AMFA row's own type. A login can leave other Keycloak
+//     rows with the same amfa_event_id (an SSO login's post broker events, a
+//     wrong code's LOGIN_ERROR), and those are only merged onto when no row of
+//     that type has arrived within amfaMergeFallbackAfter, and never when
+//     they already have an outcome of their own.
 //
 // The copy and the delete are one statement. They used to be two, and the
 // delete ran its own join, so a Keycloak row saved between them was joined by
@@ -399,9 +439,7 @@ func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 	// rows come from the update's RETURNING, not a join of its own, so it can
 	// only remove a row the update folded in: a soft-deleted AMFA row, which
 	// the update skips, is never destroyed unmerged.
-	reconcile := `
-		WITH absorbed AS (
-			UPDATE events AS k
+	set := `
 			SET is_vpn = a.is_vpn,
 			    country = a.country,
 			    city = a.city,
@@ -427,16 +465,68 @@ func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 			    -- silent no-op. Keycloak still wins where it has something.
 			    username = COALESCE(NULLIF(k.username, ''), a.username),
 			    email = COALESCE(NULLIF(k.email, ''), a.email),
-			    updated_at = now()
-			FROM events AS a
-			WHERE a.source_system = 'amfa' AND a.deleted_at IS NULL
-			  AND k.source_system = 'keycloak' AND k.deleted_at IS NULL
+			    updated_at = now()`
+	// Both matches run in one statement over one read of the pending AMFA
+	// rows: finding them scans the table, and a second statement would scan it
+	// again every sweep. The two updates never touch the same row: an AMFA row
+	// with a Keycloak row of its id is left to by_event_id, and so is a Keycloak
+	// row that a pending AMFA row names by id.
+	reconcile := `
+		WITH pending AS MATERIALIZED (
+			SELECT * FROM events
+			WHERE source_system = 'amfa' AND deleted_at IS NULL
+		),
+		by_event_id AS (
+			UPDATE events AS k` + set + `
+			FROM pending AS a
+			WHERE k.source_system = 'keycloak' AND k.deleted_at IS NULL
+			  AND k.tenant_id = a.tenant_id
+			  AND k.event_id = a.amfa_event_id
+			RETURNING a.id
+		),
+		by_decision AS (
+			UPDATE events AS k` + set + `
+			FROM pending AS a
+			WHERE k.source_system = 'keycloak' AND k.deleted_at IS NULL
 			  AND k.tenant_id = a.tenant_id
 			  AND k.amfa_event_id = a.amfa_event_id
+			  AND NOT EXISTS (
+			    SELECT 1 FROM events AS t
+			    WHERE t.source_system = 'keycloak' AND t.deleted_at IS NULL
+			      AND t.tenant_id = a.tenant_id
+			      AND t.event_id = a.amfa_event_id
+			  )
+			  AND NOT EXISTS (
+			    SELECT 1 FROM pending AS x
+			    WHERE x.tenant_id = k.tenant_id AND x.amfa_event_id = k.event_id
+			  )
+			  -- One login can leave several Keycloak rows with the same
+			  -- amfa_event_id: an SSO login's IDENTITY_PROVIDER_POST_LOGIN
+			  -- events as well as its LOGIN, or a wrong code's LOGIN_ERROR
+			  -- before the right code's LOGIN. The AMFA row belongs to the row
+			  -- of its own type. Only if none arrives in time is it merged onto
+			  -- the others, which keeps the data for a realm whose LOGIN carries
+			  -- no amfa_event_id. The fallback skips a row that already has
+			  -- an outcome (final_status is only ever set by this merge), so a
+			  -- wrong code's LOGIN_ERROR keeps its own data.
+			  AND (
+			    k.type = a.type
+			    OR (
+			      a.created_at < now() - make_interval(secs => ?)
+			      AND k.final_status IS NULL
+			      AND NOT EXISTS (
+			        SELECT 1 FROM events AS o
+			        WHERE o.source_system = 'keycloak' AND o.deleted_at IS NULL
+			          AND o.tenant_id = a.tenant_id
+			          AND o.amfa_event_id = a.amfa_event_id
+			          AND o.type = a.type
+			      )
+			    )
+			  )
 			RETURNING a.id
 		)
 		DELETE FROM events
-		WHERE id IN (SELECT id FROM absorbed)`
+		WHERE id IN (SELECT id FROM by_event_id UNION ALL SELECT id FROM by_decision)`
 	var absorbed int64
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var acquired bool
@@ -447,7 +537,7 @@ func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 		if !acquired {
 			return nil
 		}
-		res := tx.Exec(reconcile)
+		res := tx.Exec(reconcile, amfaMergeFallbackAfter.Seconds())
 		if res.Error != nil {
 			return res.Error
 		}
@@ -463,6 +553,13 @@ func (r *Repository) ReconcileAMFAMerges(ctx context.Context) (int64, error) {
 // amfaReconcileLockKey names the advisory lock that lets one reconcile sweep
 // run at a time across every mirror and every server instance.
 const amfaReconcileLockKey = "events:amfa-reconcile"
+
+// amfaMergeFallbackAfter is how long an AMFA row waits for the Keycloak row of
+// its own type before it is merged onto the other Keycloak rows carrying its
+// amfa_event_id. The two mirrors poll independently (every 30s by default), so
+// a login's LOGIN can reach the table a poll after its AMFA row; this is ten
+// such polls.
+const amfaMergeFallbackAfter = 5 * time.Minute
 
 // toDomainEvent converts a database Event to a domain Event.
 func toDomainEvent(event *database.Event) *domain.Event {

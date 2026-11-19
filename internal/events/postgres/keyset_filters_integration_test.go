@@ -113,6 +113,18 @@ func TestList_FiltersByTypeSeverityAndMinRisk(t *testing.T) {
 				t.Errorf("CountWithFilter = %d, want %d; the count must mirror List's filters",
 					count, len(tc.wantIDs))
 			}
+
+			byType, err := repo.CountByType(ctx, opts)
+			if err != nil {
+				t.Fatalf("CountByType: %v", err)
+			}
+			var sum int64
+			for _, n := range byType {
+				sum += n
+			}
+			if sum != count {
+				t.Errorf("CountByType sums to %d (%v), want %d; it must mirror CountWithFilter", sum, byType, count)
+			}
 		})
 	}
 }
@@ -353,5 +365,17 @@ func TestStats_GroupsByTypeSeverityAndSource(t *testing.T) {
 	}
 	if want := map[string]int64{kcSource: 3, amfaSource: 1}; !maps.Equal(stats.BySource, want) {
 		t.Errorf("BySource = %v, want %v", stats.BySource, want)
+	}
+
+	byType, err := repo.CountByType(ctx, &events.ListOptions{
+		TenantID:  tenant,
+		Sources:   events.SourcesForRealm("master"),
+		StartTime: &start,
+	})
+	if err != nil {
+		t.Fatalf("CountByType: %v", err)
+	}
+	if !maps.Equal(byType, stats.ByType) {
+		t.Errorf("CountByType = %v, want Stats.ByType %v", byType, stats.ByType)
 	}
 }

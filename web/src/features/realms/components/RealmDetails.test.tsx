@@ -5,6 +5,7 @@ import { RealmDetails } from "./RealmDetails";
 import { useRealmDashboard } from "../hooks";
 import type { KeycloakDashboard } from "../types";
 import { useTenant } from "@/shared/context";
+import { HEALTH_METRICS_HINT } from "@/shared/utils/healthAvailability";
 
 vi.mock("../hooks", () => ({
   useRealmDashboard: vi.fn(),
@@ -290,6 +291,69 @@ describe("RealmDetails", () => {
         screen.getByText("No data available for this realm"),
       ).toBeInTheDocument();
     });
+  });
+
+  it("does not present unavailable realm health numbers as measurements", () => {
+    mockUseRealmDashboard.mockReturnValue({
+      data: {
+        ...mockRealmDashboard,
+        health: {
+          ...mockRealmDashboard.health!,
+          memory_used_bytes: 0,
+          memory_max_bytes: 0,
+          uptime_millis: 0,
+        },
+      },
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useRealmDashboard>);
+    render(<RealmDetails realmName="test-realm" onClose={mockOnClose} />);
+    expect(screen.getAllByText("Not available")).toHaveLength(2);
+    expect(screen.getByText(HEALTH_METRICS_HINT)).toBeVisible();
+    expect(screen.queryByText("0h")).not.toBeInTheDocument();
+    expect(screen.queryByText("0 B")).not.toBeInTheDocument();
+  });
+
+  it.each(["DOWN", "DEGRADED", "UNKNOWN"])(
+    "does not suggest a role change when realm health is %s",
+    (status) => {
+      mockUseRealmDashboard.mockReturnValue({
+        data: {
+          ...mockRealmDashboard,
+          health: {
+            ...mockRealmDashboard.health!,
+            status,
+            memory_used_bytes: 0,
+            memory_max_bytes: 0,
+            uptime_millis: 0,
+          },
+        },
+        isLoading: false,
+        error: null,
+      } as ReturnType<typeof useRealmDashboard>);
+      render(<RealmDetails realmName="test-realm" onClose={mockOnClose} />);
+      expect(screen.getAllByText("Not available")).toHaveLength(2);
+      expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
+      expect(screen.queryByTitle(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
+    },
+  );
+
+  it("does not show role advice for stale UP data after a refresh fails", () => {
+    mockUseRealmDashboard.mockReturnValue({
+      data: {
+        ...mockRealmDashboard,
+        health: {
+          ...mockRealmDashboard.health!,
+          memory_max_bytes: 0,
+          uptime_millis: 0,
+        },
+      },
+      isLoading: false,
+      isError: true,
+      error: new Error("refresh failed"),
+    } as ReturnType<typeof useRealmDashboard>);
+    render(<RealmDetails realmName="test-realm" onClose={mockOnClose} />);
+    expect(screen.queryByText(HEALTH_METRICS_HINT)).not.toBeInTheDocument();
   });
 
   it("should format bytes correctly", async () => {

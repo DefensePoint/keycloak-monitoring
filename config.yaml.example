@@ -25,6 +25,28 @@
 ################################################################################
 
 # =============================================================================
+# BRANDING
+# =============================================================================
+# The product name shown in the web UI, alert emails, Slack messages, GitLab
+# issues, PDF reports and the MCP server. Leave it out to keep the defaults.
+branding:
+  # Full name: page title, settings page, notifications, reports, MCP server
+  # (whose identifier is this name in lower case with dashes)
+  name: "Keycloak Monitoring Tool"
+  # Short name: "Can't reach the KMT server.", the realm page link and, in
+  # lower case, report file names (kmt-report-<tenant>-<from>-to-<to>.pdf)
+  short_name: "KMT"
+  # Word next to the logo; the rest of the name is shown under it
+  logo_text: "Keycloak"
+  # PDF report credits: "<vendor> Team" as author, "<vendor> Security Team"
+  # as contact, with contact_email. Setting a vendor without an address
+  # leaves the address out. The logo images are not configurable here.
+  # Rebranding? Change these two as well: with only the name changed, reports
+  # still credit DefensePoint, and the server logs a warning at startup.
+  vendor: "DefensePoint"
+  contact_email: "security@defensepoint.com"
+
+# =============================================================================
 # SECURITY CONFIGURATION
 # =============================================================================
 security:
@@ -301,8 +323,10 @@ keycloak:
     # and generates alerts for misconfigurations or security issues.
     config_checker:
       # MASTER SWITCH - off by default; nothing below runs until it is on.
-      # When on, every tenant enabled at startup gets the checks enabled below
-      # (a tenant added later is checked after a restart); per-tenant
+      # When on, every enabled tenant, including one created in the interface,
+      # gets the checks enabled below; creating, enabling, disabling or deleting
+      # a tenant starts or stops its checks without a restart, and disabling one
+      # resolves its open alerts from these checks. Per-tenant
       # config_checker overrides are not applied yet. The realm and client
       # security checks are enabled by default and did not run in KMT 1.0.x,
       # so expect a first wave of alerts for existing misconfigurations.
@@ -349,6 +373,47 @@ keycloak:
           # How long to wait when retrieving metadata from IDP metadata descriptor URLs
           # Valid time units: ns, us/µs, ms, s, m, h
           certificate_check_timeout: 30s
+
+        # Identity Provider Client Secret Expiry Check
+        # Warns before the client secret of an identity provider (OIDC, social)
+        # expires. Keycloak does not know when a secret expires: the provider
+        # that issued it does (Entra ID, Okta, ...), so list the dates here.
+        # Changing a date takes effect after a restart.
+        identity_provider_secret_expiry:
+          # Enable or disable this specific check. It does nothing until a
+          # secret is listed below.
+          enabled: true
+
+          # A warning alert is raised this many days before expires_on. With
+          # the default notification thresholds only Slack gets warnings.
+          warning_days: 30
+
+          # This many days before expires_on the warning becomes an error,
+          # which email also gets with the default thresholds. On expires_on
+          # a critical alert follows, which GitLab also gets. Each replaces
+          # the one before, which resolves without a notification. Each is
+          # sent once per channel, not repeated while it stays open (a failed
+          # send is retried hourly). At most warning_days.
+          error_days: 7
+
+          # One entry per identity provider:
+          #   tenant:            KMT tenant ID, from config.yaml or the interface
+          #                      (case does not matter)
+          #   realm:             Keycloak realm of the provider
+          #   identity_provider: the provider's alias in Keycloak
+          #   expires_on:        the secret's expiry date as the provider shows
+          #                      it, YYYY-MM-DD (UTC); from that day on the
+          #                      secret counts as expired
+          # An entry whose realm or provider Keycloak does not have raises a
+          # warning, so a renamed provider is not silently left unwatched. An
+          # entry naming no enabled tenant is logged as a warning at startup.
+          # Example:
+          # secrets:
+          #   - tenant: prod
+          #     realm: customers
+          #     identity_provider: entra
+          #     expires_on: 2027-03-31
+          secrets: []
 
         # Realm Security Configuration Check
         # Validates realm-level security configurations including SSL, password policies,
@@ -467,6 +532,12 @@ keycloak:
     # occurrence, so operators opt in.
     event_checker:
       enabled: false            # MASTER SWITCH - off by default
+      # When on, every enabled tenant, including one created in the interface,
+      # gets the checks enabled below; creating, enabling, disabling or deleting
+      # a tenant starts or stops its checks without a restart, and disabling one
+      # resolves its open alerts from these checks. There is no
+      # per-tenant switch: to keep one tenant quiet, add an alert silence with
+      # its tenant_id (narrow it with alert_type, such as LOGIN_ERROR).
       # How often to run event-based checks
       # Valid time units: ns, us/µs, ms, s, m, h
       # Recommended: 5m (balance between responsiveness and performance)
@@ -551,6 +622,21 @@ keycloak:
       backfill_days: 1          # first-run lookback window
 
     # =========================================================================
+    # AMFA AUTHENTICATOR IDS
+    # =========================================================================
+    # The Events page shows its AMFA sections (KPI cards, map, Risk column) for
+    # realms whose login flows use an enabled AMFA authenticator. The Adaptive
+    # MFA plugin's adaptive-auth and conditional-adaptive-auth are always
+    # matched. List here the IDs of an extension that registers the AMFA
+    # authenticators under other names; a realm using only those shows no AMFA
+    # sections and no error until they are listed. Any listed ID marks a realm
+    # as using AMFA, so list only AMFA authenticators. The IDs in effect are
+    # logged at startup ("AMFA authenticator IDs").
+    # amfa_authenticator_ids:
+    #   - custom-adaptive-auth
+    #   - custom-conditional-adaptive-auth
+
+    # =========================================================================
     # VERSION CHECKER
     # =========================================================================
     # The version checker monitors for new Keycloak releases
@@ -568,6 +654,13 @@ keycloak:
       #
       # With this false, no version checker is constructed and the UI simply
       # shows no version information.
+      #
+      # Only a server reporting a plain release number, such as 26.4.2, is
+      # compared. A vendor or distribution build, such as Red Hat build of
+      # Keycloak (26.4.2.redhat-00001), adds its own suffix and follows its own
+      # release line, so it is never shown as behind upstream. The Health page
+      # then says the update check does not apply to that build, and the
+      # server logs it once per tenant.
       enabled: false
 
       # How long to cache version information before checking again
@@ -662,8 +755,9 @@ keycloak:
       # same keys. Settings left out keep the global value; a list replaces the
       # global list. realms, polling, events, connection and infinispan_port
       # apply per tenant. config_checker, event_checker, amfa_checker,
-      # amfa_mirror, version_checker, infinispan_enabled and
-      # connection.allow_private_ranges are only read from keycloak.global;
+      # amfa_mirror, amfa_authenticator_ids, version_checker,
+      # infinispan_enabled and connection.allow_private_ranges are only read
+      # from keycloak.global;
       # setting them here logs a warning at startup and has no effect.
       config:
         # Realm the Dashboard and Events pages open on when the browser tab
@@ -851,8 +945,8 @@ notifications:
     channel: ""
 
     # Optional: Custom bot username for messages
-    # If not specified, uses the webhook's configured name
-    username: "Keycloak Monitoring Tool"
+    # If not specified, uses branding.name
+    username: ""
 
     # Optional: Custom emoji icon for bot
     # Examples: ":robot_face:", ":shield:", ":warning:"
@@ -922,9 +1016,10 @@ notifications:
     skip_verify: false
 
     # Optional: Custom email subject template
-    # Available placeholders: {{severity}}, {{title}}, {{resource}}
-    # If not specified, uses default format
-    subject: "[{{severity}}] Keycloak Monitoring Tool Alert: {{title}}"
+    # Available placeholders: {{product}} (branding.name), {{severity}},
+    # {{title}}, {{resource}}
+    # If set to "", uses "[SEVERITY] <branding.name> Alert: <title> - <resource>"
+    subject: "[{{severity}}] {{product}} Alert: {{title}}"
 
     # Minimum severity level for sending email notifications
     # Only alerts with this severity or higher will trigger emails

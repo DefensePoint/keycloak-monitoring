@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"go.uber.org/fx/fxtest"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/saferequest"
 )
@@ -139,4 +141,110 @@ func TestBuildConfigChecks_MetadataFetchIsGuarded(t *testing.T) {
 	if len(alerts) != 1 || !strings.Contains(alerts[0].Title, "metadata fetch failed") {
 		t.Fatalf("alerts = %+v, want one metadata fetch failure", alerts)
 	}
+}
+
+// realmsAskedClient reports, once per tenant, that a check listed its realms.
+type realmsAskedClient struct {
+	stubConfigCheckClient
+	tenantID string
+	asked    chan string
+}
+
+func (c realmsAskedClient) GetAllRealms(context.Context) ([]*keycloakadmin.RealmRepresentation, error) {
+	select {
+	case c.asked <- c.tenantID:
+	default:
+	}
+	return nil, nil
+}
+
+// The bug: the configuration checks were built once at startup, so a tenant
+// created in the interface went unchecked until a restart.
+func TestConfigCheckWorkers_TenantAddedAtRuntimeIsChecked(t *testing.T) {
+	var cfg config.ConfigCheckerConfig
+	cfg.Enabled = true
+	cfg.PollInterval = time.Hour
+	cfg.Checks.RealmSecurity.Enabled = true
+	asked := make(chan string, 1)
+	lookup := func(tenantID string) configcheck.KeycloakClient {
+		return realmsAskedClient{tenantID: tenantID, asked: asked}
+	}
+	w := newConfigCheckWorkers(cfg, lookup, saferequest.Policy{}, ecFakeAlertStore{}, ecFakeNotifier{}, nil, logger.NewNoop())
+	tenants := &fakeAmfaTenantService{}
+	lc := fxtest.NewLifecycle(t)
+	w.hook(lc, tenants)
+	lc.RequireStart()
+	t.Cleanup(func() { lc.RequireStop() })
+
+	tenants.callback(tenant.EventAdded, enabledTenant("new"))
+
+	wantChecked(t, asked, "new")
+}
+
+func TestConfigCheckWorkers_NoCheckEnabledStartsNothing(t *testing.T) {
+	var cfg config.ConfigCheckerConfig
+	cfg.Enabled = true
+	w := newConfigCheckWorkers(cfg, func(string) configcheck.KeycloakClient { return nil }, saferequest.Policy{},
+		ecFakeAlertStore{}, ecFakeNotifier{}, nil, logger.NewNoop())
+
+	if _, ok := w.build("a"); ok {
+		t.Fatal("built a service for a tenant with every check off")
+	}
+}
+
+// The config checker starts after the HTTP server and after the monitoring
+// module has loaded the tenant cache: it must not load it again.
+func TestConfigCheckWorkers_DoNotReloadTheTenantCache(t *testing.T) {
+	var cfg config.ConfigCheckerConfig
+	w := newConfigCheckWorkers(cfg, func(string) configcheck.KeycloakClient { return nil }, saferequest.Policy{},
+		ecFakeAlertStore{}, ecFakeNotifier{}, nil, logger.NewNoop())
+	if w.loadTenants {
+		t.Fatal("config check workers reload the tenant cache")
+	}
+}
+
+// Every tenant gets the secret expiry check, each with its own entries: one
+// with none still needs it, so the alerts of entries since removed resolve.
+func TestBuildConfigChecks_SecretExpiryForEveryTenantWithItsOwnEntries(t *testing.T) {
+	var cfg config.ConfigCheckerConfig
+	cfg.Checks.IdentityProviderSecretExpiry.Enabled = true
+	cfg.Checks.IdentityProviderSecretExpiry.WarningDays = 30
+	cfg.Checks.IdentityProviderSecretExpiry.Secrets = []config.IdentityProviderSecret{
+		{Tenant: "a", Realm: "customers", IdentityProvider: "entra", ExpiresOn: "2020-03-31"},
+		{Tenant: "c", Realm: "customers", IdentityProvider: "okta", ExpiresOn: "2020-01-15"},
+	}
+	tenants := []*domain.KeycloakTenant{{TenantID: "a"}, {TenantID: "b"}}
+	kc := secretStubClient{stubConfigCheckClient{realms: []*keycloakadmin.RealmRepresentation{{ID: "r", Realm: "customers", Enabled: true}}}}
+	lookup := func(string) configcheck.KeycloakClient { return kc }
+
+	checks := buildConfigChecks(cfg, tenants, lookup, saferequest.Policy{}, logger.NewNoop())
+
+	if len(checks) != 2 {
+		t.Fatalf("got %d checks, want one per tenant", len(checks))
+	}
+	alerts, err := checks[0].Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(alerts) != 1 || alerts[0].TenantID != "a" || alerts[0].ResourceName != "entra" ||
+		alerts[0].Severity != domain.AlertSeverityCritical || !strings.Contains(alerts[0].Description, "2020-03-31") {
+		t.Fatalf("alerts = %+v, want one expired alert for tenant a's entra, valid until 2020-03-31", alerts)
+	}
+	if alerts, err := checks[1].Execute(context.Background()); err != nil || len(alerts) != 0 {
+		t.Fatalf("tenant b: alerts %+v, err %v; want none", alerts, err)
+	}
+
+	cfg.Checks.IdentityProviderSecretExpiry.Enabled = false
+	if checks := buildConfigChecks(cfg, tenants, lookup, saferequest.Policy{}, logger.NewNoop()); len(checks) != 0 {
+		t.Fatalf("switched off: got %d checks, want 0", len(checks))
+	}
+}
+
+type secretStubClient struct{ stubConfigCheckClient }
+
+func (secretStubClient) GetIdentityProviders(context.Context, string) ([]*keycloakadmin.IdentityProviderRepresentation, error) {
+	return []*keycloakadmin.IdentityProviderRepresentation{
+		{Alias: "entra", ProviderID: "oidc", InternalID: "idp-entra"},
+		{Alias: "okta", ProviderID: "oidc", InternalID: "idp-okta"},
+	}, nil
 }

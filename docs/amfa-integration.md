@@ -1,6 +1,6 @@
 # AMFA Integration Guide
 
-Keycloak Monitoring Tool's **AMFA Events** feature reads from each tenant's AMFA (Adaptive MFA) PostgreSQL database. This guide walks an operator through enabling it.
+Keycloak Monitoring Tool's **AMFA Events** feature reads each tenant's AMFA (Adaptive MFA) engine, [keycloak-adaptive-mfa-engine](https://github.com/DefensePoint/keycloak-adaptive-mfa-engine), over its monitoring API or from its PostgreSQL database. This guide walks an operator through enabling it.
 
 ## Architecture summary
 
@@ -18,7 +18,7 @@ Keycloak Monitoring Tool's **AMFA Events** feature reads from each tenant's AMFA
 
 ## One-time setup on each AMFA database
 
-Run on every AMFA PostgreSQL instance KMT will read from. The dedicated role enforces least privilege at the database level — even a bug in KMT cannot write to AMFA.
+Only needed when KMT reads the database, that is when `amfa.api.base_url` is not set. Run on every AMFA PostgreSQL instance KMT will read from. The dedicated role enforces least privilege at the database level, so even a bug in KMT cannot write to AMFA.
 
 ```sql
 CREATE USER kmt_ro WITH PASSWORD '<strong-password>';
@@ -111,6 +111,20 @@ The listed client can then read the monitoring data of every realm in that AMFA 
 
 Stats are realm-scoped over the API: "All Realms" is not aggregated, and the pages ask for a specific realm instead.
 
+## Which realms show AMFA sections
+
+The Events page shows its AMFA sections (KPI cards, geolocation map, Risk column) for a realm when any of the realm's top-level authentication flows contains an enabled AMFA authenticator. KMT always matches the Adaptive MFA plugin's provider IDs, `adaptive-auth` and `conditional-adaptive-auth`. An extension that registers the AMFA authenticators under its own IDs needs them listed, or its realms show no AMFA sections and no error:
+
+```yaml
+keycloak:
+  global:
+    amfa_authenticator_ids:
+      - custom-adaptive-auth
+      - custom-conditional-adaptive-auth
+```
+
+The same list can be set as `MONITORING_KEYCLOAK_GLOBAL_AMFA_AUTHENTICATOR_IDS=custom-adaptive-auth,custom-conditional-adaptive-auth`. The list is added to the built-in IDs and is only read from `keycloak.global`, so a change to it needs a restart. Any listed ID marks a realm whose flows use it as using AMFA, so list only AMFA authenticators. A misspelled ID matches nothing and gives no error, so check the IDs in effect, which KMT logs once at startup as `AMFA authenticator IDs`. KMT checks each realm's flows at most every 5 minutes, so a change to a realm's flows can take that long to show.
+
 ## RBAC
 
 The `amfa:read` permission is added by a migration that runs once per database, on the first KMT startup that has it, and is recorded in `data_migrations`:
@@ -121,27 +135,26 @@ The `amfa:read` permission is added by a migration that runs once per database, 
 
 ## Verification
 
-Expected KMT startup log lines (per enabled tenant):
+Expected KMT startup log lines (per enabled tenant, when reading the database; over the API the `database connected` and `schema version` lines do not appear):
 
 ```
-[INFO] AMFA enabled tenant detected: tenant_id=prod-keycloak
-[INFO] AMFA database connected: tenant_id=prod-keycloak host=amfa-prod.internal database=adaptive_mfa
-[INFO] AMFA schema version matches: tenant_id=prod-keycloak version=c00d6d7d197c
-[INFO] AMFA registered for tenant: tenant_id=prod-keycloak
-[INFO] AMFA module ready: enabled_tenant_count=1
+AMFA database connected     host=amfa-prod.internal database=adaptive_mfa
+AMFA schema version matches version=<AMFA alembic head>
+AMFA registered for tenant  tenant_id=prod-keycloak transport=database
+AMFA module ready           enabled_tenant_count=1
 ```
 
-Then open the AMFA Events page from the sidebar (`/{tenantId}/amfa-events`) and verify:
+AMFA has no page of its own. It appears on the Events page (`/{tenantId}/events`):
 
-1. KPI cards show non-zero numbers if AMFA has events for the selected realm.
-2. The events table populates and is filterable / paginatable.
-3. The world map shows marker clusters at the geo points reported by AMFA's `auth_context.lat/long`.
-4. Switching tenants (via the `TenantSelector`) routes you to the correct tenant's AMFA data; tenants without AMFA configured show a clear empty state.
+1. AMFA logins are listed in the events table with source `amfa:<realm>`, but only when the mirror is on (`keycloak.global.amfa_mirror.enabled: true`, off by default). Its first run logs `amfamirror: mirrored events` with a count per realm. On a tenant created or edited in the interface, the AMFA toggle starts and stops the tenant's mirror straight away, as it does the AMFA alert checker: see [Tenants created in the interface](#tenants-created-in-the-interface).
+2. The AMFA KPI cards and the Risk column appear only for realms where any top-level authentication flow contains an enabled AMFA authenticator, bound or not, and with "All Realms" when any realm of the tenant does. The geo map needs one such realm selected. KMT reads the flows to decide this (`GET /api/tenants/{tenantId}/keycloak/amfa-realms`), so a realm without such a flow shows the table only, even if AMFA has events for it.
+3. Map markers come from each login's coordinates: `auth_context.lat/long`, or the `auth_process.auth_context_json` snapshot that the engine writes. A failed login AMFA stored without a risk decision, such as a wrong password or an unknown user, has no snapshot; its IP address, country, VPN flag and coordinates come from `location_network`. Coordinates are there only from AMFA engine migration `5ae8978564f9` on, for addresses seen since: with an older engine, Point's included, these failures show their IP, country and VPN flag but are not on the map. KMT checks for the columns itself and needs no setting.
 
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
+| A realm whose login uses AMFA shows no AMFA sections on the Events page | Its flows use an AMFA authenticator under a provider ID KMT does not match, such as an extension's own IDs. | List the IDs in `keycloak.global.amfa_authenticator_ids` and restart. If they are listed already, compare them with the startup line `AMFA authenticator IDs` and the provider IDs in the realm's flows. See [Which realms show AMFA sections](#which-realms-show-amfa-sections). |
 | Page returns 404 `amfa_not_configured` for a tenant | That tenant has no `amfa:` block, or `amfa.enabled: false`. | Add or enable the block. |
 | API transport: AMFA pages fail with 500 (`AMFA stats failed`, `AMFA list events failed`) for every realm except the admin realm, the MCP `get_amfa_stats` tool answers `internal error`, and those realms get no mirrored AMFA events or AMFA alerts | AMFA refuses KMT's admin-realm token for other realms. AMFA's access log shows `403` on `/{realm}/monitoring/...`, with `Token realm does not match request realm`. | List the client in AMFA's `MONITORING_TRUSTED_READERS` (see [What has to exist](#what-has-to-exist)). |
 | API transport: every realm fails, the admin realm included | AMFA rejects the token itself: the Keycloak base URL is missing from AMFA's `OIDC_TRUSTED_BASE_URLS`, or the token lacks the `amfa` audience. | Add the base URL, or the audience mapper on the client (see [What has to exist](#what-has-to-exist)). |
@@ -151,27 +164,150 @@ Then open the AMFA Events page from the sidebar (`/{tenantId}/amfa-events`) and 
 | Log line `AMFA schema version drift detected — KMT may need updating` | AMFA's database schema has moved past the version KMT was built against. The feature still works for the fields KMT knows about, but new columns or renames will not be picked up. | Test against the new AMFA schema and bump `expected_schema_version` once verified. |
 | Log line `Could not read AMFA alembic_version table` | The `alembic_version` table is missing from AMFA's DB (e.g., a partial volume wipe). The schema check is non-fatal — KMT continues to operate. | Re-create the table from the current head: `CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY); INSERT INTO alembic_version VALUES ('<current_head_hash>');` Confirm the head by inspecting `migrations/versions/` in the AMFA repo. |
 | Events table shows raw UUIDs instead of usernames | Either the Keycloak admin client isn't healthy for that tenant, or the AMFA event references a `user_id` that no longer exists in Keycloak. AMFA Events falls back to UUID display so the page still loads. | Check Keycloak is up and the monitor pool reports `Keycloak client initialized successfully` at startup. If the user genuinely doesn't exist in Keycloak (e.g. deleted), the UUID display is correct. |
-| Page shows nothing when "All Realms" is selected in the dropdown | AMFA endpoints require a specific `realm_id` — they don't aggregate cross-realm. The hooks are intentionally disabled when no specific realm is picked. | Select a specific realm. An info banner now explains this directly on the page. |
+| With "All Realms" selected, there is no geo map, or the AMFA KPI cards show a banner instead of numbers | The geo map is drawn for one realm only. The KPI cards total all realms when KMT reads the database, but over the monitoring API AMFA does not total stats across realms. A user whose access is limited to certain realms gets a banner too: with one realm, the numbers cover that realm; with several, none are shown. | Select a specific realm. |
 | Geolocation map area is empty (no tiles, no markers) | If you're maintaining the map component: react-leaflet 4 strips non-`height/width` keys from its `style` prop, and a percentage height races MUI's layout pass at first paint. Leaflet measures `0×0` and never re-measures, so the map renders invisible. | Always pass an explicit pixel height to `MapContainer style={{ height: <number>, width: "100%" }}`. See the inline comment in `web/src/features/amfa/components/AmfaGeoMap.tsx`. |
 | Map shows fewer markers than the events count | AMFA rows with `NULL` lat/long are excluded from the geo aggregation. The events table still shows them. | Expected behavior. |
-| Counts lower than expected on older AMFA data | Historical AMFA rows may not have the `realm_id` key in `auth_context_json`. | Expected for legacy data. New events will include the key. |
-| One login appears twice on the unified Events page, as both `keycloak:<realm>` and `amfa:<realm>`, then becomes one row shortly after | The two mirrors write independently and a periodic sweep (`ReconcileAMFAMerges`) folds the AMFA row onto its Keycloak twin at the end of each mirror cycle. Between the AMFA write and that sweep, both halves of the same login are visible, and the event count is correspondingly high. | Expected behavior, bounded by `keycloak.global.amfa_mirror.poll_interval` (default 30s) and self-healing. Raising `poll_interval` widens the window proportionally. |
-| One login appears twice on the unified Events page and **stays** that way | The two rows never merge because they share no correlation key. The merge is keyed on `amfa_event_id`, stamped onto the interactive login event by an Adaptive MFA Keycloak extension. The stock open-source Adaptive MFA SPI does not stamp it, so without an extension that does, KMT cannot tell that the Keycloak and AMFA rows describe the same login, and both are shown and counted. | Not the transient case above. Compare both sides for one realm: `SELECT source_system, count(*) AS rows, count(*) FILTER (WHERE amfa_event_id IS NOT NULL) AS with_merge_key FROM events WHERE source IN ('keycloak:<realm>','amfa:<realm>') GROUP BY source_system;` If the `amfa` row reports `with_merge_key > 0` but the `keycloak` row reports 0, no extension is stamping the key and every AMFA-covered login in that realm is counted twice indefinitely. A zero on the Keycloak side alone is not conclusive: only interactive logins that ran the AMFA flow carry the key, so `CLIENT_LOGIN`, token refreshes and non-AMFA flows legitimately have none. |
+| Counts lower than expected on older AMFA data | Rows with no realm attribution: neither `auth_event.realm_id` nor `auth_context_json->>'realm_id'` is set. | Expected for that data. Events the engine records for a Keycloak login carry the realm. |
+| One login appears twice on the unified Events page, as both `keycloak:<realm>` and `amfa:<realm>`, then becomes one row shortly after | The two mirrors write independently and a periodic sweep (`ReconcileAMFAMerges`) folds the AMFA row onto its Keycloak twin at the end of each mirror cycle. Between the AMFA write and that sweep, both halves of the same login are visible, and the event count is correspondingly high. | Expected behavior, bounded by `keycloak.global.amfa_mirror.poll_interval` (default 30s) and self-healing. Raising `poll_interval` widens the window proportionally. An SSO login whose `LOGIN` carries no `amfa_event_id` stays as two rows for up to five minutes: the AMFA row first waits for a Keycloak row of its own type, then is merged onto the login's other Keycloak rows with that id (`IDENTITY_PROVIDER_POST_LOGIN`). |
+| One login appears twice on the unified Events page and **stays** that way | The two rows never merge because they share no correlation key. The merge is keyed on `amfa_event_id`, stamped onto the interactive login event by the Adaptive MFA Keycloak extension. The open-source Adaptive MFA plugin stamps it in releases after 1.0.1 (on an SSO login, or a login that ends with a required action such as TOTP setup, only when the plugin's `amfa-login-event-details` required action is registered in the realm); version 1.0.1 and earlier do not, so with those, and without another extension that does, KMT cannot tell that the Keycloak and AMFA rows describe the same login, and both are shown and counted. | Not the transient case above. Compare both sides for one realm: `SELECT source_system, count(*) AS rows, count(*) FILTER (WHERE amfa_event_id IS NOT NULL) AS with_merge_key FROM events WHERE source IN ('keycloak:<realm>','amfa:<realm>') GROUP BY source_system;` If the `amfa` row reports `with_merge_key > 0` but the `keycloak` row reports 0, nothing is stamping the key (for example the open-source plugin is at 1.0.1 or earlier) and every AMFA-covered login in that realm is counted twice indefinitely. A zero on the Keycloak side alone is not conclusive: only interactive logins that ran the AMFA flow carry the key, so `CLIENT_LOGIN`, token refreshes and non-AMFA flows legitimately have none. |
 
+## Running an end-to-end smoke locally
+
+The following walks through a local smoke of KMT's bundled demo (`make docker-demo-up`, two Keycloaks) reading a local AMFA engine through its database. It assumes `keycloak-adaptive-mfa-engine` is checked out alongside `keycloak-monitoring`.
+
+### Prerequisites
+
+- Docker Desktop running with enough VM disk (≥20 GB free inside the VM, see `docker system df`).
+- `keycloak-adaptive-mfa-engine` (the AMFA engine) cloned to a sibling directory.
+- KMT's `.env` with the `BUNDLED_*` values and a `MONITORING_AUTH_SIMPLE_DEFAULT_PASS` that meets the password rules (at least 12 characters, with upper case, lower case, a digit and a special character), as for `make docker-demo-up`.
+- Host ports 5433, 6379 and 8095 free for the engine. The demo uses 18080, 18081, 17880, 17888 and 15433, so it does not collide with them. The plain `make docker-up` stack does: its Postgres also publishes 5433.
+
+### Step 1: Bring up AMFA
+
+```bash
+# The engine's quick-start stack without its own Keycloak. It
+# creates its database schema on first start.
+cd ../keycloak-adaptive-mfa-engine/config/keycloak
+cp -n .env.example .env
+docker compose up -d --build postgres redis adaptive_auth
+```
+
+The engine mounts `certs/rootCA.pem`, which the engine's README has you create with mkcert for its full stack. If it does not exist yet, Docker creates an empty directory under that name, and the engine then cannot verify any Keycloak token (`OIDC discovery fetch failed ... Is a directory`), so it scores no logins. KMT reading the database is not affected. Remove `config/keycloak/certs/` before you generate the certificates for the engine's own quick-start.
+
+### Step 2: Set up KMT's read-only role on AMFA's PostgreSQL
+
+```bash
+docker exec -i amfa-postgres-1 psql -U keycloak -d adaptive_mfa <<'SQL'
+CREATE USER kmt_ro WITH PASSWORD '<your-strong-password>';
+GRANT CONNECT ON DATABASE adaptive_mfa TO kmt_ro;
+GRANT USAGE ON SCHEMA public TO kmt_ro;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO kmt_ro;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT ON TABLES TO kmt_ro;
+SQL
+```
+
+> **Note on indexes:** `CREATE INDEX idx_auth_process_realm_id ON auth_process ((auth_context_json->>'realm_id'))` is recommended for production performance. This is an *operator-discretion* schema change on AMFA's DB, so KMT does not create it automatically. Skip it for a local smoke, which has only a few rows; add it for any deployment with non-trivial event volume, with sign-off from whoever owns AMFA's schema.
+
+### Step 3: Add the AMFA block to a KMT tenant
+
+The demo mounts `deployments/local/config.bundled.yaml`. Add an `amfa:` block under its `demo1` tenant, and turn the mirror on so AMFA logins reach the Events table (revert the file with `git checkout` when you are done):
+
+```yaml
+keycloak:
+  global:
+    # ... existing fields untouched ...
+    amfa_mirror:
+      enabled: true
+  tenants:
+    demo1:
+      # ... existing fields untouched ...
+      amfa:
+        enabled: true
+        events_lookback_days: 30
+        expected_schema_version: "<current AMFA alembic head>"
+        database:
+          host: "host.docker.internal"  # KMT runs in Docker; AMFA Postgres is on host
+          port: 5433
+          database: "adaptive_mfa"
+          user: "kmt_ro"
+          password: "<the password from Step 2>"
+          ssl_mode: "disable"             # local-only; use require in production
+```
+
+Get the current schema head:
+
+```bash
+docker exec amfa-postgres-1 \
+  psql -U keycloak -d adaptive_mfa -tAc "SELECT version_num FROM alembic_version"
+```
+
+### Step 4: Build KMT images and bring up the demo
+
+```bash
+cd ../../../keycloak-monitoring
+make docker-demo-up
+```
+
+This builds the images and waits until every service is healthy. After a config change, `make docker-demo-restart` picks it up. **`docker restart` will NOT pick up a freshly rebuilt image**: it restarts the same container instance with whatever image it was created from.
+
+### Step 5: Verify startup
+
+```bash
+docker logs kmt-demo-server 2>&1 | grep -E '"message":"(AMFA|amfamirror)' | tail -10
+```
+
+Expect these lines (one-time, at boot):
+
+```
+AMFA database connected            host=host.docker.internal database=adaptive_mfa
+AMFA schema version matches        version=<your hash>
+AMFA registered for tenant         tenant_id=demo1 transport=database
+AMFA module ready                  enabled_tenant_count=1
+AMFA Keycloak enrichment enabled via monitor pool
+amfamirror: mirrored events        realm=<realm> count=<n>   (only once AMFA has events for that realm)
+```
+
+### Step 6: Open the UI
+
+Navigate to `http://localhost:17880/demo1/events`, sign in with `MONITORING_AUTH_SIMPLE_DEFAULT_USER` / `MONITORING_AUTH_SIMPLE_DEFAULT_PASS` from `.env`, and select a specific realm.
+
+- A fresh AMFA database has no logins, so until AMFA has scored some for a realm of this Keycloak, the table shows Keycloak rows only. Once it has, they appear with source `amfa:<realm>`.
+- AMFA events for a user who exists in that realm show the username and email; events whose `user_id` does not exist in Keycloak fall back to the UUID.
+- The bundled Keycloaks do not have the AMFA authenticator, so the KPI cards and the geo map stay hidden (see [Verification](#verification)). To see them, point a tenant at a Keycloak with a realm whose flows contain it, such as the engine's full quick-start (realm `test-amfa`).
+
+### Step 7: Tail logs while exercising the UI
+
+```bash
+docker logs -f kmt-demo-server 2>&1 | grep "amfa/"
+```
+
+Each page refresh with a realm selected logs a `200` for `/api/tenants/demo1/amfa/stats`, plus one for `/amfa/geo` when that realm uses the AMFA authenticator.
+
+### Step 8: Cleanup (optional)
+
+```bash
+# Stop the demo, and revert the config change:
+make docker-demo-down
+git checkout deployments/local/config.bundled.yaml
+
+# Stop AMFA:
+(cd ../keycloak-adaptive-mfa-engine/config/keycloak && docker compose stop)
+
+# Optionally drop the RO role on AMFA's DB:
+docker exec -i amfa-postgres-1 psql -U keycloak -d adaptive_mfa <<'SQL'
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM kmt_ro;
+REVOKE USAGE ON SCHEMA public FROM kmt_ro;
+REVOKE CONNECT ON DATABASE adaptive_mfa FROM kmt_ro;
+DROP USER kmt_ro;
+SQL
+```
 
 ## Seeding demo data for UI development
 
-For development / UI work without waiting for real AMFA traffic, seed a few synthetic `auth_process` rows and events directly:
+For development and UI work without waiting for real AMFA traffic, `deployments/local/amfa-demo/seed.sh` seeds about 730 logins over 30 days into a local AMFA engine stack: real city coordinates for the map, risk levels 1 to 4, VPN-flagged logins, an impossible-travel pair and a burst of rejections. It also creates the `demo-*` users in Keycloak, so the events show usernames rather than UUIDs, and the `kmt_ro` role. Every seeded row carries a marker, so `teardown.sh` removes exactly the demo data. See [its README](../deployments/local/amfa-demo/README.md).
 
-```sql
--- Insert one realistic record set:
---   1× auth_context (lat/long for the map, IP, country)
---   1× device + 1× location_network (FK targets)
---   1× auth_process (links them, sets realm + risk_level)
---   1× auth_event  (the displayable event row)
-```
-
-For two real users to appear with names instead of UUIDs, look up their UUIDs from Keycloak and use those `user_id` values in your seed.
+It writes `auth_process.auth_context_json` and leaves the `auth_context` table empty, as the engine itself does; KMT reads the JSON snapshot.
 
 ## Rollback
 
@@ -186,18 +322,9 @@ Restart KMT. Other tenants are unaffected. AMFA itself was never touched — the
 
 To disable globally: remove or set `enabled: false` on every tenant's `amfa:` block.
 
-## Known limitation (follow-up)
-
-In the current implementation, AMFA event enrichment with Keycloak usernames/emails requires a Keycloak admin client to be available to the AMFA fx module. KMT currently constructs Keycloak admin clients per-tenant inside the monitor pool, not as a process-scope singleton, so AMFA enrichment falls back to UUID-only display until one of the following is done:
-
-1. Expose a per-tenant Keycloak admin client lookup function to `internal/fx/amfa.go` (small refactor of `internal/fx/monitoring.go`'s `MonitorPoolManager`).
-2. Or construct a dedicated process-scope admin client for AMFA in `internal/fx/amfa.go`.
-
-The UUID-only fallback is a deliberate degraded mode, not a bug: enrichment quality drops, correctness does not.
-
 ## Alerts
 
-The AMFA risk-alert checker (`amfacheck/`) is a per-tenant poll loop that turns high-risk AMFA login events into KMT alerts. Alerts flow through the normal alert lifecycle and notification fan-out, so they appear on the Alerts page and trigger any configured notifications (e.g. Slack) exactly like Keycloak event-checker alerts. The checker reads AMFA's database read-only through the same `kmt_ro` role used by the rest of the integration; it never writes to AMFA.
+The AMFA risk-alert checker (`amfacheck/`) is a per-tenant poll loop that turns high-risk AMFA login events into KMT alerts. Alerts flow through the normal alert lifecycle and notification fan-out, so they appear on the Alerts page and trigger any configured notifications (e.g. Slack) exactly like Keycloak event-checker alerts. The checker reads AMFA the same way as the rest of the integration (over the monitoring API, or through the `kmt_ro` role when reading the database); it never writes to AMFA.
 
 ### Rules and severities
 
@@ -207,7 +334,7 @@ The AMFA risk-alert checker (`amfacheck/`) is a per-tenant poll loop that turns 
 | `repeated_risky` (rule 2) | A user accumulating repeated risky attempts within a window (default 3 within 24h at `min_risk_level` 2+) and still making them. | warning |
 | `vpn_risky` (rule 3) | A risky login originating from a VPN or anonymizing IP. | warning |
 | `login_error` (rule 4a) | A burst of `LOGIN_ERROR` events (default 5 within 5m). | warning |
-| `client_login_error` (rule 4b) | A burst of `CLIENT_LOGIN_ERROR` events (default 5 within 5m). | warning |
+| `client_login_error` (rule 4b) | A burst of `CLIENT_LOGIN_ERROR` events (default 5 within 5m). AMFA stores these only when the Keycloak side forwards them, and the open-source Adaptive MFA plugin does not, so with it this rule never fires. For client authentication failures, use the Keycloak event checker's `client_error` check (`keycloak.global.event_checker.checks.client_error`), which counts the same events from Keycloak without AMFA. | warning |
 
 ### Configuration
 
@@ -252,9 +379,19 @@ AMFA checker globally disabled; no alert services constructed
 amfacheck lifecycle hooks registered service_count=0
 ```
 
+### Tenants created in the interface
+
+A tenant created or edited in the interface gets the whole AMFA integration from its AMFA toggle, as a `config.yaml` tenant does: the statistics and map, the mirror and the alert checker. No restart is needed:
+
+- Turning AMFA on, with an AMFA endpoint, starts the tenant's mirror and checker. The mirror backfills `backfill_days` the first time it reads a realm for that tenant.
+- Changing the AMFA endpoint, or any other setting of the tenant, restarts both with the new settings.
+- Turning AMFA off, disabling the tenant or deleting it stops both. Nothing more is written for it.
+
+The global switches stay the master on/off and are read at startup only: with `keycloak.global.amfa_checker.enabled` or `keycloak.global.amfa_mirror.enabled` off, no tenant runs that feature, whatever its toggle says. A started or stopped service logs `amfacheck service starting` or `amfamirror service starting`, and `Stopping amfacheck service` or `Stopping amfamirror service`, with the tenant ID.
+
 ### Manual smoke test
 
-1. Set `amfa_checker.enabled: true` for a tenant whose `amfa:` block is enabled, and restart KMT.
+1. Set `keycloak.global.amfa_checker.enabled: true` and restart KMT. Every tenant whose AMFA is enabled gets a checker.
 2. Trigger one risk-engine rejection via AMFA's `/decision` endpoint (a login that AMFA's risk engine rejects).
 3. Wait one poll interval (default 1m).
 4. Confirm the alert appears on KMT's Alerts page and that a notification lands in the configured Slack channel.
@@ -263,7 +400,8 @@ amfacheck lifecycle hooks registered service_count=0
 
 The Alerts page shows a **Reload AMFA alerts** button next to Refresh, but only
 for tenants where the AMFA checker is enabled (both the tenant's `amfa.enabled`
-and the global `amfa_checker.enabled`). Clicking it runs the AMFA checker for
+and the global `amfa_checker.enabled`). It follows the tenant's AMFA toggle
+without a restart, as the checker does. Clicking it runs the AMFA checker for
 that tenant immediately - the same checks the background poller runs - then
 reloads the list, so new AMFA alerts appear without waiting for the next poll
 interval. It does not touch the other checkers, and it never removes alerts
@@ -287,16 +425,16 @@ To disable the checker, set `enabled: false` on the `amfa_checker` block and res
 |---|---|---|
 | No `amfacheck service starting` log lines | `amfa_checker.enabled: false` (default) | Set it true and restart |
 | Services start but no alerts ever | No qualifying events, or all per-check toggles disabled | Verify check toggles; confirm risky events exist in the window |
-| `skipping tenant with no AMFA repository` warning | Tenant has `amfa.enabled: true` but its AMFA DB is unreachable | Check the tenant's `amfa.database` connection |
+| `skipping tenant with no AMFA repository` warning | Tenant has `amfa.enabled: true` but KMT could not set up its AMFA reader at startup (look for `AMFA unavailable for tenant` or `AMFA config invalid for tenant` earlier in the log) | Check the tenant's `amfa.api` or `amfa.database` settings and that AMFA is reachable |
 | Alert flood right after enabling | Risky events from the last `poll_interval` plus 10 minutes | Expected for per-event rules; add an `alert_silences` rule in the server configuration to suppress noisy realms (`realm_name`) or IPs (`field_matches: {ip_address: ...}`) |
 | Rule 2 misses a burst spanning midnight UTC | Day boundary is UTC; counts split across two days | Documented limitation; tune `window`/`threshold` if needed |
-| One login appears twice on the unified Events page, as both `keycloak:<realm>` and `amfa:<realm>`, then becomes one row shortly after | The two mirrors write independently and a periodic sweep (`ReconcileAMFAMerges`) folds the AMFA row onto its Keycloak twin at the end of each mirror cycle. Between the AMFA write and that sweep, both halves of the same login are visible, and the event count is correspondingly high. | Expected behavior, bounded by `keycloak.global.amfa_mirror.poll_interval` (default 30s) and self-healing. Raising `poll_interval` widens the window proportionally. |
-| One login appears twice on the unified Events page and **stays** that way | The two rows never merge because they share no correlation key. The merge is keyed on `amfa_event_id`, stamped onto the interactive login event by an Adaptive MFA Keycloak extension. The stock open-source Adaptive MFA SPI does not stamp it, so without an extension that does, KMT cannot tell that the Keycloak and AMFA rows describe the same login, and both are shown and counted. | Not the transient case above. Compare both sides for one realm: `SELECT source_system, count(*) AS rows, count(*) FILTER (WHERE amfa_event_id IS NOT NULL) AS with_merge_key FROM events WHERE source IN ('keycloak:<realm>','amfa:<realm>') GROUP BY source_system;` If the `amfa` row reports `with_merge_key > 0` but the `keycloak` row reports 0, no extension is stamping the key and every AMFA-covered login in that realm is counted twice indefinitely. A zero on the Keycloak side alone is not conclusive: only interactive logins that ran the AMFA flow carry the key, so `CLIENT_LOGIN`, token refreshes and non-AMFA flows legitimately have none. |
+| One login appears twice on the unified Events page, as both `keycloak:<realm>` and `amfa:<realm>`, then becomes one row shortly after | The two mirrors write independently and a periodic sweep (`ReconcileAMFAMerges`) folds the AMFA row onto its Keycloak twin at the end of each mirror cycle. Between the AMFA write and that sweep, both halves of the same login are visible, and the event count is correspondingly high. | Expected behavior, bounded by `keycloak.global.amfa_mirror.poll_interval` (default 30s) and self-healing. Raising `poll_interval` widens the window proportionally. An SSO login whose `LOGIN` carries no `amfa_event_id` stays as two rows for up to five minutes: the AMFA row first waits for a Keycloak row of its own type, then is merged onto the login's other Keycloak rows with that id (`IDENTITY_PROVIDER_POST_LOGIN`). |
+| One login appears twice on the unified Events page and **stays** that way | The two rows never merge because they share no correlation key. The merge is keyed on `amfa_event_id`, stamped onto the interactive login event by the Adaptive MFA Keycloak extension. The open-source Adaptive MFA plugin stamps it in releases after 1.0.1 (on an SSO login, or a login that ends with a required action such as TOTP setup, only when the plugin's `amfa-login-event-details` required action is registered in the realm); version 1.0.1 and earlier do not, so with those, and without another extension that does, KMT cannot tell that the Keycloak and AMFA rows describe the same login, and both are shown and counted. | Not the transient case above. Compare both sides for one realm: `SELECT source_system, count(*) AS rows, count(*) FILTER (WHERE amfa_event_id IS NOT NULL) AS with_merge_key FROM events WHERE source IN ('keycloak:<realm>','amfa:<realm>') GROUP BY source_system;` If the `amfa` row reports `with_merge_key > 0` but the `keycloak` row reports 0, nothing is stamping the key (for example the open-source plugin is at 1.0.1 or earlier) and every AMFA-covered login in that realm is counted twice indefinitely. A zero on the Keycloak side alone is not conclusive: only interactive logins that ran the AMFA flow carry the key, so `CLIENT_LOGIN`, token refreshes and non-AMFA flows legitimately have none. |
 
 ### Implementation notes
 
-- **Per-tenant lifecycle.** One `amfacheck.Service` goroutine is constructed per tenant whose `amfa.enabled: true` AND `keycloak.global.amfa_checker.enabled: true`. The fx module starts each on `OnStart` and stops it on `OnStop`.
-- **Poll-loop context.** The poll loop runs on a long-lived background context owned by the fx hook, NOT fx's `OnStart` context. fx cancels the `OnStart` context once startup finishes, so passing it to the loop would stop polling moments after boot (the loop would log `amfacheck polling cancelled`). Shutdown happens via `OnStop`, which cancels the background context and calls `Stop()` for a graceful drain.
+- **Per-tenant lifecycle.** One `amfacheck.Service` goroutine runs per tenant whose AMFA is enabled, while `keycloak.global.amfa_checker.enabled: true`. `config.yaml` tenants get theirs at startup. Tenants stored in the database follow the AMFA registry, which `amfaTenantSync` updates on every tenant change and which tells its listeners (`amfa.Registry.Subscribe`): a tenant that gets an AMFA repository gets a checker, a new repository replaces it, and a tenant that loses its repository has it stopped. A save that leaves the AMFA connection as it was (the AMFA settings and the Keycloak server, admin realm and client that issue its tokens) keeps the repository and the running services. Every checker built for a tenant shares the tenant's run lock, so a "Reload AMFA alerts" run still going on a replaced checker and the new checker's first run take turns and cannot both announce an alert. If the database tenants cannot be loaded at startup, startup fails, as it does for the monitoring module's load of the same tenants. When a tenant's AMFA stops being checked (AMFA turned off, or the tenant disabled or deleted), its checker is stopped and then its open AMFA alerts are resolved, with a resolution notice saying AMFA is no longer checked for it; nothing would ever resolve them otherwise. Startup does the same for every tenant without a checker, such as one whose AMFA was turned off before the upgrade. The mirror follows the same rules; both use `amfaTenantWorkers` (`internal/fx/amfa_tenant_workers.go`). The fx module starts the services on `OnStart` and stops them on `OnStop`; one started before then waits for `OnStart`.
+- **Poll-loop context.** Each poll loop runs on its own long-lived background context (`lifecycle.Pool`), NOT fx's `OnStart` context. fx cancels the `OnStart` context once startup finishes, so passing it to the loop would stop polling moments after boot (the loop would log `amfacheck polling cancelled`). Stopping a tenant's checker, and shutdown via `OnStop`, cancels that context and calls `Stop()` for a graceful drain.
 - **Realm discovery.** Each tick the checker resolves the tenant's realms via `keycloak.Service.ListRealms` (the realms KMT has discovered/stored), so realms added or removed in Keycloak are picked up without a restart. AMFA events are matched by `auth_context_json->>'realm_id'`, so a realm only produces alerts if KMT has discovered a realm of that name.
 - **Checkpoints.** Per-event rules (1, 3) keep a per-realm cursor and query `event_time > cursor - 10m`, so an event that reaches AMFA up to 10 minutes after a newer one is still read. Events whose alert was already raised are skipped without being saved or notified again, including when an operator deleted that alert. The cursor moves only past events whose alerts were saved: a failed save, or a realm whose query failed, is read again on the next tick, and the other realms are not held back. After a restart each realm resumes from its newest alert (counting deleted ones) less one `poll_interval`; a realm with no alert yet starts one `poll_interval` back, so enabling the checker does not alert on old history. Known limits: an event that reaches AMFA more than 10 minutes late, or a downtime longer than AMFA keeps events, is not alerted.
 - **Threshold rules (4a, 4b) use a rolling window.** `login_error` and `client_login_error` count events of their type over a rolling `[now - window, now]` window (the same rolling style as rule 2), NOT a fixed clock-aligned bucket. This means a recent burst is always counted regardless of when the check runs, so a manual "Reload AMFA alerts" click (or a poll) reliably catches a burst even if it landed just before a clock boundary. The `AlertID` is stable per `(realm, eventType)`, so repeated polls and manual runs dedup to one alert row (the service bumps `LastSeen` on recurrence), mirroring how `eventscheck` handles its error-threshold alerts. (An earlier design used a fixed window-aligned bucket keyed into the `AlertID`; it was changed because a manual trigger could miss a burst that fell in the previous bucket.)
@@ -309,7 +447,7 @@ There are three layers. All Go commands run in Docker (no host toolchain require
 
 ```bash
 gotest() { docker run --rm -v "$PWD:/app" -v go-mod-cache:/go/pkg/mod -w /app \
-  golang:1.27.2-alpine sh -c "apk add --no-cache git build-base >/dev/null 2>&1 && $*"; }
+  golang:1.27.3-alpine sh -c "apk add --no-cache git build-base >/dev/null 2>&1 && $*"; }
 ```
 
 **1. Unit tests** (stubbed repository, no database):
@@ -327,7 +465,7 @@ Covers config defaults, all five rules (alert shape, severity, `AlertID`, thresh
 ```bash
 docker run --rm -v "$PWD:/app" -v go-mod-cache:/go/pkg/mod -w /app \
   -e AMFA_TEST_DSN="host=host.docker.internal port=5433 dbname=adaptive_mfa user=keycloak password=password sslmode=disable" \
-  golang:1.27.2-alpine sh -c "apk add --no-cache git build-base >/dev/null 2>&1 && \
+  golang:1.27.3-alpine sh -c "apk add --no-cache git build-base >/dev/null 2>&1 && \
     go test -tags=integration ./amfa/postgres/ ./amfacheck/"
 ```
 

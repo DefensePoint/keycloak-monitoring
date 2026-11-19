@@ -49,6 +49,12 @@ func TestReconcileAMFAMerges_CopiesTheNameOntoAKeycloakTwinThatHasNone(t *testin
 	}); err != nil {
 		t.Fatalf("save amfa event: %v", err)
 	}
+	// The twin is not of the AMFA row's type, so it is merged onto only once no
+	// LOGIN has arrived within the wait.
+	if err := db.Exec(`UPDATE events SET created_at = now() - make_interval(secs => ?) WHERE event_id = ?`,
+		(amfaMergeFallbackAfter + time.Minute).Seconds(), amfaID).Error; err != nil {
+		t.Fatalf("age amfa row: %v", err)
+	}
 
 	if _, err := repo.ReconcileAMFAMerges(ctx); err != nil {
 		t.Fatalf("reconcile: %v", err)

@@ -399,7 +399,8 @@ The API is implemented in `internal/http/chi/` with handlers for each domain. Fu
 
 **Components**:
 
-- **Service**: Main configuration checker service with background worker
+- **Identity provider secret expiry**: Warns before an identity provider's client secret expires, from the dates listed under `config_checker.checks.identity_provider_secret_expiry.secrets` (Keycloak does not store them).
+- **Service**: Main configuration checker service with background worker, one per enabled tenant. The services follow tenant changes (`internal/fx/tenant_check_workers.go`), so creating, enabling, disabling or deleting a tenant starts or stops its checks without a restart. Disabling a tenant also resolves its open alerts from those checks once they have stopped, and so does startup for every tenant already disabled, with a resolution notice saying it is no longer monitored, as the monitor pool does for health alerts.
 - **Realm Security Checker**: Validates realm security settings
   - SSL requirements
   - Brute force protection
@@ -863,6 +864,8 @@ All times are measured per occurrence: an alert that resolved and came back star
 - Monitor Keycloak events for IDP errors
 - Detect identity provider failures
 - Generate alerts for IDP issues
+
+Runs one service per enabled tenant, config.yaml and interface tenants alike, and follows tenant changes like the configuration checker (`internal/fx/tenant_check_workers.go`).
 
 ### 20. Metrics Check Package (`metricscheck/`)
 
@@ -1454,28 +1457,30 @@ CREATE INDEX idx_operator_actions_alert ON operator_alert_actions(alert_id);
 - **Caching layer** (Redis) for frequently accessed data
 - **Microservices** split for specific monitoring tasks
 
-### 22. AMFA Module (`amfa/`)
+### 22. AMFA Module (`internal/amfa/`)
 
-**Purpose:** Read-only access to per-tenant AMFA (Adaptive Multi-Factor Authentication) PostgreSQL databases, surfacing AMFA login events, risk metrics, and geolocation in the KMT monitoring dashboard.
+**Purpose:** Read-only access to each tenant's AMFA (Adaptive Multi-Factor Authentication) engine, over its monitoring API or from its PostgreSQL database, surfacing AMFA login events, risk metrics, and geolocation in the KMT monitoring dashboard.
 
-**Deployment model:** One AMFA service per Keycloak instance, owned by the same KMT tenant. KMT opens one read-only DB connection per tenant whose `amfa.enabled` is `true`. 
+**Deployment model:** One AMFA service per Keycloak instance, owned by the same KMT tenant. For each tenant whose `amfa.enabled` is `true`, KMT reads AMFA one of two ways. When `amfa.api.base_url` is set, it calls AMFA's read-only monitoring API with a client-credentials token from the tenant's admin realm, using the client it already uses for the Admin API. Otherwise it opens one read-only connection to AMFA's database.
 
 **Components:**
 
-- `amfa.Registry` — per-tenant `Repository` registry built at startup by iterating `cfg.Keycloak.Tenants`. Tenants without `amfa.enabled = true` are absent; lookups for them return `ErrAmfaNotConfigured`.
-- `amfa/postgres/` — read-only GORM client + repository. Uses the `gorm:"->"` read-only tag plus a dedicated least-privilege Postgres role (`kmt_ro`); `AutoMigrate` is never called on this connection. Per-tenant `EventsLookbackDays` (config) drives the default query window via `NewRepositoryWithLookback`; capped at 90 days regardless.
-- `amfa/postgres/errors.go` — translates low-level driver / pgconn / network errors into `amfa.ErrAmfaUnavailable` so DB outages surface as HTTP 503 rather than 500. Query/syntax errors continue to bubble up as 500.
-- `amfa/postgres/schema_check.go` — non-fatal `alembic_version` check at startup, with its own 5s deadline so a hung AMFA DB can never block KMT's monitoring boot. Logs WARN on drift, never returns a fatal error.
-- `amfa.Enrichment` — Keycloak user-lookup cache backed by `hashicorp/golang-lru/v2` (bounded at 50k entries by default; capacity is configurable). 5-minute success TTL, 30-second negative TTL. Concurrent lookups for the same `(tenant, realm, user)` coalesce through `golang.org/x/sync/singleflight` so a cold cache or TTL boundary doesn't produce a thundering herd against Keycloak. Cache keys are typed structs (no delimiter collisions).
-- `amfa.Service` — orchestrates `Registry` + `Enrichment` behind the `Service` interface.
-- `internal/http/chi/amfa_handlers.go` — HTTP layer under `/api/tenants/{id}/amfa/{events,stats,geo}`, gated by `auth` → `RequireTenantAccess` → `RequirePermission("amfa:read")`. Input validation rejects malformed RFC3339 timestamps, inverted time ranges, and oversized offsets (`> 50_000`) with 400; `ErrAmfaUnavailable` from the data layer produces 503.
-- `internal/fx/amfa.go` — fx module wiring the above; if no tenants enable AMFA, the registry is empty and all `/amfa/*` endpoints return 404 cleanly. The monitor-pool type-assertion logs a per-tenant WARN if a future Keycloak-client wrapper breaks the cast (regression guard).
+- `amfa.Registry`: per-tenant `Repository` registry built at startup by iterating `cfg.Keycloak.Tenants`. Tenants without `amfa.enabled = true` are absent; lookups for them return `ErrAmfaNotConfigured`.
+  Tenants stored in the database are added, replaced and removed as they change, by `amfaTenantSync` (`internal/fx/amfa_tenants.go`). Listeners added with `Subscribe` are told about each change, in order.
+- `internal/amfa/httpclient/`: `Repository` over AMFA's monitoring API. AMFA computes the aggregates (stats, geo buckets, risky-user counts, event counts) server-side. Tokens are cached until shortly before they expire. Transport failures, 5xx, 408 and 429 map to `amfa.ErrAmfaUnavailable`; 401 and 403 do not, since a rejected token is a configuration fault. Stats are realm-scoped over this transport, so an "all realms" request returns `ErrAllRealmsUnsupported`.
+- `internal/amfa/postgres/`: read-only GORM client + repository. Uses the `gorm:"->"` read-only tag plus a dedicated least-privilege Postgres role (`kmt_ro`); `AutoMigrate` is never called on this connection. Per-tenant `EventsLookbackDays` (config) drives the default query window via `NewRepositoryWithLookback`; capped at 90 days regardless.
+- `internal/amfa/postgres/errors.go`: translates low-level driver / pgconn / network errors into `amfa.ErrAmfaUnavailable` so DB outages surface as HTTP 503 rather than 500. Query/syntax errors continue to bubble up as 500.
+- `internal/amfa/postgres/schema_check.go`: non-fatal `alembic_version` check at startup, database transport only, with its own 5s deadline so a hung AMFA DB can never block KMT's monitoring boot. Logs WARN on drift, never returns a fatal error.
+- `amfa.Enrichment`: Keycloak user-lookup cache backed by `hashicorp/golang-lru/v2` (bounded at 50k entries by default; capacity is configurable). 5-minute success TTL, 30-second negative TTL. Concurrent lookups for the same `(tenant, realm, user)` coalesce through `golang.org/x/sync/singleflight` so a cold cache or TTL boundary doesn't produce a thundering herd against Keycloak. Cache keys are typed structs (no delimiter collisions).
+- `amfa.Service`: orchestrates `Registry` + `Enrichment` behind the `Service` interface.
+- `internal/http/chi/amfa_handlers.go`: HTTP layer under `/api/tenants/{id}/amfa/{events,stats,geo}`, gated by `auth` → `RequireTenantAccess` → `RequirePermission("amfa:read")`. Input validation rejects malformed RFC3339 timestamps, inverted time ranges, and oversized offsets (`> 50_000`) with 400; `ErrAmfaUnavailable` from the data layer produces 503.
+- `internal/fx/amfa.go`: fx module wiring the above, choosing each tenant's transport; if no tenants enable AMFA, the registry is empty and all `/amfa/*` endpoints return 404 cleanly. The monitor-pool type-assertion logs a per-tenant WARN if a future Keycloak-client wrapper breaks the cast (regression guard).
 
 **Permissions:** A new `amfa:read` permission is added by a one-time data migration, recorded in `data_migrations`, granted to the default `admin`, `operator`, and `viewer` roles.
 
-**Existing AMFA codebase is not modified.** All integration is purely additive on the KMT monitoring side; the only AMFA-side change is the operator-run `CREATE USER ... GRANT SELECT` block documented in `docs/amfa-integration.md`.
+**Existing AMFA codebase is not modified.** All integration is purely additive on the KMT monitoring side. The AMFA-side setup is configuration only, documented in `docs/amfa-integration.md`: over the API, an audience mapper on KMT's client and AMFA's `OIDC_TRUSTED_BASE_URLS` and `MONITORING_TRUSTED_READERS` settings; from the database, the operator-run `CREATE USER ... GRANT SELECT` block.
 
-**Risk-alert checker (`amfacheck/`):** A per-tenant poll loop, sibling to `eventscheck/`, that turns high-risk AMFA login events into `domain.Alert`s routed through the existing alerts and notifications infrastructure (same lifecycle and notification fan-out as the Keycloak event checker). It reads AMFA's database through additive `amfa.Repository` methods, never modifying the AMFA schema. The package is deliberately kept parallel to `eventscheck/` rather than refactored behind a shared abstraction; see the design spec for the rationale. The checker is gated by the `keycloak.global.amfa_checker` config block (master switch off by default) and is documented operationally in `docs/amfa-integration.md`.
+**Risk-alert checker (`internal/amfacheck/`):** A per-tenant poll loop, sibling to `internal/eventscheck/`, that turns high-risk AMFA login events into `domain.Alert`s routed through the existing alerts and notifications infrastructure (same lifecycle and notification fan-out as the Keycloak event checker). It reads AMFA through additive `amfa.Repository` methods, over either transport, never writing to AMFA. The package is deliberately kept parallel to `internal/eventscheck/` rather than refactored behind a shared abstraction; see the design spec for the rationale. The checker is gated by the `keycloak.global.amfa_checker` config block (master switch off by default) and is documented operationally in `docs/amfa-integration.md`. Its per-tenant services, and the AMFA mirror's, follow registry changes (`internal/fx/amfa_tenant_workers.go`), so a tenant's AMFA toggle starts or stops them without a restart.
 
 **Operator-facing setup guide:** [`docs/amfa-integration.md`](amfa-integration.md).
 

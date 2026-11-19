@@ -147,14 +147,18 @@ func loadConfig(configPath string, out io.Writer) (*AppConfig, error) {
 
 	// Unmarshal
 	var config AppConfig
-	if err := v.Unmarshal(&config); err != nil {
+	if err := v.Unmarshal(&config, viper.DecodeHook(decodeHooks())); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 	if err := checkTenantOverrides(&config.Keycloak); err != nil {
 		return nil, err
 	}
+	if err := config.Keycloak.Global.ConfigChecker.Checks.IdentityProviderSecretExpiry.Validate(); err != nil {
+		return nil, err
+	}
 	config.MCP.RemovedKeys = removedMCPKeysInFile(v)
 	config.PlaceholderWarnings = placeholderWarnings
+	applyBranding(&config)
 
 	// Step 5: Final configuration summary
 	say.println("┌─────────────────────────────────────────────────────────────────────────────┐")
@@ -219,6 +223,19 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("web.server.port", 7880)
 	v.SetDefault("web.server.static_dir", "web/dist")
 	v.SetDefault("web.server.api_host_url", "http://localhost:7888")
+
+	// =============================================================================
+	// Branding Defaults
+	// =============================================================================
+	v.SetDefault("branding.name", DefaultBrandingName)
+	v.SetDefault("branding.short_name", DefaultBrandingShortName)
+	v.SetDefault("branding.logo_text", DefaultBrandingLogoText)
+	// Empty here, so WithDefaults can tell a vendor left unset, which brings
+	// the default contact address, from one set without an address. The keys
+	// stay registered so MONITORING_BRANDING_VENDOR and
+	// MONITORING_BRANDING_CONTACT_EMAIL bind without them in config.yaml.
+	v.SetDefault("branding.vendor", "")
+	v.SetDefault("branding.contact_email", "")
 
 	// =============================================================================
 	// Database Defaults
@@ -310,6 +327,9 @@ func setDefaults(v *viper.Viper) {
 	// networks, so private IP ranges are allowed by default. Cloud-hosted
 	// deployments can flip this to false for extra hardening.
 	v.SetDefault("keycloak.global.connection.allow_private_ranges", true)
+	// Registered so MONITORING_KEYCLOAK_GLOBAL_AMFA_AUTHENTICATOR_IDS, a
+	// comma-separated list, applies without the key in config.yaml.
+	v.SetDefault("keycloak.global.amfa_authenticator_ids", []string{})
 
 	// =============================================================================
 	// Global Keycloak Configuration Checker Defaults
@@ -324,6 +344,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("keycloak.global.config_checker.checks.identity_provider_metadata.excluded_providers", []string{})
 	v.SetDefault("keycloak.global.config_checker.checks.identity_provider_metadata.certificate_expiration_warning_days", 30)
 	v.SetDefault("keycloak.global.config_checker.checks.identity_provider_metadata.certificate_check_timeout", "30s")
+
+	// Identity Provider Secret Expiry Check defaults: on, but it does nothing
+	// until a secret is listed.
+	v.SetDefault("keycloak.global.config_checker.checks.identity_provider_secret_expiry.enabled", true)
+	v.SetDefault("keycloak.global.config_checker.checks.identity_provider_secret_expiry.warning_days", 30)
+	v.SetDefault("keycloak.global.config_checker.checks.identity_provider_secret_expiry.error_days", 7)
 
 	// Realm Security Check defaults
 	v.SetDefault("keycloak.global.config_checker.checks.realm_security.enabled", true)
@@ -381,7 +407,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("notifications.slack.enabled", false)
 	v.SetDefault("notifications.slack.webhook_url", "")
 	v.SetDefault("notifications.slack.channel", "")
-	v.SetDefault("notifications.slack.username", "Keycloak Monitoring Tool")
+	// Empty means branding.name. The key stays registered so
+	// MONITORING_NOTIFICATIONS_SLACK_USERNAME binds without it in config.yaml.
+	v.SetDefault("notifications.slack.username", "")
 	v.SetDefault("notifications.slack.icon_emoji", ":shield:")
 	v.SetDefault("notifications.slack.min_severity", "warning") // Only send Slack messages for warning and above
 
@@ -395,7 +423,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("notifications.email.to", []string{"admin@example.com"})
 	v.SetDefault("notifications.email.use_tls", true)
 	v.SetDefault("notifications.email.skip_verify", false)
-	v.SetDefault("notifications.email.subject", "[{{severity}}] Keycloak Monitoring Tool Alert: {{title}}")
+	v.SetDefault("notifications.email.subject", "[{{severity}}] {{product}} Alert: {{title}}")
 	v.SetDefault("notifications.email.min_severity", "error") // Only send emails for error and above
 
 	setMCPDefaults(v)

@@ -95,6 +95,13 @@ func (s *realmScope) goneWith(alert *domain.Alert) bool {
 	if s.configured || s.visible[realm] {
 		return true
 	}
+	return s.deleted(realm)
+}
+
+// deleted reports whether a realm Keycloak does not list was deleted. Only a
+// 404 says so: a realm that answers exists but is unreadable to the client,
+// and any other error says nothing either way.
+func (s *realmScope) deleted(realm string) bool {
 	if gone, ok := s.gone[realm]; ok {
 		return gone
 	}

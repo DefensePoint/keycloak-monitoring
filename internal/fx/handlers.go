@@ -228,10 +228,11 @@ type ReportHandlersParams struct {
 	Logger         *logger.Logger
 	AuthMiddleware *chihttp.AuthMiddleware
 	RBACMiddleware *chihttp.RBACMiddleware
+	Config         *config.AppConfig
 }
 
 func provideReportHandlers(p ReportHandlersParams) *chihttp.ReportHandlers {
-	return chihttp.NewReportHandlers(
+	handlers := chihttp.NewReportHandlers(
 		p.Service,
 		&reportTenantAdapter{p.TenantService},
 		&rbacCheckerAdapter{p.RBACService},
@@ -239,6 +240,11 @@ func provideReportHandlers(p ReportHandlersParams) *chihttp.ReportHandlers {
 		p.AuthMiddleware.Authenticate,
 		p.RBACMiddleware,
 	)
+	handlers.SetBranding(p.Config.Branding)
+	if w := p.Config.Branding.VendorWarning(); w != "" {
+		p.Logger.Warn(w)
+	}
+	return handlers
 }
 
 // SystemHandlersParams contains dependencies for system handlers.
@@ -329,6 +335,7 @@ func provideAuthHandlers(p AuthHandlersParams) *chihttp.AuthHandlers {
 	if p.UserRepo != nil {
 		handlers.SetSessionRevoker(p.UserRepo)
 	}
+	handlers.SetBranding(p.Config.Branding)
 
 	return handlers
 }
@@ -491,6 +498,10 @@ func (a *eventRepoAdapter) List(ctx context.Context, opts *events.ListOptions) (
 
 func (a *eventRepoAdapter) CountWithFilter(ctx context.Context, opts *events.ListOptions) (int64, error) {
 	return a.repo.CountWithFilter(ctx, opts)
+}
+
+func (a *eventRepoAdapter) CountByType(ctx context.Context, opts *events.ListOptions) (map[string]int64, error) {
+	return a.repo.CountByType(ctx, opts)
 }
 
 func (a *eventRepoAdapter) GetByTenantAndEventID(ctx context.Context, tenantID, eventID string) (*domain.Event, error) {

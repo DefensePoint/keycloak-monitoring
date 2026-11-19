@@ -13,15 +13,28 @@ package postgres
 // that KPI silently returned nothing no matter how much real traffic AMFA had
 // recorded.
 //
+// IP, country and VPN flag have one more source, location_network, read
+// last. A LOGIN_ERROR that AMFA stored without a risk decision (a wrong
+// password or an unknown user, which fail before AMFA's step runs) has no
+// auth_process and so no snapshot, but the engine still wrote its address,
+// country and VPN flag there. Reading only the first two sources showed such a
+// failure with no IP, no country and no VPN flag. The engine stores a country
+// it could not resolve as the text "None". Coordinates come from there too, but
+// only on an AMFA whose location_network has them: see coordinatesFor.
+//
 // Every query using them must join auth_event e -> auth_process p and
-// LEFT JOIN auth_context ac ON ac.hash = e.auth_context_hash.
+// LEFT JOIN auth_context ac ON ac.hash = e.auth_context_hash. A query using
+// exprIP, exprCountry or exprIsVPN must also add joinNetworkLocation.
 const (
 	exprClient  = `COALESCE(ac.client, p.auth_context_json->>'client', '')`
-	exprIP      = `COALESCE(ac.ip_address, p.auth_context_json->>'ip_address', '')`
-	exprCountry = `COALESCE(NULLIF(ac.country_name, ''), NULLIF(p.auth_context_json->>'country_name', ''))`
-	exprLat     = `COALESCE(ac.lat, (p.auth_context_json->>'lat')::float8)`
-	exprLong    = `COALESCE(ac.long, (p.auth_context_json->>'long')::float8)`
-	exprIsVPN   = `COALESCE(ac.is_vpn, (p.auth_context_json->>'is_vpn')::boolean, false)`
+	exprIP      = `COALESCE(ac.ip_address, NULLIF(p.auth_context_json->>'ip_address', ''), NULLIF(nl.ip_address, ''), '')`
+	exprCountry = `COALESCE(NULLIF(ac.country_name, ''), NULLIF(p.auth_context_json->>'country_name', ''), NULLIF(NULLIF(nl.country, ''), 'None'))`
+	exprIsVPN   = `COALESCE(ac.is_vpn, (p.auth_context_json->>'is_vpn')::boolean, nl.is_vpn_flag <> 0, false)`
+
+	// Joined only for an event with no auth_process: a scored event has its
+	// snapshot, which every expression reads first, and joining every row cost
+	// the stats query 70% to 140% more time on 300,000 events.
+	joinNetworkLocation = `LEFT JOIN location_network nl ON p.id IS NULL AND nl.hash = e.network_location_hash`
 
 	// Additional device/agent context. auth_context has no city column, so
 	// city has no table-first fallback to apply; the other four read the
@@ -71,13 +84,39 @@ const realmFilterExpr = `(
 // fallback) already return for the realms they do know.
 const realmAttributedExpr = `COALESCE(NULLIF(e.realm_id, ''), p.auth_context_json->>'realm_id') IS NOT NULL`
 
-// exprHasGeo restricts a query to logins with a usable coordinate pair.
+// coordinates are the expressions a query reads a login's coordinates with.
+//
+// location_network has coordinates only from engine migration 5ae8978564f9 on.
+// On an older AMFA, Point's included, or after the engine's downgrade drops
+// them, a query naming the columns fails outright, so they are read only where
+// they exist (Repository.withCoordinates). They are the last source, like the
+// other location_network fields: a scored login keeps its snapshot's.
+type coordinates struct {
+	lat, long string
+}
+
+func coordinatesFor(networkHasCoordinates bool) coordinates {
+	if networkHasCoordinates {
+		return coordinates{
+			lat:  `COALESCE(ac.lat, (p.auth_context_json->>'lat')::float8, nl.lat)`,
+			long: `COALESCE(ac.long, (p.auth_context_json->>'long')::float8, nl.long)`,
+		}
+	}
+	return coordinates{
+		lat:  `COALESCE(ac.lat, (p.auth_context_json->>'lat')::float8)`,
+		long: `COALESCE(ac.long, (p.auth_context_json->>'long')::float8)`,
+	}
+}
+
+// hasGeo restricts a query to logins with a usable coordinate pair.
 //
 // AMFA's geolocation helper writes lat/long 0 whenever the ipinfo lookup fails
 // or exceeds its 0.3s timeout, which is the normal outcome for private IPs (a
 // browser login against a local stack reports the Docker gateway address). That
 // 0,0 sentinel has to be excluded, or every un-geolocatable login piles onto a
 // single marker in the Gulf of Guinea and reads as real activity.
-const exprHasGeo = `(` + exprLat + `) IS NOT NULL
-          AND (` + exprLong + `) IS NOT NULL
-          AND NOT ((` + exprLat + `) = 0 AND (` + exprLong + `) = 0)`
+func (c coordinates) hasGeo() string {
+	return `(` + c.lat + `) IS NOT NULL
+          AND (` + c.long + `) IS NOT NULL
+          AND NOT ((` + c.lat + `) = 0 AND (` + c.long + `) = 0)`
+}
