@@ -213,22 +213,45 @@ func (r *Repository) Stats(ctx context.Context, opts *events.ListOptions) (*even
 		{"severity", stats.BySeverity},
 		{"source", stats.BySource},
 	} {
-		var rows []struct {
-			Key   string
-			Count int64
-		}
-		query := r.applyFilters(r.db.WithContext(ctx).Model(&database.Event{}), opts)
-		if err := query.
-			Select(group.column + ` AS key, count(*) AS count`).
-			Group(group.column).
-			Find(&rows).Error; err != nil {
-			return nil, fmt.Errorf("failed to aggregate events by %s: %w", group.column, err)
-		}
-		for _, row := range rows {
-			group.counts[row.Key] = row.Count
+		if err := r.countBy(ctx, opts, group.column, group.counts); err != nil {
+			return nil, err
 		}
 	}
 	return stats, nil
+}
+
+// CountByType returns event counts grouped by type under the same filter
+// scope as List. The counts add up to CountWithFilter's total.
+func (r *Repository) CountByType(ctx context.Context, opts *events.ListOptions) (map[string]int64, error) {
+	if opts == nil {
+		opts = &events.ListOptions{}
+	}
+
+	counts := map[string]int64{}
+	if err := r.countBy(ctx, opts, "type", counts); err != nil {
+		return nil, err
+	}
+	return counts, nil
+}
+
+// countBy fills counts with the number of matching events per value of
+// column. column is one of the fixed names above, never caller input.
+func (r *Repository) countBy(ctx context.Context, opts *events.ListOptions, column string, counts map[string]int64) error {
+	var rows []struct {
+		Key   string
+		Count int64
+	}
+	query := r.applyFilters(r.db.WithContext(ctx).Model(&database.Event{}), opts)
+	if err := query.
+		Select(column + ` AS key, count(*) AS count`).
+		Group(column).
+		Find(&rows).Error; err != nil {
+		return fmt.Errorf("failed to aggregate events by %s: %w", column, err)
+	}
+	for _, row := range rows {
+		counts[row.Key] = row.Count
+	}
+	return nil
 }
 
 // applyFilters adds every ListOptions predicate except pagination: tenant and

@@ -24,6 +24,7 @@ import (
 type EventRepository interface {
 	List(ctx context.Context, opts *events.ListOptions) ([]*domain.Event, error)
 	CountWithFilter(ctx context.Context, opts *events.ListOptions) (int64, error)
+	CountByType(ctx context.Context, opts *events.ListOptions) (map[string]int64, error)
 	GetByTenantAndEventID(ctx context.Context, tenantID, eventID string) (*domain.Event, error)
 }
 
@@ -527,6 +528,7 @@ func (h *SystemHandlers) handleStats(w http.ResponseWriter, r *http.Request) {
 	if len(sources) == 0 {
 		httputil.RespondJSON(w, h.log, http.StatusOK, map[string]interface{}{
 			"total_events": int64(0),
+			"by_type":      map[string]int64{},
 		})
 		return
 	}
@@ -547,8 +549,10 @@ func (h *SystemHandlers) handleStats(w http.ResponseWriter, r *http.Request) {
 		opts.EndTime = &endTime
 	}
 
-	// Get total event count
-	totalEvents, err := h.eventRepo.CountWithFilter(ctx, opts)
+	// One grouped count gives both the per-type counts and the total, so the
+	// events page can offer every type in the window, not only the ones on
+	// its current page.
+	byType, err := h.eventRepo.CountByType(ctx, opts)
 	if err != nil {
 		h.log.Error("Failed to count events",
 			logger.Str("tenant_id", tenantID),
@@ -556,9 +560,14 @@ func (h *SystemHandlers) handleStats(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondInternalError(w, h.log, "Failed to retrieve statistics")
 		return
 	}
+	var totalEvents int64
+	for _, count := range byType {
+		totalEvents += count
+	}
 
 	httputil.RespondJSON(w, h.log, http.StatusOK, map[string]interface{}{
 		"total_events": totalEvents,
+		"by_type":      byType,
 	})
 }
 

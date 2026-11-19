@@ -96,6 +96,10 @@ type Repository interface {
 	// under the same filter scope as List.
 	Stats(ctx context.Context, opts *ListOptions) (*Stats, error)
 
+	// CountByType returns event counts grouped by type, under the same filter
+	// scope as List. The counts add up to CountWithFilter's total.
+	CountByType(ctx context.Context, opts *ListOptions) (map[string]int64, error)
+
 	// Count returns the total number of events.
 	Count(ctx context.Context) (int64, error)
 
