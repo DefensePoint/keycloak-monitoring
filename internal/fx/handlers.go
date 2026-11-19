@@ -500,6 +500,10 @@ func (a *eventRepoAdapter) CountWithFilter(ctx context.Context, opts *events.Lis
 	return a.repo.CountWithFilter(ctx, opts)
 }
 
+func (a *eventRepoAdapter) CountByType(ctx context.Context, opts *events.ListOptions) (map[string]int64, error) {
+	return a.repo.CountByType(ctx, opts)
+}
+
 func (a *eventRepoAdapter) GetByTenantAndEventID(ctx context.Context, tenantID, eventID string) (*domain.Event, error) {
 	return a.repo.GetByTenantAndEventID(ctx, tenantID, eventID)
 }

@@ -3,6 +3,7 @@ package chi
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -30,6 +31,7 @@ func (m *mockRealmLister) ListRealms(_ context.Context, _ string) ([]*domain.Key
 type stubEventRepo struct {
 	events   []*domain.Event
 	total    int64
+	byType   map[string]int64
 	calls    int
 	lastOpts *events.ListOptions
 }
@@ -44,6 +46,12 @@ func (s *stubEventRepo) CountWithFilter(_ context.Context, opts *events.ListOpti
 	s.calls++
 	s.lastOpts = opts
 	return s.total, nil
+}
+
+func (s *stubEventRepo) CountByType(_ context.Context, opts *events.ListOptions) (map[string]int64, error) {
+	s.calls++
+	s.lastOpts = opts
+	return maps.Clone(s.byType), nil
 }
 
 // GetByTenantAndEventID matches on both columns, as the real repository does.
@@ -332,7 +340,7 @@ func TestSystemHandlers_Events_RealmPolicy(t *testing.T) {
 func TestSystemHandlers_Stats_RealmPolicy(t *testing.T) {
 	for _, tt := range realmScopeCases() {
 		t.Run(tt.name, func(t *testing.T) {
-			repo := &stubEventRepo{total: 7}
+			repo := &stubEventRepo{byType: map[string]int64{"LOGIN": 4, "LOGOUT": 3}}
 			h := &SystemHandlers{
 				eventRepo:   repo,
 				realmLister: &mockRealmLister{realms: realms("realmA", "realmB")},
@@ -348,7 +356,8 @@ func TestSystemHandlers_Stats_RealmPolicy(t *testing.T) {
 			}
 
 			var resp struct {
-				TotalEvents int64 `json:"total_events"`
+				TotalEvents int64            `json:"total_events"`
+				ByType      map[string]int64 `json:"by_type"`
 			}
 			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 				t.Fatalf("decode: %v; body = %s", err, rec.Body.String())
@@ -358,8 +367,8 @@ func TestSystemHandlers_Stats_RealmPolicy(t *testing.T) {
 				if repo.calls != 0 {
 					t.Errorf("repository queried %d times for a denied caller, want 0 (opts = %+v)", repo.calls, repo.lastOpts)
 				}
-				if resp.TotalEvents != 0 {
-					t.Errorf("total_events = %d, want 0", resp.TotalEvents)
+				if resp.TotalEvents != 0 || resp.ByType == nil || len(resp.ByType) != 0 {
+					t.Errorf("total_events = %d, by_type = %v, want 0 and an empty object", resp.TotalEvents, resp.ByType)
 				}
 				return
 			}
@@ -371,7 +380,10 @@ func TestSystemHandlers_Stats_RealmPolicy(t *testing.T) {
 				t.Errorf("sources = %v, want %v", repo.lastOpts.Sources, tt.wantSources)
 			}
 			if resp.TotalEvents != 7 {
-				t.Errorf("total_events = %d, want 7", resp.TotalEvents)
+				t.Errorf("total_events = %d, want 7 (4 + 3)", resp.TotalEvents)
+			}
+			if want := map[string]int64{"LOGIN": 4, "LOGOUT": 3}; !maps.Equal(resp.ByType, want) {
+				t.Errorf("by_type = %v, want %v", resp.ByType, want)
 			}
 		})
 	}

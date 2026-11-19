@@ -32,6 +32,7 @@ import {
   useRealmSelector,
   useEvent,
   useEvents,
+  useEventStats,
   isEventNotFoundError,
   useAmfaStats,
   useAmfaGeo,
@@ -252,12 +253,26 @@ export function EventsPage() {
     }));
   }, [eventsResponse]);
 
-  // Type suggestions come from the rows on screen; any other type can still
-  // be typed in.
-  const typeOptions = useMemo(
-    () => [...new Set(events.map((e) => e.type).filter(Boolean))].sort(),
-    [events],
-  );
+  // Type suggestions cover every type in the time range and realm, not just
+  // the rows on screen, which hold one page and, once a type is chosen, only
+  // that type. Until the counts arrive the rows on screen stand in. Any other
+  // type can still be typed in.
+  const { data: typeStats } = useEventStats({
+    tenantId: selectedTenant?.tenant_id,
+    startTime,
+    endTime,
+    realm: realmFilter,
+    refetchInterval: 30000,
+  });
+  const typeOptions = useMemo(() => {
+    const counted = Object.keys(typeStats?.by_type ?? {});
+    const types = counted.length ? counted : events.map((e) => e.type);
+    return [
+      ...new Set(
+        [...types, filters.type].filter((type): type is string => !!type),
+      ),
+    ].sort();
+  }, [typeStats, events, filters.type]);
 
   const currentPage = Math.floor(offset / limit) + 1;
   const totalPages = eventsResponse
