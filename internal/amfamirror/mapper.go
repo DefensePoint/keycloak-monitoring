@@ -30,9 +30,10 @@ func SourceForRealm(realm string) string {
 // raw_data for the details view. Severity derives from the event type ONLY
 // (never from risk level — risk is its own dimension in the UI).
 func ToDomainEvent(row amfa.EventRow, tenantID, realm string, user *amfa.KeycloakUser) *domain.Event {
-	// amfaEventID is the raw AMFA auth_event.id — the exact value the KMT
-	// extension stamps onto the Keycloak event as "amfa_event_id", so it is the
-	// merge key between the two rows.
+	// amfaEventID is the raw AMFA auth_event.id, the merge key between the two
+	// rows. For a LOGIN it is the decision id the Keycloak extension stamps onto
+	// the Keycloak event as "amfa_event_id"; for a LOGIN_ERROR it is the id of
+	// the Keycloak event itself (see ReconcileAMFAMerges).
 	amfaEventID := row.EventID
 	ev := &domain.Event{
 		TenantID:         tenantID,
