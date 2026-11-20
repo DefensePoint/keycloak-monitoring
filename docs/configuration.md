@@ -484,7 +484,10 @@ keycloak:
       # build, such as Red Hat build of Keycloak (26.4.2.redhat-00001), follows
       # its own release line and is never shown as behind. The Health page then
       # says the update check does not apply to that build, and the server logs
-      # it once per tenant.
+      # it once per tenant. A Keycloak that does not report its version to
+      # the monitoring client (26.7 and later, unless the client can administer
+      # the master realm) is checked against the tenant's keycloak_version,
+      # when one is set.
       enabled: false
 
       # Cache duration for version information
@@ -539,6 +542,13 @@ keycloak:
 
       # Optional: Owner/team identifier
       owner: "platform-team"
+
+      # Optional: Keycloak version for the update check, used only while
+      # Keycloak does not report its own. Keycloak 26.7 and later report it
+      # only to a master realm administrator, so with the recommended
+      # read-only roles the update check needs this. Change it when you
+      # upgrade Keycloak; the Health page shows the day it was set.
+      keycloak_version: "26.7.5"
 
       # Optional: Override global settings for this tenant
       config:

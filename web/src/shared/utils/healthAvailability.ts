@@ -1,7 +1,7 @@
 import type { KeycloakHealth } from "@/shared/types";
 
 export const HEALTH_METRICS_HINT =
-  "On Keycloak 26.7+, these details require the master admin role.";
+  "Keycloak 26.7 and later show these details only to a master realm administrator. For the update check, a Keycloak version can be entered in the tenant settings.";
 
 export function getHealthMetricsHint(
   health: KeycloakHealth | null | undefined,

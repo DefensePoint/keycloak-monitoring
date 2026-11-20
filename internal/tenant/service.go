@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -268,6 +269,7 @@ func (s *service) applyCreate(ctx context.Context, req *CreateRequest, isConfigD
 		Amfa:            req.Amfa.toDomain(),
 		HealthStatus:    "unknown",
 	}
+	setKeycloakVersion(tenant, req.KeycloakVersion)
 
 	if err := s.repo.Create(ctx, tenant); err != nil {
 		return nil, fmt.Errorf("failed to create tenant: %w", err)
@@ -485,6 +487,13 @@ func (s *service) applyUpdate(ctx context.Context, current *domain.KeycloakTenan
 	if req.Owner != nil {
 		tenant.Owner = *req.Owner
 	}
+	if req.KeycloakVersion != nil {
+		version, err := normalizeKeycloakVersion(*req.KeycloakVersion)
+		if err != nil {
+			return nil, err
+		}
+		setKeycloakVersion(tenant, version)
+	}
 
 	// a partial update must not leave the tenant without the client_credentials auth fields, or it would fail at
 	// monitor start rather than here. Unset fields retain their existing value.
@@ -655,7 +664,44 @@ func (s *service) validateCreateRequest(req *CreateRequest) error {
 	if req.ClientSecret == "" {
 		return fmt.Errorf("client_secret is required")
 	}
+	version, err := normalizeKeycloakVersion(req.KeycloakVersion)
+	if err != nil {
+		return err
+	}
+	req.KeycloakVersion = version
 	return nil
+}
+
+// keycloakVersionPattern is a release number with two to four parts, and an
+// optional qualifier that starts with a letter, such as "26.6.9.redhat-00002".
+var keycloakVersionPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,3}([.-][A-Za-z][0-9A-Za-z.-]*)?$`)
+
+// normalizeKeycloakVersion trims an entered Keycloak version and checks that it
+// reads as one. Empty means none.
+func normalizeKeycloakVersion(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", nil
+	}
+	if len(v) > 64 || !keycloakVersionPattern.MatchString(v) {
+		return "", fmt.Errorf("keycloak_version %q is not a Keycloak version, such as 26.7.5", v)
+	}
+	return v, nil
+}
+
+// setKeycloakVersion stores an entered version, and when it changes, the time
+// it changed; removing it clears both.
+func setKeycloakVersion(t *domain.KeycloakTenant, version string) {
+	if version == t.KeycloakVersion {
+		return
+	}
+	t.KeycloakVersion = version
+	if version == "" {
+		t.KeycloakVersionSetAt = nil
+		return
+	}
+	now := time.Now().UTC()
+	t.KeycloakVersionSetAt = &now
 }
 
 // cloneTenant copies t far enough to be changed without touching the original:
@@ -672,6 +718,10 @@ func cloneTenant(t *domain.KeycloakTenant) *domain.KeycloakTenant {
 	if t.LastErrorAt != nil {
 		at := *t.LastErrorAt
 		clone.LastErrorAt = &at
+	}
+	if t.KeycloakVersionSetAt != nil {
+		at := *t.KeycloakVersionSetAt
+		clone.KeycloakVersionSetAt = &at
 	}
 	return &clone
 }

@@ -630,4 +630,115 @@ describe("HealthPage", () => {
     expect(chip?.className).toContain("colorSuccess");
     expect(screen.queryByTestId("alert-banner")).not.toBeInTheDocument();
   });
+
+  // Keycloak 26.7 and later hide their version from a read-only client. The
+  // version entered in the tenant settings then stands in, and the page says so.
+  it("shows the version entered in the tenant settings, and its update warning, when Keycloak hides its own", async () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        health: { ...mockKeycloakDashboard.health, server_version: "" },
+        version_info: {
+          ...mockKeycloakDashboard.version_info,
+          current_version: "23.0.1",
+          version_source: "tenant_settings",
+          version_set_at: "2026-11-20T09:00:00Z",
+          version_comparable: true,
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<HealthPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("23.0.1")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("Entered in the tenant settings on Nov 20, 2026"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/Security Update Required/).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText("Not available")).not.toBeInTheDocument();
+  });
+
+  it("shows the version Keycloak reports without the entered-version note", async () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        health: { ...mockKeycloakDashboard.health, server_version: "23.0.1" },
+        version_info: {
+          ...mockKeycloakDashboard.version_info,
+          current_version: "23.0.1",
+          version_source: "keycloak",
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<HealthPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("23.0.1")).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText(/Entered in the tenant settings/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("still says the version is not available when none was reported or entered", async () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        health: { ...mockKeycloakDashboard.health, server_version: "" },
+        version_info: null,
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<HealthPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Not available")).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText(/Entered in the tenant settings/),
+    ).not.toBeInTheDocument();
+  });
+
+  // With the version check off (the default) there is no update check result,
+  // so the entered version comes from the tenant itself.
+  it("shows the tenant's entered version when there is no update check result", async () => {
+    const tenantWithVersion = {
+      ...mockSelectedTenant,
+      keycloak_version: "26.7.5",
+      keycloak_version_set_at: "2026-11-20T09:00:00Z",
+    };
+    vi.mocked(useTenant).mockReturnValue({
+      selectedTenant: tenantWithVersion,
+      tenants: [tenantWithVersion],
+      selectTenant: vi.fn(),
+    } as unknown as ReturnType<typeof useTenant>);
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        health: { ...mockKeycloakDashboard.health, server_version: "" },
+        version_info: null,
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<HealthPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("26.7.5")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("Entered in the tenant settings on Nov 20, 2026"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Update Available|Security Update Required/),
+    ).not.toBeInTheDocument();
+  });
 });

@@ -328,6 +328,7 @@ func syncTenant(ctx context.Context, p BootstrapParams, tenantID string, cfgTena
 	enabled := cfgTenant.Enabled
 	isDefault := cfgTenant.IsDefault
 	owner := cfgTenant.Owner
+	keycloakVersion := cfgTenant.KeycloakVersion
 	defaultRealm, configuration, err := tenantOverridesForSync(cfgTenant.Config)
 	if err != nil {
 		return fmt.Errorf("config for tenant %s: %w", tenantID, err)
@@ -339,34 +340,36 @@ func syncTenant(ctx context.Context, p BootstrapParams, tenantID string, cfgTena
 	}
 
 	createReq := &tenant.CreateRequest{
-		TenantID:      tenantID,
-		Name:          cfgTenant.Name,
-		Description:   cfgTenant.Description,
-		ServerURL:     cfgTenant.ServerURL,
-		AdminRealm:    cfgTenant.AdminRealm,
-		ClientID:      cfgTenant.ClientID,
-		ClientSecret:  cfgTenant.ClientSecret,
-		Enabled:       cfgTenant.Enabled,
-		IsDefault:     cfgTenant.IsDefault,
-		Tags:          cfgTenant.Tags,
-		Owner:         cfgTenant.Owner,
-		DefaultRealm:  defaultRealm,
-		Configuration: configuration,
+		TenantID:        tenantID,
+		Name:            cfgTenant.Name,
+		Description:     cfgTenant.Description,
+		ServerURL:       cfgTenant.ServerURL,
+		AdminRealm:      cfgTenant.AdminRealm,
+		ClientID:        cfgTenant.ClientID,
+		ClientSecret:    cfgTenant.ClientSecret,
+		Enabled:         cfgTenant.Enabled,
+		IsDefault:       cfgTenant.IsDefault,
+		Tags:            cfgTenant.Tags,
+		Owner:           cfgTenant.Owner,
+		DefaultRealm:    defaultRealm,
+		Configuration:   configuration,
+		KeycloakVersion: keycloakVersion,
 	}
 
 	updateReq := &tenant.UpdateRequest{
-		Name:          &name,
-		Description:   &description,
-		ServerURL:     &serverURL,
-		AdminRealm:    &adminRealm,
-		ClientID:      &clientID,
-		ClientSecret:  &clientSecret,
-		Enabled:       &enabled,
-		IsDefault:     &isDefault,
-		Tags:          cfgTenant.Tags,
-		Owner:         &owner,
-		DefaultRealm:  &defaultRealm,
-		Configuration: &configuration,
+		Name:            &name,
+		Description:     &description,
+		ServerURL:       &serverURL,
+		AdminRealm:      &adminRealm,
+		ClientID:        &clientID,
+		ClientSecret:    &clientSecret,
+		Enabled:         &enabled,
+		IsDefault:       &isDefault,
+		Tags:            cfgTenant.Tags,
+		Owner:           &owner,
+		DefaultRealm:    &defaultRealm,
+		Configuration:   &configuration,
+		KeycloakVersion: &keycloakVersion,
 	}
 
 	p.Logger.Debug("Syncing tenant from configuration", logger.Str("tenant_id", tenantID))

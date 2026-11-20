@@ -287,6 +287,32 @@ describe("DashboardPage", () => {
     },
   );
 
+  it("shows the Keycloak version entered in the tenant settings when Keycloak hides its own", () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        ...mockDashboard,
+        health: { ...mockDashboard.health, server_version: "" },
+        version_info: {
+          current_version: "26.7.5",
+          latest_keycloak_version: "26.8.2",
+          keycloak_release_url: "",
+          is_keycloak_outdated: true,
+          has_security_updates: false,
+          version_source: "tenant_settings",
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<DashboardPage />);
+
+    expect(
+      screen.getByText("26.7.5 (entered in tenant settings)"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Version not available")).not.toBeInTheDocument();
+  });
+
   it.each(["DOWN", "DEGRADED", "UNKNOWN"])(
     "does not blame missing metrics on roles when status is %s",
     (status) => {

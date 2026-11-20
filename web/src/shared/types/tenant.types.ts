@@ -32,6 +32,10 @@ export interface Tenant {
   owner?: string;
   infinispan_enabled?: boolean;
   amfa?: TenantAmfa;
+  // The Keycloak version an operator entered, used by the update check only
+  // while Keycloak does not report its own, and when it was set.
+  keycloak_version?: string;
+  keycloak_version_set_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -52,6 +56,7 @@ export interface TenantCreate {
   tags?: string[];
   owner?: string;
   amfa?: TenantAmfa;
+  keycloak_version?: string;
 }
 
 // TenantUpdate represents the payload for updating a tenant
@@ -70,6 +75,8 @@ export interface TenantUpdate {
   tags?: string[];
   owner?: string;
   amfa?: TenantAmfa;
+  // An empty string removes an entered version.
+  keycloak_version?: string;
 }
 
 // TenantsResponse represents the API response for listing tenants

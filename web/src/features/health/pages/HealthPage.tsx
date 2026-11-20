@@ -23,6 +23,10 @@ import {
   getHealthMetricsHint,
 } from "@/shared/utils/healthAvailability";
 import {
+  enteredVersionNote,
+  shownKeycloakVersion,
+} from "@/shared/utils/keycloakVersion";
+import {
   LoadingSkeleton,
   EmptyState,
   ErrorState,
@@ -56,6 +60,13 @@ export function HealthPage() {
       ? keycloakDashboard.version_info
       : null;
   const healthAvailability = getHealthAvailability(health);
+  // Keycloak's own version, or else the one entered in the tenant settings.
+  const shownVersion = shownKeycloakVersion(
+    health,
+    versionInfo,
+    selectedTenant,
+  );
+  const versionKnown = shownVersion.version !== "";
   const healthMetricsHint = getHealthMetricsHint(
     failed ? null : health,
     !healthAvailability.memory ||
@@ -193,14 +204,10 @@ export function HealthPage() {
                   Server Version
                 </Typography>
                 <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                  <Typography
-                    variant={healthAvailability.version ? "h4" : "body1"}
-                  >
-                    {healthAvailability.version
-                      ? health.server_version
-                      : "Not available"}
+                  <Typography variant={versionKnown ? "h4" : "body1"}>
+                    {versionKnown ? shownVersion.version : "Not available"}
                   </Typography>
-                  {healthAvailability.version && versionInfo && isOutdated && (
+                  {versionKnown && versionInfo && isOutdated && (
                     <Tooltip
                       title={`${updateTitle}: ${latestVersionDisplay} available`}
                     >
@@ -215,13 +222,22 @@ export function HealthPage() {
                     </Tooltip>
                   )}
                 </Box>
-                {healthAvailability.version && notComparable && (
+                {versionKnown && notComparable && (
                   <Typography
                     variant="caption"
                     color="text.secondary"
                     sx={{ display: "block", mt: 0.5 }}
                   >
                     Update check does not apply to this build
+                  </Typography>
+                )}
+                {shownVersion.entered && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: "block", mt: 0.5 }}
+                  >
+                    {enteredVersionNote(shownVersion)}
                   </Typography>
                 )}
               </Box>
@@ -231,7 +247,7 @@ export function HealthPage() {
                 {healthMetricsHint}
               </Typography>
             )}
-            {healthAvailability.version && versionInfo && isOutdated && (
+            {versionKnown && versionInfo && isOutdated && (
               <Box sx={{ mt: 3 }}>
                 <Typography variant="body2" color="text.secondary">
                   {updateTitle}: {latestVersionDisplay}
