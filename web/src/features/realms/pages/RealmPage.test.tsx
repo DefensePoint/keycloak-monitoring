@@ -625,6 +625,27 @@ describe("RealmPage", () => {
     expect(screen.queryByText(/KMT cannot read/)).not.toBeInTheDocument();
   });
 
+  it("never read: says so and shows no settings", () => {
+    mockUseRealmDashboard.mockReturnValue({
+      data: {
+        ...mockRealmDashboard,
+        realm_info: {
+          ...mockRealmDashboard.realm_info,
+          unreadable_since: "2026-10-14T10:05:00Z",
+        },
+      },
+      isLoading: false,
+      isError: false,
+    });
+    render(<RealmPage />);
+
+    expect(
+      screen.getByText(/cannot read this realm's settings since/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/It has not been read yet/)).toBeInTheDocument();
+    expect(screen.queryByText("Realm Configuration")).not.toBeInTheDocument();
+  });
+
   it("shows no such warning for a realm it can read", () => {
     render(<RealmPage />);
     expect(

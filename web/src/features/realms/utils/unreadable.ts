@@ -18,6 +18,18 @@ export function unreadableRealmText(
     `${shortName} cannot read this realm's settings since ${since}: the monitoring client lacks access to it in Keycloak. ` +
     (read
       ? `What is shown was last read at ${read}.`
-      : "What is shown was read earlier.")
+      : "It has not been read yet, so its settings are not shown.")
   );
+}
+
+/**
+ * Whether the monitoring client has never been able to read the realm: only
+ * its name is stored, so its settings, and any warning drawn from them, are
+ * unknown.
+ */
+export function neverRead(realm: {
+  unreadable_since?: string | null;
+  last_checked?: string;
+}): boolean {
+  return Boolean(realm.unreadable_since) && !realm.last_checked;
 }
