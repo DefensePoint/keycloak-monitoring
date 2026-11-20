@@ -14,6 +14,7 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
 	kcpostgres "github.com/DefensePoint/keycloak-monitoring/internal/keycloak/postgres"
 	"github.com/DefensePoint/keycloak-monitoring/internal/logger"
+	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/keycloakadmin"
 	"github.com/DefensePoint/keycloak-monitoring/pkg/saferequest"
 )
@@ -60,6 +61,7 @@ func provideKeycloakService(
 	metricsRepo keycloak.MetricsRepository,
 	healthRepo keycloak.HealthRepository,
 	realmRepo keycloak.RealmRepository,
+	tenants tenant.Service,
 ) keycloak.Service {
 	// A misspelled ID matches nothing and fails silently, as the realms that
 	// use it show no AMFA sections, so the IDs in effect are logged once.
@@ -68,8 +70,24 @@ func provideKeycloakService(
 
 	// The ClientProvider is set later by the monitor pool, when live Keycloak
 	// access is needed.
-	return keycloak.NewService(eventRepo, metricsRepo, healthRepo, realmRepo, nil,
+	svc := keycloak.NewService(eventRepo, metricsRepo, healthRepo, realmRepo, nil,
 		newVersionChecker(cfg.Keycloak.Global.VersionChecker, log), extra)
+	return keycloak.WithTenantVersions(svc, tenantVersionLookup(tenants))
+}
+
+// tenantVersionLookup reads the Keycloak version an operator entered for a
+// tenant, from the tenant cache.
+func tenantVersionLookup(tenants tenant.Service) keycloak.TenantVersionLookup {
+	return func(ctx context.Context, tenantID string) (string, *time.Time, bool) {
+		if tenants == nil {
+			return "", nil, false
+		}
+		t, err := tenants.GetTenant(ctx, tenantID)
+		if err != nil || t == nil || t.KeycloakVersion == "" {
+			return "", nil, false
+		}
+		return t.KeycloakVersion, t.KeycloakVersionSetAt, true
+	}
 }
 
 // newVersionChecker builds the version checker from

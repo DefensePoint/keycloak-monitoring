@@ -72,4 +72,16 @@ type VersionCheckResult struct {
 	// upstream release, such as a Red Hat build of Keycloak, and so was not
 	// compared: IsKeycloakOutdated is then always false.
 	VersionComparable bool `json:"version_comparable"`
+	// VersionSource says where CurrentVersion came from: VersionSourceKeycloak,
+	// or VersionSourceTenantSettings when Keycloak reported none and an
+	// operator entered one. Empty when there is no version. VersionSetAt is
+	// when an entered version was set.
+	VersionSource string     `json:"version_source,omitempty"`
+	VersionSetAt  *time.Time `json:"version_set_at,omitempty"`
 }
+
+// Where a VersionCheckResult's version came from.
+const (
+	VersionSourceKeycloak       = "keycloak"
+	VersionSourceTenantSettings = "tenant_settings"
+)

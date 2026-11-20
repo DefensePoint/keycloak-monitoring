@@ -34,6 +34,9 @@ type CreateRequest struct {
 	Tags          []string     `json:"tags,omitempty"`
 	Owner         string       `json:"owner,omitempty"`
 	Amfa          *AmfaRequest `json:"amfa,omitempty"`
+	// KeycloakVersion is the version an operator enters for a Keycloak that
+	// does not report its own; empty for none.
+	KeycloakVersion string `json:"keycloak_version,omitempty"`
 }
 
 // AmfaRequest carries a tenant's AMFA settings on create and update.
@@ -62,6 +65,8 @@ type UpdateRequest struct {
 	Tags          []string     `json:"tags,omitempty"`
 	Owner         *string      `json:"owner,omitempty"`
 	Amfa          *AmfaRequest `json:"amfa,omitempty"`
+	// KeycloakVersion replaces the entered version; "" removes it, nil keeps it.
+	KeycloakVersion *string `json:"keycloak_version,omitempty"`
 }
 
 // TestConnectionRequest represents the request to test a tenant connection.

@@ -5357,6 +5357,13 @@ const docTemplate = `{
                 "is_default": {
                     "type": "boolean"
                 },
+                "keycloak_version": {
+                    "description": "KeycloakVersion is the Keycloak version an operator entered for this\ntenant. The update check uses it only while Keycloak does not report its\nown version, as Keycloak 26.7 and later, and Red Hat build of Keycloak\n26.6.9, do for a client without master realm administration roles.\nKeycloakVersionSetAt is when it was last changed, so a page can show how\nold it is.",
+                    "type": "string"
+                },
+                "keycloak_version_set_at": {
+                    "type": "string"
+                },
                 "last_error": {
                     "type": "string"
                 },
@@ -6012,6 +6019,12 @@ const docTemplate = `{
                     "type": "boolean",
                     "example": false
                 },
+                "keycloak_version": {
+                    "description": "KeycloakVersion is used by the update check only while Keycloak does not\nreport its own version.",
+                    "type": "string",
+                    "maxLength": 64,
+                    "example": "26.7.5"
+                },
                 "name": {
                     "type": "string",
                     "maxLength": 255,
@@ -6276,6 +6289,12 @@ const docTemplate = `{
                 "is_default": {
                     "type": "boolean",
                     "example": false
+                },
+                "keycloak_version": {
+                    "description": "KeycloakVersion replaces the entered version; an empty string removes it.",
+                    "type": "string",
+                    "maxLength": 64,
+                    "example": "26.7.5"
                 },
                 "name": {
                     "type": "string",

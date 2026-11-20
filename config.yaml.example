@@ -661,6 +661,10 @@ keycloak:
       # release line, so it is never shown as behind upstream. The Health page
       # then says the update check does not apply to that build, and the
       # server logs it once per tenant.
+      #
+      # Keycloak 26.7 and later report their version only to a client that can
+      # administer the master realm. With read-only roles, set the tenant's
+      # keycloak_version (see TENANTS below) so the check still runs.
       enabled: false
 
       # How long to cache version information before checking again
@@ -749,6 +753,14 @@ keycloak:
       # Owner or team responsible for this tenant (optional)
       # Useful for accountability and contact information
       owner: "platform-team"
+
+      # Keycloak version for the update check (optional)
+      # Only needed when Keycloak does not report its version to the
+      # monitoring client: Keycloak 26.7 and later report it only to a master
+      # realm administrator. A version Keycloak reports always takes its
+      # place. Change it when you upgrade Keycloak; the Health page shows the
+      # day it was set.
+      # keycloak_version: "26.7.5"
 
       # Tenant-specific configuration overrides (optional)
       # These settings override keycloak.global for this tenant only, using the

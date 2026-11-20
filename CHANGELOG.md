@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A tenant can carry the Keycloak version an operator enters, as `keycloak_version` in `config.yaml` or the "Keycloak version" field of the tenant form. Keycloak 26.7 and later, and Red Hat build of Keycloak 26.6.9, report their version only to a client that can administer the master realm, so with the recommended read-only roles the check for a newer Keycloak release was skipped. It now uses the entered version while Keycloak reports none. The dashboard and the Health page show that version, marked as entered in the tenant settings, and the Health page shows the day it was set; a version Keycloak reports always takes its place. The value must read as a Keycloak version, such as `26.7.5`, or the tenant is not saved; for a `config.yaml` tenant the server logs the refusal at startup and the tenant keeps its earlier settings.
+
+### Fixed
+
+- `docs/keycloak-setup.md` named only the master `admin` role as bringing back the Keycloak version, memory and uptime, and only from Keycloak 26.7. `manage-realm` from `master-realm` brings them back too, and both can change the master realm, so neither is read-only; Red Hat build of Keycloak 26.6.9 hides them as well. The pages' note now says these details need a master realm administrator.
+
 ## [2.1.0] - 2026-11-19
 
 ### Added

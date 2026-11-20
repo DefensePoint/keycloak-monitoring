@@ -14,6 +14,21 @@ const amfaFields = {
   amfa_api_timeout_seconds: z.coerce.number().int().min(0).max(300).optional(),
 };
 
+// The Keycloak version an operator enters for a Keycloak that does not report
+// its own. The same check as the server's: two to four numeric parts and an
+// optional qualifier that starts with a letter, such as 26.6.9.redhat-00002.
+const keycloakVersionField = z
+  .string()
+  .trim()
+  .max(64, "At most 64 characters")
+  .refine(
+    (v) =>
+      v === "" ||
+      /^[0-9]+(\.[0-9]+){1,3}([.-][A-Za-z][0-9A-Za-z.-]*)?$/.test(v),
+    "Enter a Keycloak version, such as 26.7.5",
+  )
+  .optional();
+
 const requireBaseUrlWhenEnabled = <
   T extends { amfa_enabled: boolean; amfa_api_base_url?: string },
 >(
@@ -51,6 +66,7 @@ export const createTenantSchema = z
     enabled: z.boolean(),
     is_default: z.boolean(),
     default_realm: optionalString,
+    keycloak_version: keycloakVersionField,
     ...amfaFields,
   })
   .superRefine(requireBaseUrlWhenEnabled);
@@ -66,6 +82,7 @@ export const updateTenantSchema = z
     enabled: z.boolean(),
     is_default: z.boolean(),
     default_realm: optionalString,
+    keycloak_version: keycloakVersionField,
     ...amfaFields,
   })
   .superRefine(requireBaseUrlWhenEnabled);

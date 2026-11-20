@@ -203,6 +203,10 @@ type TenantConfig struct {
 	Owner        string            `mapstructure:"owner"`          // Optional owner/team identifier
 	Config       map[string]any    `mapstructure:"config"`         // Overrides of keycloak.global for this tenant, as written; the loader checks them against KeycloakInstanceConfig
 	Amfa         *AmfaTenantConfig `mapstructure:"amfa,omitempty"` // Optional AMFA integration for this tenant
+	// KeycloakVersion is the tenant's Keycloak version, for the update check
+	// while Keycloak does not report it (Keycloak 26.7 and later, and Red Hat
+	// build of Keycloak 26.6.9, report it only to master realm administrators).
+	KeycloakVersion string `mapstructure:"keycloak_version"`
 }
 
 // AmfaTenantConfig represents AMFA integration configuration for a tenant.

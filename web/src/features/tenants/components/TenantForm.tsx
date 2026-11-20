@@ -74,6 +74,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
           enabled: true,
           is_default: false,
           default_realm: "",
+          keycloak_version: "",
           amfa_enabled: false,
           amfa_api_base_url: "",
           amfa_events_lookback_days: undefined,
@@ -89,6 +90,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
           enabled: editingTenant?.enabled ?? true,
           is_default: editingTenant?.is_default ?? false,
           default_realm: editingTenant?.default_realm || "",
+          keycloak_version: editingTenant?.keycloak_version || "",
           amfa_enabled: editingTenant?.amfa?.enabled ?? false,
           amfa_api_base_url: editingTenant?.amfa?.api_base_url || "",
           amfa_events_lookback_days: editingTenant?.amfa?.events_lookback_days,
@@ -110,6 +112,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
         enabled: editingTenant.enabled,
         is_default: editingTenant.is_default,
         default_realm: editingTenant.default_realm || "",
+        keycloak_version: editingTenant.keycloak_version || "",
         amfa_enabled: editingTenant.amfa?.enabled ?? false,
         amfa_api_base_url: editingTenant.amfa?.api_base_url || "",
         amfa_events_lookback_days: editingTenant.amfa?.events_lookback_days,
@@ -133,6 +136,8 @@ export const TenantForm: React.FC<TenantFormProps> = ({
 
     const payload = {
       ...rest,
+      // Empty on edit removes an entered version.
+      keycloak_version: rest.keycloak_version?.trim() ?? "",
       amfa: {
         enabled: amfa_enabled,
         api_base_url: amfa_api_base_url?.trim() ?? "",
@@ -356,6 +361,16 @@ export const TenantForm: React.FC<TenantFormProps> = ({
               ))}
             </FormSelect>
           )}
+
+          <FormTextField
+            name="keycloak_version"
+            control={control}
+            label="Keycloak version"
+            placeholder="26.7.5"
+            helperText="Only needed when Keycloak does not report its version to the monitoring client, as Keycloak 26.7 and later do unless it is a master realm administrator. The update check uses it, so change it when you upgrade Keycloak."
+            fullWidth
+            disabled={isReadOnly}
+          />
         </DialogContent>
 
         <DialogActions sx={{ px: 3, pb: 3, gap: 1 }}>
