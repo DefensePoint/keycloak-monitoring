@@ -23,7 +23,7 @@ import {
   Cancel,
   ArrowForward,
 } from "@mui/icons-material";
-import { unreadableRealmText } from "../utils/unreadable";
+import { neverRead, unreadableRealmText } from "../utils/unreadable";
 import { useBranding } from "@/shared/hooks/useBranding";
 import { useTenant } from "@/shared/context";
 import {
@@ -239,6 +239,10 @@ export function RealmPage() {
     );
   }
 
+  // A realm never read has only its name stored: there are no settings to show.
+  const settingsKnown =
+    !realmDashboard.realm_info || !neverRead(realmDashboard.realm_info);
+
   return (
     <Box sx={{ p: { xs: 2, sm: 4 } }}>
       {/* Header */}
@@ -277,7 +281,7 @@ export function RealmPage() {
       <Box>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
           {/* Realm Configuration */}
-          {realmDashboard.realm_info && (
+          {settingsKnown && realmDashboard.realm_info && (
             <Paper
               elevation={0}
               sx={{ p: 3, border: "1px solid", borderColor: "divider" }}

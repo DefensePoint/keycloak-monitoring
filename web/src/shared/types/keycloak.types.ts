@@ -231,7 +231,8 @@ export interface KeycloakRealmInfo {
   enabled: boolean;
   is_healthy: boolean;
   health_message?: string;
-  last_checked: string;
+  /** When the realm's settings were last read; absent for a realm never read. */
+  last_checked?: string;
   /** When the monitoring client stopped being able to read the realm; absent while it can. */
   unreadable_since?: string;
   ssl_required?: string;
