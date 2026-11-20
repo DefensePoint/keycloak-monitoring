@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"gorm.io/gorm"
@@ -133,18 +134,52 @@ func upsertRealm(tx *gorm.DB, dbRealm *database.KeycloakRealmInfo) error {
 	return nil
 }
 
+// unreadRealmIDPrefix starts the id of a realm's name-only row. Keycloak does
+// not give a realm's id to a client that cannot view the realm, and the row
+// needs one; the first full read replaces the row (see SaveRealm).
+const unreadRealmIDPrefix = "unread:"
+
 // MarkRealmsUnreadable implements keycloak.RealmWriter. It touches only live
 // rows not marked yet, so the first time a realm was found unreadable stays.
+//
+// A realm with no live row, one the client has never been able to read, gets
+// a row with its name only: enabled, so its events are polled, not healthy,
+// and with no last read time. Without it the realm was neither listed nor
+// polled, so a tenant whose client lacks view-realm showed no realms and no
+// events at all. A name-only row retired earlier is made live again.
 func (r *RealmRepository) MarkRealmsUnreadable(ctx context.Context, tenantID string, realmNames []string, since time.Time) error {
 	if len(realmNames) == 0 {
 		return nil
 	}
-	if err := r.db.WithContext(ctx).Model(&database.KeycloakRealmInfo{}).
-		Where("tenant_id = ? AND realm_name IN ? AND unreadable_since IS NULL", tenantID, realmNames).
-		UpdateColumn("unreadable_since", since).Error; err != nil {
-		return fmt.Errorf("failed to mark realms unreadable: %w", err)
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&database.KeycloakRealmInfo{}).
+			Where("tenant_id = ? AND realm_name IN ? AND unreadable_since IS NULL", tenantID, realmNames).
+			UpdateColumn("unreadable_since", since).Error; err != nil {
+			return fmt.Errorf("failed to mark realms unreadable: %w", err)
+		}
+		var stored []string
+		if err := tx.Model(&database.KeycloakRealmInfo{}).
+			Where("tenant_id = ? AND realm_name IN ?", tenantID, realmNames).
+			Pluck("realm_name", &stored).Error; err != nil {
+			return fmt.Errorf("failed to read stored realms: %w", err)
+		}
+		for _, name := range realmNames {
+			if slices.Contains(stored, name) {
+				continue
+			}
+			if err := tx.Exec(`INSERT INTO keycloak_realms
+				(tenant_id, realm_id, realm_name, enabled, is_healthy, health_message, unreadable_since, created_at, updated_at)
+				VALUES (?, ?, ?, true, false, ?, ?, ?, ?)
+				ON CONFLICT (tenant_id, realm_id) DO UPDATE SET
+					deleted_at = NULL, unreadable_since = EXCLUDED.unreadable_since, updated_at = EXCLUDED.updated_at
+				WHERE keycloak_realms.deleted_at IS NOT NULL`,
+				tenantID, unreadRealmIDPrefix+name, name, "Monitoring client cannot view this realm's settings",
+				since, since, since).Error; err != nil {
+				return fmt.Errorf("failed to add unreadable realm %q: %w", name, err)
+			}
+		}
+		return nil
+	})
 }
 
 // SaveRealms saves multiple realms.

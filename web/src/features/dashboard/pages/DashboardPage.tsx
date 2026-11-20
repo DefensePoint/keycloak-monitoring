@@ -1013,7 +1013,10 @@ export function DashboardPage() {
               </Box>
               <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
                 {realms.slice(0, 5).map((realm) => {
+                  // A realm never read has only its name stored, so its
+                  // settings say nothing.
                   const hasWarning =
+                    !(realm.unreadable_since && !realm.last_checked) &&
                     realm.enabled &&
                     (!realm.events_enabled ||
                       !realm.events_listeners ||

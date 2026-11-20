@@ -210,7 +210,7 @@ type KeycloakRealmInfo struct {
 	EnabledEventTypes         []string  `json:"enabled_event_types,omitempty"`
 	AdminEventsEnabled        bool      `json:"admin_events_enabled"`
 	AdminEventsDetailsEnabled bool      `json:"admin_events_details_enabled"`
-	LastChecked               time.Time `json:"last_checked"`
+	LastChecked               time.Time `json:"last_checked,omitzero"` // zero for a realm never read
 	IsHealthy                 bool      `json:"is_healthy"`
 	HealthMessage             string    `json:"health_message,omitempty"`
 	// UnreadableSince is when the monitoring client stopped being able to

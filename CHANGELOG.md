@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A tenant whose monitoring client lacks `view-realm` in a realm it has never read, such as a client created in one realm with only some of its roles, now lists that realm and collects its events. Before, the realm was never stored, so the tenant showed no realms and no events while its health stayed UP, whether it was created in the interface or in `config.yaml`; the only sign was the log line `Monitoring client cannot view this realm's settings`. The realm is stored with its name only and shown as "Can't read", with no settings and no settings warning, until the client can read it; the first full read replaces it, and a realm deleted in Keycloak is retired as before. The API leaves out `last_checked` for such a realm.
+
 ## [2.1.0] - 2026-11-19
 
 ### Added

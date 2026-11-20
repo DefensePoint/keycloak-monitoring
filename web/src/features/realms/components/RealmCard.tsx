@@ -9,13 +9,14 @@ import {
   Tooltip,
 } from "@mui/material";
 import type { RealmCardProps } from "../types";
-import { unreadableRealmText } from "../utils/unreadable";
+import { neverRead, unreadableRealmText } from "../utils/unreadable";
 import { useBranding } from "@/shared/hooks/useBranding";
 
 export const RealmCard: React.FC<RealmCardProps> = ({ realm, onClick }) => {
   const theme = useTheme();
 
   const hasEventWarning =
+    !neverRead(realm) &&
     realm.enabled &&
     (!realm.events_enabled ||
       !realm.events_listeners ||

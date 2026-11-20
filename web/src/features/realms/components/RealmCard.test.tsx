@@ -179,4 +179,29 @@ describe("RealmCard for a realm KMT cannot read", () => {
     expect(screen.queryByText("Can't read")).not.toBeInTheDocument();
     expect(screen.queryByText(/Last read/)).not.toBeInTheDocument();
   });
+
+  // Never read: none of its settings are known, so the stored defaults
+  // (events off) must not raise the event-collection warning.
+  it("never read: says so, with no settings warning and no read time", async () => {
+    renderWithTheme(
+      <RealmCard
+        realm={{
+          realm_name: "rx",
+          enabled: true,
+          is_healthy: false,
+          events_enabled: false,
+          unreadable_since: "2026-10-14T10:05:00Z",
+        }}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Can't read")).toBeInTheDocument();
+    expect(screen.queryByText("Warning")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Last read/)).not.toBeInTheDocument();
+    await userEvent.hover(screen.getByText("Can't read"));
+    expect(
+      await screen.findByText(/It has not been read yet/),
+    ).toBeInTheDocument();
+  });
 });
