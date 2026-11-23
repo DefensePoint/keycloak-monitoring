@@ -18,6 +18,9 @@ type CreateTenant struct {
 	Tags          []string    `json:"tags,omitempty" example:"production,main"`
 	Owner         string      `json:"owner,omitempty" validate:"omitempty,max=255" example:"admin@example.com"`
 	Amfa          *TenantAmfa `json:"amfa,omitempty"`
+	// KeycloakVersion is used by the update check only while Keycloak does not
+	// report its own version.
+	KeycloakVersion string `json:"keycloak_version,omitempty" validate:"omitempty,max=64" example:"26.7.5"`
 }
 
 // TenantAmfa is a tenant's AMFA integration settings.
@@ -51,6 +54,8 @@ type UpdateTenant struct {
 	Tags          []string    `json:"tags,omitempty" example:"production,updated"`
 	Owner         *string     `json:"owner,omitempty" validate:"omitempty,max=255" example:"newowner@example.com"`
 	Amfa          *TenantAmfa `json:"amfa,omitempty"`
+	// KeycloakVersion replaces the entered version; an empty string removes it.
+	KeycloakVersion *string `json:"keycloak_version,omitempty" validate:"omitempty,max=64" example:"26.7.5"`
 }
 
 // TestTenantConnection represents the request to test a Keycloak connection.

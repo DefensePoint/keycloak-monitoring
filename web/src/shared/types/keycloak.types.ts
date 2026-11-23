@@ -254,6 +254,10 @@ export interface KeycloakVersionInfo {
   // False when the server version, such as a Red Hat build of Keycloak's, is
   // not compared with upstream releases.
   version_comparable?: boolean;
+  // Where current_version came from: "keycloak", or "tenant_settings" when
+  // Keycloak reported none and an operator entered one, set at version_set_at.
+  version_source?: "keycloak" | "tenant_settings";
+  version_set_at?: string;
 }
 
 // ============================================================================

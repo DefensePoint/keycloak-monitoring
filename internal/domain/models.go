@@ -122,6 +122,15 @@ type KeycloakTenant struct {
 
 	Amfa *TenantAmfa `json:"amfa,omitempty"`
 
+	// KeycloakVersion is the Keycloak version an operator entered for this
+	// tenant. The update check uses it only while Keycloak does not report its
+	// own version, as Keycloak 26.7 and later, and Red Hat build of Keycloak
+	// 26.6.9, do for a client without master realm administration roles.
+	// KeycloakVersionSetAt is when it was last changed, so a page can show how
+	// old it is.
+	KeycloakVersion      string     `json:"keycloak_version,omitempty"`
+	KeycloakVersionSetAt *time.Time `json:"keycloak_version_set_at,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

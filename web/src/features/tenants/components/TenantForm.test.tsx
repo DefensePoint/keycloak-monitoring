@@ -621,4 +621,76 @@ describe("TenantForm", () => {
       amfa: { events_lookback_days: 7, api_timeout_seconds: 20 },
     });
   });
+
+  describe("Keycloak version", () => {
+    it("shows the stored version and sends a new one", async () => {
+      const onSubmit = vi.fn();
+      render(
+        <TenantForm
+          {...defaultProps}
+          isCreating={false}
+          editingTenant={{ ...tenantFixture(), keycloak_version: "26.7.5" }}
+          onSubmit={onSubmit}
+        />,
+      );
+
+      const field = screen.getByLabelText(/keycloak version/i);
+      expect(field).toHaveValue("26.7.5");
+      await userEvent.clear(field);
+      await userEvent.type(field, " 26.8.1 ");
+      await userEvent.click(
+        screen.getByRole("button", { name: /save changes/i }),
+      );
+
+      await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+      expect(onSubmit.mock.calls[0][0]).toMatchObject({
+        keycloak_version: "26.8.1",
+      });
+    });
+
+    it("sends an empty version when the field is cleared, which removes it", async () => {
+      const onSubmit = vi.fn();
+      render(
+        <TenantForm
+          {...defaultProps}
+          isCreating={false}
+          editingTenant={{ ...tenantFixture(), keycloak_version: "26.7.5" }}
+          onSubmit={onSubmit}
+        />,
+      );
+
+      await userEvent.clear(screen.getByLabelText(/keycloak version/i));
+      await userEvent.click(
+        screen.getByRole("button", { name: /save changes/i }),
+      );
+
+      await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+      expect(onSubmit.mock.calls[0][0]).toMatchObject({ keycloak_version: "" });
+    });
+
+    it("refuses a value that is not a Keycloak version", async () => {
+      const onSubmit = vi.fn();
+      render(
+        <TenantForm
+          {...defaultProps}
+          isCreating={false}
+          editingTenant={tenantFixture()}
+          onSubmit={onSubmit}
+        />,
+      );
+
+      await userEvent.type(
+        screen.getByLabelText(/keycloak version/i),
+        "latest",
+      );
+      await userEvent.click(
+        screen.getByRole("button", { name: /save changes/i }),
+      );
+
+      expect(
+        await screen.findByText("Enter a Keycloak version, such as 26.7.5"),
+      ).toBeInTheDocument();
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+  });
 });

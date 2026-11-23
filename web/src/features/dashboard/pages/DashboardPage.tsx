@@ -56,6 +56,7 @@ import {
   getHealthAvailability,
   getHealthMetricsHint,
 } from "@/shared/utils/healthAvailability";
+import { shownKeycloakVersion } from "@/shared/utils/keycloakVersion";
 
 type EventWithFormattedTime = KeycloakEvent & {
   formattedTime: string;
@@ -307,6 +308,14 @@ export function DashboardPage() {
   }, [filteredRealms, loginStats]);
 
   const healthAvailability = getHealthAvailability(keycloakDashboard?.health);
+  // Keycloak's own version, or else the one entered in the tenant settings.
+  const shownVersion = shownKeycloakVersion(
+    keycloakDashboard?.health,
+    keycloakDashboard && "version_info" in keycloakDashboard
+      ? keycloakDashboard.version_info
+      : null,
+    selectedTenant,
+  );
   const healthMetricsHint = getHealthMetricsHint(
     keycloakFailed ? null : keycloakDashboard?.health,
     !healthAvailability.memory ||
@@ -803,9 +812,11 @@ export function DashboardPage() {
                       color="text.secondary"
                       sx={{ mt: 0.5 }}
                     >
-                      {healthAvailability.version
-                        ? keycloakDashboard.health.server_version
-                        : "Version not available"}
+                      {shownVersion.version === ""
+                        ? "Version not available"
+                        : shownVersion.entered
+                          ? `${shownVersion.version} (entered in tenant settings)`
+                          : shownVersion.version}
                     </Typography>
                   </Box>
                 </Box>

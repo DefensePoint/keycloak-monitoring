@@ -110,10 +110,25 @@ type service struct {
 	realmRepo      RealmRepository
 	clientProvider ClientProvider
 	versionChecker *VersionChecker
+	tenantVersions TenantVersionLookup
 
 	amfaAuthenticatorIDs map[string]struct{}
 	amfaRealmsMu         sync.Mutex
 	amfaRealmsCache      map[string]amfaRealmsCacheEntry
+}
+
+// TenantVersionLookup returns the Keycloak version an operator entered for a
+// tenant and when it was set, or ok false when none was entered.
+type TenantVersionLookup func(ctx context.Context, tenantID string) (version string, setAt *time.Time, ok bool)
+
+// WithTenantVersions makes svc fall back to the version an operator entered
+// for a tenant whenever its Keycloak does not report one. svc must come from
+// NewService; it is returned for chaining.
+func WithTenantVersions(svc Service, lookup TenantVersionLookup) Service {
+	if s, ok := svc.(*service); ok {
+		s.tenantVersions = lookup
+	}
+	return svc
 }
 
 // NewService creates a new keycloak service. extraAmfaAuthenticatorIDs are
@@ -402,12 +417,14 @@ func (s *service) GetDashboard(ctx context.Context, tenantID string, realmName s
 	health, _ := s.healthRepo.GetLatestHealth(ctx, tenantID)
 	dashboard.Health = health
 
-	// Get version info if health has version. The dashboard does not wait for
-	// GitHub: it shows the last fetched release, if any, and a stale or missing
-	// one is fetched in the background.
-	if health != nil && health.ServerVersion != "" && s.versionChecker != nil {
-		if latest := s.versionChecker.CachedVersions(ctx); latest != nil {
-			dashboard.VersionInfo = s.versionResult(tenantID, health.ServerVersion, latest)
+	// Get version info when the version is known. The dashboard does not wait
+	// for GitHub: it shows the last fetched release, if any, and a stale or
+	// missing one is fetched in the background.
+	if s.versionChecker != nil {
+		if current := s.currentVersion(ctx, tenantID, health); current.version != "" {
+			if latest := s.versionChecker.CachedVersions(ctx); latest != nil {
+				dashboard.VersionInfo = s.versionResult(tenantID, current, latest)
+			}
 		}
 	}
 
@@ -473,10 +490,7 @@ func (s *service) GetVersionInfo(ctx context.Context, tenantID string) (*Version
 		return nil, err
 	}
 
-	currentVersion := ""
-	if health != nil {
-		currentVersion = health.ServerVersion
-	}
+	current := s.currentVersion(ctx, tenantID, health)
 
 	// Fetch latest versions
 	latestVersions, err := s.versionChecker.GetLatestVersions(ctx)
@@ -484,12 +498,35 @@ func (s *service) GetVersionInfo(ctx context.Context, tenantID string) (*Version
 		return nil, err
 	}
 
-	return s.versionResult(tenantID, currentVersion, latestVersions), nil
+	return s.versionResult(tenantID, current, latestVersions), nil
+}
+
+// tenantVersion is a tenant's Keycloak version and where it came from.
+type tenantVersion struct {
+	version string
+	source  string
+	setAt   *time.Time
+}
+
+// currentVersion is the version Keycloak reported in health, or else the one
+// an operator entered for the tenant. A reported version always wins: it is
+// the running server's own.
+func (s *service) currentVersion(ctx context.Context, tenantID string, health *domain.KeycloakHealth) tenantVersion {
+	if health != nil && health.ServerVersion != "" {
+		return tenantVersion{version: health.ServerVersion, source: VersionSourceKeycloak}
+	}
+	if s.tenantVersions != nil {
+		if version, setAt, ok := s.tenantVersions(ctx, tenantID); ok && version != "" {
+			return tenantVersion{version: version, source: VersionSourceTenantSettings, setAt: setAt}
+		}
+	}
+	return tenantVersion{}
 }
 
 // versionResult compares the server version with the latest upstream release.
 // Only a plain release number is compared, see isUpstreamRelease.
-func (s *service) versionResult(tenantID, currentVersion string, latest *VersionInfo) *VersionCheckResult {
+func (s *service) versionResult(tenantID string, current tenantVersion, latest *VersionInfo) *VersionCheckResult {
+	currentVersion := current.version
 	comparable := isUpstreamRelease(currentVersion)
 	if !comparable && currentVersion != "" {
 		s.versionChecker.noteNotComparable(tenantID, currentVersion)
@@ -501,6 +538,8 @@ func (s *service) versionResult(tenantID, currentVersion string, latest *Version
 
 	return &VersionCheckResult{
 		CurrentVersion:        currentVersion,
+		VersionSource:         current.source,
+		VersionSetAt:          current.setAt,
 		LatestKeycloakVersion: latest.LatestKeycloakVersion,
 		KeycloakReleaseURL:    latest.KeycloakReleaseURL,
 		IsKeycloakOutdated:    isKeycloakOutdated,

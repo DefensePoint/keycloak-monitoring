@@ -89,7 +89,7 @@ func TestProvideKeycloakService_UsesTheConfiguredVersionChecker(t *testing.T) {
 			GitHubAPIBaseURL: stub.URL,
 			HTTPTimeout:      5 * time.Second,
 		}
-		svc := provideKeycloakService(cfg, nil, nil, nil, healthWithVersion{version: "26.4.2"}, nil)
+		svc := provideKeycloakService(cfg, nil, nil, nil, healthWithVersion{version: "26.4.2"}, nil, nil)
 
 		info, err := svc.GetVersionInfo(context.Background(), "t1")
 		if err != nil {

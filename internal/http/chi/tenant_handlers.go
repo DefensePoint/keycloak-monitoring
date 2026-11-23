@@ -230,20 +230,21 @@ func (h *TenantHandlers) createTenant(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req := tenant.CreateRequest{
-		TenantID:      dto.TenantID,
-		Name:          dto.Name,
-		Description:   dto.Description,
-		ServerURL:     dto.ServerURL,
-		AdminRealm:    dto.AdminRealm,
-		ClientID:      dto.ClientID,
-		ClientSecret:  dto.ClientSecret,
-		Configuration: dto.Configuration,
-		DefaultRealm:  dto.DefaultRealm,
-		Enabled:       dto.Enabled,
-		IsDefault:     dto.IsDefault,
-		Tags:          dto.Tags,
-		Owner:         dto.Owner,
-		Amfa:          toTenantAmfa(dto.Amfa),
+		TenantID:        dto.TenantID,
+		Name:            dto.Name,
+		Description:     dto.Description,
+		ServerURL:       dto.ServerURL,
+		AdminRealm:      dto.AdminRealm,
+		ClientID:        dto.ClientID,
+		ClientSecret:    dto.ClientSecret,
+		Configuration:   dto.Configuration,
+		DefaultRealm:    dto.DefaultRealm,
+		Enabled:         dto.Enabled,
+		IsDefault:       dto.IsDefault,
+		Tags:            dto.Tags,
+		Owner:           dto.Owner,
+		Amfa:            toTenantAmfa(dto.Amfa),
+		KeycloakVersion: dto.KeycloakVersion,
 	}
 
 	if req.IsDefault {
@@ -355,19 +356,20 @@ func (h *TenantHandlers) updateTenant(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req := tenant.UpdateRequest{
-		Name:          dto.Name,
-		Description:   dto.Description,
-		ServerURL:     dto.ServerURL,
-		AdminRealm:    dto.AdminRealm,
-		ClientID:      dto.ClientID,
-		ClientSecret:  dto.ClientSecret,
-		Configuration: dto.Configuration,
-		DefaultRealm:  dto.DefaultRealm,
-		Enabled:       dto.Enabled,
-		IsDefault:     dto.IsDefault,
-		Tags:          dto.Tags,
-		Owner:         dto.Owner,
-		Amfa:          toTenantAmfa(dto.Amfa),
+		Name:            dto.Name,
+		Description:     dto.Description,
+		ServerURL:       dto.ServerURL,
+		AdminRealm:      dto.AdminRealm,
+		ClientID:        dto.ClientID,
+		ClientSecret:    dto.ClientSecret,
+		Configuration:   dto.Configuration,
+		DefaultRealm:    dto.DefaultRealm,
+		Enabled:         dto.Enabled,
+		IsDefault:       dto.IsDefault,
+		Tags:            dto.Tags,
+		Owner:           dto.Owner,
+		Amfa:            toTenantAmfa(dto.Amfa),
+		KeycloakVersion: dto.KeycloakVersion,
 	}
 
 	if req.IsDefault != nil && *req.IsDefault {

@@ -226,6 +226,11 @@ type KeycloakTenant struct {
 	AmfaAPIBaseURL       string `gorm:"size:512"`
 	AmfaEventsLookback   int    `gorm:"default:0"` // Days; 0 applies the platform default
 	AmfaAPITimeoutSecond int    `gorm:"default:0"` // 0 applies the platform default
+
+	// The Keycloak version an operator entered, used by the update check only
+	// while Keycloak does not report its own; empty when none was entered.
+	KeycloakVersion      string `gorm:"size:64"`
+	KeycloakVersionSetAt *time.Time
 }
 
 // TableName specifies the table name for KeycloakTenant.
