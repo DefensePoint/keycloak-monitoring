@@ -328,6 +328,10 @@ func (m *mockEventRepository) SaveEvents(ctx context.Context, events []*domain.K
 	return nil
 }
 
+func (*mockEventRepository) CountAMFAFallbackLogins(context.Context, string, string, time.Time, time.Time) (AMFAFallbackCounts, error) {
+	return AMFAFallbackCounts{}, nil
+}
+
 func (m *mockEventRepository) CountEventsByType(ctx context.Context, tenantID, realmName, eventType string, from, to time.Time) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

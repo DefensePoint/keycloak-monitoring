@@ -20,6 +20,10 @@ type countingEventRepo struct {
 
 var errCountFailed = errors.New("count query failed")
 
+func (*countingEventRepo) CountAMFAFallbackLogins(context.Context, string, string, time.Time, time.Time) (AMFAFallbackCounts, error) {
+	return AMFAFallbackCounts{}, nil
+}
+
 func (r *countingEventRepo) CountEventsByType(_ context.Context, _, _, eventType string, _, _ time.Time) (int64, error) {
 	r.asked = append(r.asked, eventType)
 	if eventType == r.failType {

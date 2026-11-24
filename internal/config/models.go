@@ -554,6 +554,7 @@ type EventCheckerChecks struct {
 	CodeToToken  CodeToTokenErrorCheckConfig `mapstructure:"code_to_token"`
 	ClientError  ClientErrorCheckConfig      `mapstructure:"client_error"`
 	CommonErrors CommonErrorCheckConfig      `mapstructure:"common_errors"`
+	AmfaFallback AmfaFallbackCheckConfig     `mapstructure:"amfa_fallback"`
 }
 
 // LoginErrorCheckConfig represents settings for LOGIN_ERROR event check
@@ -591,6 +592,15 @@ type CommonErrorCheckConfig struct {
 	Threshold  int           `mapstructure:"threshold"`   // Number of errors to trigger alert (default: 50)
 	TimeWindow time.Duration `mapstructure:"time_window"` // Time window to count errors (default: 5m)
 	EventTypes []string      `mapstructure:"event_types"` // Which error types to monitor (REGISTER_ERROR, RESET_PASSWORD_ERROR, LOGOUT_ERROR)
+}
+
+// AmfaFallbackCheckConfig represents settings for the check on logins the AMFA
+// plugin handled without the engine's decision (decision_source fallback or
+// engine_unreachable_denied on their Keycloak events).
+type AmfaFallbackCheckConfig struct {
+	Enabled    bool          `mapstructure:"enabled"`
+	Threshold  int           `mapstructure:"threshold"`   // Logins to trigger an alert (default: 1)
+	TimeWindow time.Duration `mapstructure:"time_window"` // Time window to count them (default: 5m)
 }
 
 // AmfaCheckerConfig configures the AMFA risk-alert checker. It mirrors the

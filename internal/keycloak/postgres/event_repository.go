@@ -209,6 +209,39 @@ func (r *EventRepository) CountEventsByType(ctx context.Context, tenantID, realm
 	return count, nil
 }
 
+// CountAMFAFallbackLogins counts the realm's logins from from to to that the
+// AMFA plugin handled without the engine's decision. A login is identified by
+// its amfa_event_id, which its LOGIN_ERROR for a wrong code and its LOGIN
+// share, or by the event's own id when it has none.
+func (r *EventRepository) CountAMFAFallbackLogins(ctx context.Context, tenantID, realmName string, from, to time.Time) (keycloak.AMFAFallbackCounts, error) {
+	var rows []struct {
+		Source string
+		Logins int64
+	}
+	err := r.db.WithContext(ctx).Model(&database.KeycloakEvent{}).
+		Select("details->>'decision_source' AS source, "+
+			"COUNT(DISTINCT COALESCE(NULLIF(details->>'amfa_event_id', ''), event_id)) AS logins").
+		Where("tenant_id = ? AND realm_name = ? AND time >= ? AND time <= ?", tenantID, realmName, from, to).
+		Where("details->>'decision_source' IN ?",
+			[]string{keycloak.DecisionSourceFallback, keycloak.DecisionSourceUnreachableDeny}).
+		Group("details->>'decision_source'").
+		Scan(&rows).Error
+	if err != nil {
+		return keycloak.AMFAFallbackCounts{}, fmt.Errorf("failed to count AMFA fallback logins: %w", err)
+	}
+
+	var counts keycloak.AMFAFallbackCounts
+	for _, row := range rows {
+		switch row.Source {
+		case keycloak.DecisionSourceFallback:
+			counts.Fallback = row.Logins
+		case keycloak.DecisionSourceUnreachableDeny:
+			counts.Refused = row.Logins
+		}
+	}
+	return counts, nil
+}
+
 // SaveEvent saves a single event.
 func (r *EventRepository) SaveEvent(ctx context.Context, event *domain.KeycloakEvent) error {
 	dbEvent := convertDomainEventToDB(event)

@@ -47,6 +47,10 @@ func (s *stubKeycloakService) ListEventsByTimeRange(context.Context, string, tim
 
 func (s *stubKeycloakService) CountEvents(context.Context, string) (int64, error) { return 0, nil }
 
+func (*stubKeycloakService) CountAMFAFallbackLogins(context.Context, string, string, time.Time, time.Time) (keycloak.AMFAFallbackCounts, error) {
+	return keycloak.AMFAFallbackCounts{}, nil
+}
+
 func (s *stubKeycloakService) CountEventsByType(context.Context, string, string, string, time.Time, time.Time) (int64, error) {
 	return 0, nil
 }
@@ -188,6 +192,10 @@ func (s *stubKeycloakEventRepo) GetEventsByTimeRange(context.Context, string, ti
 }
 
 func (s *stubKeycloakEventRepo) CountEvents(context.Context, string) (int64, error) { return 0, nil }
+
+func (*stubKeycloakEventRepo) CountAMFAFallbackLogins(context.Context, string, string, time.Time, time.Time) (keycloak.AMFAFallbackCounts, error) {
+	return keycloak.AMFAFallbackCounts{}, nil
+}
 
 func (s *stubKeycloakEventRepo) CountEventsByType(context.Context, string, string, string, time.Time, time.Time) (int64, error) {
 	return 0, nil

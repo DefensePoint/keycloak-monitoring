@@ -15,6 +15,9 @@ type EventReader interface {
 	GetEventsByTimeRange(ctx context.Context, tenantID string, from, to time.Time, limit, offset int) ([]*domain.KeycloakEvent, error)
 	CountEvents(ctx context.Context, tenantID string) (int64, error)
 	CountEventsByType(ctx context.Context, tenantID, realmName, eventType string, from, to time.Time) (int64, error)
+	// CountAMFAFallbackLogins counts the realm's logins the AMFA plugin
+	// handled without the engine's decision.
+	CountAMFAFallbackLogins(ctx context.Context, tenantID, realmName string, from, to time.Time) (AMFAFallbackCounts, error)
 	// StoredEventIDs returns which of ids the tenant has events stored under
 	// with a time from from to to.
 	StoredEventIDs(ctx context.Context, tenantID string, ids []string, from, to time.Time) (map[string]bool, error)
