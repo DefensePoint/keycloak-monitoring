@@ -30,6 +30,7 @@ type Service interface {
 	ListEventsByTimeRange(ctx context.Context, tenantID string, from, to time.Time, limit, offset int) ([]*domain.KeycloakEvent, error)
 	CountEvents(ctx context.Context, tenantID string) (int64, error)
 	CountEventsByType(ctx context.Context, tenantID, realmName, eventType string, from, to time.Time) (int64, error)
+	CountAMFAFallbackLogins(ctx context.Context, tenantID, realmName string, from, to time.Time) (AMFAFallbackCounts, error)
 	GetEventStats(ctx context.Context, tenantID, realmName string, from, to time.Time) (*EventStats, error)
 
 	// Metrics
@@ -214,6 +215,12 @@ func (s *service) ListEventsByTimeRange(ctx context.Context, tenantID string, fr
 // CountEvents returns the total count of events for a tenant.
 func (s *service) CountEvents(ctx context.Context, tenantID string) (int64, error) {
 	return s.eventRepo.CountEvents(ctx, tenantID)
+}
+
+// CountAMFAFallbackLogins counts the realm's logins the AMFA plugin handled
+// without the engine's decision.
+func (s *service) CountAMFAFallbackLogins(ctx context.Context, tenantID, realmName string, from, to time.Time) (AMFAFallbackCounts, error) {
+	return s.eventRepo.CountAMFAFallbackLogins(ctx, tenantID, realmName, from, to)
 }
 
 // CountEventsByType returns the count of events by type for a realm.

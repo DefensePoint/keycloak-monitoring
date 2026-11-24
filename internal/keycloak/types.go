@@ -86,3 +86,20 @@ const (
 	VersionSourceKeycloak       = "keycloak"
 	VersionSourceTenantSettings = "tenant_settings"
 )
+
+// AMFAFallbackCounts are the logins in a realm the AMFA plugin handled without
+// the engine's decision, read from the decision_source detail it puts on the
+// login's events. Fallback logins continued at the realm's fallback risk level;
+// refused ones were denied because the realm's failure mode is mandatory. Each
+// login counts once, however many of its events carry the detail.
+type AMFAFallbackCounts struct {
+	Fallback int64
+	Refused  int64
+}
+
+// The decision_source values the AMFA plugin sets when it could not use the
+// engine's decision.
+const (
+	DecisionSourceFallback        = "fallback"
+	DecisionSourceUnreachableDeny = "engine_unreachable_denied"
+)

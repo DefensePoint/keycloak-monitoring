@@ -593,6 +593,18 @@ keycloak:
             - "RESET_PASSWORD_ERROR"
             - "LOGOUT_ERROR"
 
+        # AMFA Fallback Check - Logins the Adaptive MFA plugin handled without
+        # the engine's decision (engine down, erroring or too slow): they ran at
+        # the realm's fallback risk level, or were refused in mandatory failure
+        # mode. Read from the Keycloak events, so it works while the engine is
+        # down. See docs/amfa-integration.md, "Engine outages".
+        # High priority: with a fallback risk level of 1, an outage lets every
+        # login through without a step-up
+        amfa_fallback:
+          enabled: true
+          threshold: 1         # Alert on the first such login
+          time_window: 5m
+
     # =========================================================================
     # AMFA CHECKER
     # =========================================================================

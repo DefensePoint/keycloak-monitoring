@@ -104,11 +104,18 @@ func registerEventsCheckHooks(p EventsCheckParams) {
 		p.Notifier, p.Silences, p.Logger).hook(p.Lifecycle, p.Tenants)
 }
 
+// eventsCheckReader is what the event checks read: event counts by type, and
+// the logins the AMFA plugin handled without the engine's decision.
+type eventsCheckReader interface {
+	eventscheck.KeycloakEventReader
+	eventscheck.AMFAFallbackCounter
+}
+
 // newEventsCheckWorkers runs one event checker service per enabled tenant,
 // with the checks the configuration enables.
 func newEventsCheckWorkers(
 	checkerCfg config.EventCheckerConfig,
-	events eventscheck.KeycloakEventReader,
+	events eventsCheckReader,
 	realms realmLister,
 	alertStore eventscheck.AlertStore,
 	notifier eventscheck.NotificationService,
@@ -146,7 +153,7 @@ func newEventsCheckWorkers(
 func buildEventsChecks(
 	tenantID string,
 	realmsFn eventscheck.RealmsFunc,
-	events eventscheck.KeycloakEventReader,
+	events eventsCheckReader,
 	checkerCfg config.EventCheckerConfig,
 	log eventscheck.Logger,
 ) []eventscheck.Check {
@@ -166,6 +173,9 @@ func buildEventsChecks(
 	}
 	if c.CommonErrors.Enabled {
 		out = append(out, eventscheck.NewCommonErrorCheck(events, log, tenantID, realmsFn, c.CommonErrors.Threshold, c.CommonErrors.TimeWindow, c.CommonErrors.EventTypes))
+	}
+	if c.AmfaFallback.Enabled {
+		out = append(out, eventscheck.NewAMFAFallbackCheck(events, log, tenantID, realmsFn, c.AmfaFallback.Threshold, c.AmfaFallback.TimeWindow))
 	}
 	return out
 }

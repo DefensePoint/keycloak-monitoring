@@ -355,6 +355,26 @@ The checker lives under `keycloak.global` in your KMT config, at the same level 
           client_login_error: { enabled: true, threshold: 5, window: 5m }              # rule 4b: CLIENT_LOGIN_ERROR burst
 ```
 
+### Engine outages
+
+When the Adaptive MFA plugin cannot get the engine's decision, because the engine is down, answers with an error or does not answer in time, it does not stop the login. In the default `advisory` failure mode the login continues at the realm's `fallbackRisk` level; in `mandatory` mode it is refused. Nothing in AMFA records it, and with `fallbackRisk` set to 1 an outage lets every login through without a step-up.
+
+The plugin marks such a login with a `decision_source` detail on its Keycloak events: `fallback` when it continued at the fallback level, `engine_unreachable_denied` when mandatory mode refused it. The `amfa_fallback` event check counts those logins in the Keycloak events KMT already collects, so it does not depend on reading AMFA and keeps working while the engine is down. It raises one alert per realm (severity error, check type `amfa_fallback_events`) when the logins reach the threshold within the time window, and resolves it once the logins have the engine's decision again.
+
+It is one of the Keycloak event checks, under `event_checker`, not `amfa_checker`, so it needs the `event_checker` master switch on:
+
+```yaml
+    event_checker:
+      enabled: true               # MASTER SWITCH - off by default
+      checks:
+        amfa_fallback:
+          enabled: true
+          threshold: 1            # default 1: every such login
+          time_window: 5m         # default 5m
+```
+
+A login counts once, however many of its events carry the detail: a wrong code entered before the right one, or an SSO login, whose `IDENTITY_PROVIDER_POST_LOGIN` and `LOGIN` events both carry it. The plugin also starts each such Keycloak log line with `ADAPTIVE_AUTH_ENGINE_UNREACHABLE`, for alerting on Keycloak's logs.
+
 ### Expected startup logs
 
 With the checker enabled, KMT logs something like:

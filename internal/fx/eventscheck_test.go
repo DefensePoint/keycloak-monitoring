@@ -8,6 +8,7 @@ import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"github.com/DefensePoint/keycloak-monitoring/internal/domain"
 	"github.com/DefensePoint/keycloak-monitoring/internal/eventscheck"
+	"github.com/DefensePoint/keycloak-monitoring/internal/keycloak"
 	"github.com/DefensePoint/keycloak-monitoring/internal/tenant"
 
 	"go.uber.org/fx/fxtest"
@@ -39,6 +40,10 @@ func (ecRealmRepoStub) ListRealms(_ context.Context, _ string) ([]*domain.Keyclo
 
 type ecEventReaderStub struct{}
 
+func (ecEventReaderStub) CountAMFAFallbackLogins(context.Context, string, string, time.Time, time.Time) (keycloak.AMFAFallbackCounts, error) {
+	return keycloak.AMFAFallbackCounts{}, nil
+}
+
 func (ecEventReaderStub) CountEventsByType(_ context.Context, _, _, _ string, _, _ time.Time) (int64, error) {
 	return 0, nil
 }
@@ -53,6 +58,10 @@ var (
 // tenantEventReader reports, once per tenant, that a check read its events.
 type tenantEventReader struct{ asked chan string }
 
+func (tenantEventReader) CountAMFAFallbackLogins(context.Context, string, string, time.Time, time.Time) (keycloak.AMFAFallbackCounts, error) {
+	return keycloak.AMFAFallbackCounts{}, nil
+}
+
 func (r tenantEventReader) CountEventsByType(_ context.Context, tenantID, _, _ string, _, _ time.Time) (int64, error) {
 	select {
 	case r.asked <- tenantID:
@@ -61,7 +70,7 @@ func (r tenantEventReader) CountEventsByType(_ context.Context, tenantID, _, _ s
 	return 0, nil
 }
 
-func newEventsWorkersUnderTest(t *testing.T, checkerCfg config.EventCheckerConfig, events eventscheck.KeycloakEventReader, tenants *fakeAmfaTenantService) {
+func newEventsWorkersUnderTest(t *testing.T, checkerCfg config.EventCheckerConfig, events eventsCheckReader, tenants *fakeAmfaTenantService) {
 	t.Helper()
 	checkerCfg.Enabled = true
 	checkerCfg.PollInterval = time.Hour
@@ -129,6 +138,32 @@ func TestEventsCheckWorkers_NoCheckEnabledStartsNothing(t *testing.T) {
 	case got := <-asked:
 		t.Fatalf("tenant %q was checked with every check off", got)
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// The AMFA fallback check runs only when its own flag is set, like the others.
+func TestBuildEventsChecks_AmfaFallbackFollowsItsFlag(t *testing.T) {
+	realmsFn := eventscheck.RealmsFunc(func(context.Context) ([]string, error) { return []string{"master"}, nil })
+	has := func(checks []eventscheck.Check) bool {
+		for _, c := range checks {
+			if c.GetCheckType() == "amfa_fallback_events" {
+				return true
+			}
+		}
+		return false
+	}
+
+	var off config.EventCheckerConfig
+	off.Checks.LoginError.Enabled = true
+	if has(buildEventsChecks("tenant-1", realmsFn, ecEventReaderStub{}, off, noopEventscheckLogger{})) {
+		t.Error("amfa_fallback_events built without its flag")
+	}
+
+	var on config.EventCheckerConfig
+	on.Checks.AmfaFallback.Enabled = true
+	checks := buildEventsChecks("tenant-1", realmsFn, ecEventReaderStub{}, on, noopEventscheckLogger{})
+	if !has(checks) || len(checks) != 1 {
+		t.Errorf("checks = %d, want only amfa_fallback_events", len(checks))
 	}
 }
 
