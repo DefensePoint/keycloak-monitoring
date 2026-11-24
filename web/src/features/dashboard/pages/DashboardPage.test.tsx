@@ -608,6 +608,33 @@ describe("DashboardPage", () => {
     expect(screen.getByText(/1 healthy • View realms/)).toBeInTheDocument();
   });
 
+  // A realm never read has only its name stored; its settings are unknown, so
+  // the stored defaults (events off) must not raise the settings warning.
+  it("shows no settings warning for a realm it has never read", () => {
+    mockUseKeycloakDashboard.mockReturnValue({
+      data: {
+        ...mockDashboard,
+        realms: [
+          {
+            realm_name: "rx",
+            enabled: true,
+            is_healthy: false,
+            events_enabled: false,
+            unreadable_since: "2026-10-14T10:05:00Z",
+          },
+        ],
+      },
+      dataUpdatedAt: Date.now(),
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<DashboardPage />);
+
+    expect(screen.getByText("rx")).toBeInTheDocument();
+    expect(screen.queryByText("Warning")).not.toBeInTheDocument();
+  });
+
   // A failed stats request used to render as "0" total events, which reads as
   // a quiet window rather than a broken query.
   it("shows the total events as unavailable when the stats request fails", async () => {
