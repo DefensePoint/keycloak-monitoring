@@ -201,9 +201,16 @@ docker-config-check:
 	@test -f config.yaml || { echo "Missing config.yaml. Create it from the example and add your Keycloak tenants:"; echo "  cp config.yaml.example config.yaml"; exit 1; }
 
 .PHONY: docker-down
-.PHONY: docker-demo-up docker-demo-down docker-demo-restart docker-demo-clean docker-demo-logs
-docker-demo-up: docker-env-check ## Build and start the self-contained two-Keycloak demo
+.PHONY: docker-demo-env docker-demo-up docker-demo-down docker-demo-restart docker-demo-clean docker-demo-logs
+# Creates .env from the example if needed and fills the demo's empty secrets
+# and dashboard password. Values already set are never changed.
+docker-demo-env:
+	@sh deployments/local/demo-env.sh .env .env.example $(DOCKER_DEMO_PROJECT)
+
+docker-demo-up: docker-demo-env ## Build and start the self-contained two-Keycloak demo
 	@$(call DOCKER_DEMO_UP,--build)
+	@port=$$(sed -n 's/^BUNDLED_WEB_PORT=//p' .env); \
+	echo "Dashboard: http://localhost:$${port:-17880} (user and password: MONITORING_AUTH_SIMPLE_DEFAULT_USER and _PASS in .env)"
 
 docker-demo-down: docker-env-check ## Stop the bundled demo, retaining its data
 	@$(DOCKER_DEMO_COMPOSE) down

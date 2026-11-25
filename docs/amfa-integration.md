@@ -179,7 +179,7 @@ The following walks through a local smoke of KMT's bundled demo (`make docker-de
 
 - Docker Desktop running with enough VM disk (≥20 GB free inside the VM, see `docker system df`).
 - `keycloak-adaptive-mfa-engine` (the AMFA engine) cloned to a sibling directory.
-- KMT's `.env` with the `BUNDLED_*` values and a `MONITORING_AUTH_SIMPLE_DEFAULT_PASS` that meets the password rules (at least 12 characters, with upper case, lower case, a digit and a special character), as for `make docker-demo-up`.
+- Nothing to prepare in KMT's `.env`: `make docker-demo-up` creates it and fills the `BUNDLED_*` values and the dashboard password on its first run.
 - Host ports 5433, 6379 and 8095 free for the engine. The demo uses 18080, 18081, 17880, 17888 and 15433, so it does not collide with them. The plain `make docker-up` stack does: its Postgres also publishes 5433.
 
 ### Step 1: Bring up AMFA
