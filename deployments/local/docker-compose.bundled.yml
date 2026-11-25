@@ -87,6 +87,10 @@ services:
       # and environment entries are merged, not replaced. The demo's Postgres
       # uses its own password, so override it here.
       MONITORING_DATABASE_PASSWORD: ${BUNDLED_DB_PASSWORD:?Set BUNDLED_DB_PASSWORD in .env}
+      # The AMFA tenant's switch and port (make docker-demo-up AMFA=1), read by
+      # config.bundled.yaml. Not in .env, so set here with defaults.
+      BUNDLED_AMFA: ${BUNDLED_AMFA:-false}
+      BUNDLED_AMFA_KC_PORT: ${BUNDLED_AMFA_KC_PORT:-18082}
     depends_on:
       keycloak-setup:
         condition: service_completed_successfully
@@ -99,6 +103,11 @@ services:
       - "127.0.0.1:${BUNDLED_MCP_PORT:-17889}:7889"
     volumes:
       - ./config.bundled.yaml:/app/config.yaml:ro
+    environment:
+      # The AMFA tenant's switch and port (make docker-demo-up AMFA=1), read by
+      # config.bundled.yaml. Not in .env, so set here with defaults.
+      BUNDLED_AMFA: ${BUNDLED_AMFA:-false}
+      BUNDLED_AMFA_KC_PORT: ${BUNDLED_AMFA_KC_PORT:-18082}
     depends_on:
       keycloak-setup:
         condition: service_completed_successfully
@@ -110,3 +119,8 @@ services:
       - "127.0.0.1:${BUNDLED_WEB_PORT:-17880}:7880"
     volumes:
       - ./config.bundled.yaml:/app/config.yaml:ro
+    environment:
+      # The AMFA tenant's switch and port (make docker-demo-up AMFA=1), read by
+      # config.bundled.yaml. Not in .env, so set here with defaults.
+      BUNDLED_AMFA: ${BUNDLED_AMFA:-false}
+      BUNDLED_AMFA_KC_PORT: ${BUNDLED_AMFA_KC_PORT:-18082}

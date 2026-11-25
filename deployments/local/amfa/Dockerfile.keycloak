@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1.7
+# Keycloak with the Adaptive MFA plugin and its admin UI, for the bundled demo's
+# AMFA tenant (make docker-demo-up AMFA=1). The JARs are the published 1.1.0
+# release assets, the versions the AMFA engine 1.2.0 quick start pins; each
+# build checks them against these digests, so a wrong or truncated download
+# fails the build instead of Keycloak.
+#
+# Keycloak stays on 26.6.x: the plugin's Email OTP step fails on 26.7+.
+FROM quay.io/keycloak/keycloak:26.6.3@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992
+
+ADD --chown=keycloak:keycloak \
+    --checksum=sha256:7bee0e71b82a1d5696ebca4f4063c781e2b9213adfefe9730c7f5552fbf7ba94 \
+    https://github.com/DefensePoint/keycloak-adaptive-mfa/releases/download/v1.1.0/keycloak-adaptive-mfa.jar \
+    /opt/keycloak/providers/keycloak-adaptive-mfa.jar
+# Named like the built-in admin console JAR so it replaces it.
+ADD --chown=keycloak:keycloak \
+    --checksum=sha256:bf39d4617a1721ddf00da37bcf7a6c594fd29dde3c5c4b5839466e965669c228 \
+    https://github.com/DefensePoint/keycloak-adaptive-mfa-admin-ui/releases/download/v1.1.0/keycloak-admin-ui-amfa.jar \
+    /opt/keycloak/providers/keycloak-admin-ui-26.6.3.jar
+# The plugin's runtime dependency, at the version the 1.1.0 release was built against.
+ADD --chown=keycloak:keycloak \
+    --checksum=sha256:f9ea1043ad66dbd8e0c4dd7b7a9cdce5bf2d86fab1ce33aace1ad4d56bd1270b \
+    https://repo1.maven.org/maven2/io/vavr/vavr/1.0.1/vavr-1.0.1.jar \
+    /opt/keycloak/providers/vavr-1.0.1.jar

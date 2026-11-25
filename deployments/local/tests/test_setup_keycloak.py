@@ -38,6 +38,7 @@ class FakeKeycloak:
         self.admin_api_scope = False
         self.default_scopes = set()
         self.partial_imports = []
+        self.mappers = []
         self.demo_logins = []
         # Keycloak 26.7 answers a refused password grant with 400; older builds
         # answered 401.
@@ -127,6 +128,12 @@ class FakeKeycloak:
                         status = 409
                     else:
                         state.realms[data["realm"]] = data
+                        status = 201
+                elif path == "/admin/realms/master/clients/client-uuid/protocol-mappers/models":
+                    if self.command == "GET":
+                        response = state.mappers
+                    else:
+                        state.mappers.append(data)
                         status = 201
                 elif path == "/admin/realms/demo/partialImport" and self.command == "POST":
                     state.partial_imports.append(data)
@@ -312,6 +319,62 @@ class ProvisioningTests(unittest.TestCase):
         self.assertEqual(other.client["secret"], "two-$secret")
         self.assertNotIn("secret", output.getvalue())
         self.assertIn("Keycloak 2", output.getvalue())
+
+
+class AmfaTenantTests(unittest.TestCase):
+    def servers(self, count):
+        fakes = [FakeKeycloak() for _ in range(count)]
+        for fake in fakes:
+            self.addCleanup(fake.close)
+        return fakes
+
+    def env(self, fakes, **extra):
+        env = {"BUNDLED_KC_ADMIN_PASSWORD": "admin-pass", "BUNDLED_KC1_CLIENT_SECRET": "one-$secret",
+               "BUNDLED_KC2_CLIENT_SECRET": "two-$secret", "BUNDLED_KC3_CLIENT_SECRET": "three-$secret"}
+        for number, fake in enumerate(fakes, start=1):
+            env[f"BUNDLED_KC{number}_URL"] = fake.url
+        env.update(extra)
+        return env
+
+    def run_main(self, env):
+        output = io.StringIO()
+        with patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(output):
+            setup.main()
+        return output.getvalue()
+
+    def test_amfa_on_provisions_the_third_keycloak(self):
+        fakes = self.servers(3)
+        output = self.run_main(self.env(fakes, BUNDLED_AMFA="true"))
+        self.assertEqual([f.client["secret"] for f in fakes], ["one-$secret", "two-$secret", "three-$secret"])
+        self.assertIn("Keycloak 3", output)
+        self.assertTrue(any(ok for _, ok in fakes[2].demo_logins))
+
+    def test_only_the_amfa_keycloak_gives_kmt_the_amfa_audience(self):
+        fakes = self.servers(3)
+        env = self.env(fakes, BUNDLED_AMFA="true")
+        self.run_main(env)
+        self.run_main(env)
+        self.assertEqual(fakes[0].mappers, [])
+        self.assertEqual(fakes[1].mappers, [])
+        [mapper] = fakes[2].mappers
+        self.assertEqual(mapper["protocolMapper"], "oidc-audience-mapper")
+        self.assertEqual(mapper["config"]["included.custom.audience"], "amfa")
+        self.assertEqual(mapper["config"]["access.token.claim"], "true")
+
+    def test_amfa_off_leaves_the_third_keycloak_alone(self):
+        fakes = self.servers(3)
+        for value in ("false", ""):
+            output = self.run_main(self.env(fakes, BUNDLED_AMFA=value))
+            self.assertIsNone(fakes[2].client)
+            self.assertEqual(fakes[2].requests, [])
+            self.assertNotIn("Keycloak 3", output)
+
+    def test_amfa_on_requires_the_third_secret(self):
+        env = self.env(self.servers(3), BUNDLED_AMFA="true")
+        del env["BUNDLED_KC3_CLIENT_SECRET"]
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaisesRegex(setup.SetupError, "set BUNDLED_KC3_CLIENT_SECRET in .env"):
+                setup.main()
 
 
 class DemoRealmTests(unittest.TestCase):

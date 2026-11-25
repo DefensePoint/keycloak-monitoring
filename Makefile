@@ -14,7 +14,15 @@ export KMT_BUILD_DATE := $(BUILD_DATE)
 # Other variables
 DOCKER_COMPOSE_LOCAL_FILE := "./deployments/local/docker-compose.yml"
 DOCKER_DEMO_PROJECT ?= kmt-demo
-DOCKER_DEMO_COMPOSE = docker compose --env-file .env -p $(DOCKER_DEMO_PROJECT) -f $(DOCKER_COMPOSE_LOCAL_FILE) -f deployments/local/docker-compose.bundled.yml --profile bundled-kc
+# AMFA=1 adds the AMFA tenant: a third Keycloak with the Adaptive MFA plugin
+# and the AMFA engine (deployments/local/docker-compose.amfa.yml).
+DOCKER_DEMO_AMFA = $(filter 1 true yes,$(AMFA))
+DOCKER_DEMO_FILES = -f $(DOCKER_COMPOSE_LOCAL_FILE) -f deployments/local/docker-compose.bundled.yml -f deployments/local/docker-compose.amfa.yml
+DOCKER_DEMO_COMPOSE = BUNDLED_AMFA=$(if $(DOCKER_DEMO_AMFA),true,false) docker compose --env-file .env -p $(DOCKER_DEMO_PROJECT) $(DOCKER_DEMO_FILES) --profile bundled-kc $(if $(DOCKER_DEMO_AMFA),--profile amfa)
+# Stop, down, clean and logs also reach AMFA containers from an earlier AMFA=1 start.
+DOCKER_DEMO_COMPOSE_ALL = docker compose --env-file .env -p $(DOCKER_DEMO_PROJECT) $(DOCKER_DEMO_FILES) --profile bundled-kc --profile amfa
+# One .env value, without its quotes; .env is not sourced, so nothing in it runs.
+DOCKER_DEMO_ENV_VALUE = $$(sed -n 's/^$(1)=//p' .env | sed "s/^'\(.*\)'$$/\1/; s/^\"\(.*\)\"$$/\1/")
 # A restarted setup container keeps the logs of its earlier runs, so a failure prints only this run's.
 DOCKER_DEMO_UP = since=$$(date -u +%Y-%m-%dT%H:%M:%SZ); \
 	$(DOCKER_DEMO_COMPOSE) up -d $(1) --wait --wait-timeout 600 || \
@@ -201,29 +209,51 @@ docker-config-check:
 	@test -f config.yaml || { echo "Missing config.yaml. Create it from the example and add your Keycloak tenants:"; echo "  cp config.yaml.example config.yaml"; exit 1; }
 
 .PHONY: docker-down
-.PHONY: docker-demo-env docker-demo-up docker-demo-down docker-demo-restart docker-demo-clean docker-demo-logs
+.PHONY: docker-demo-env docker-demo-up docker-demo-down docker-demo-restart docker-demo-clean docker-demo-logs docker-demo-amfa-seed
 # Creates .env from the example if needed and fills the demo's empty secrets
 # and dashboard password. Values already set are never changed.
 docker-demo-env:
 	@sh deployments/local/demo-env.sh .env .env.example $(DOCKER_DEMO_PROJECT)
 
-docker-demo-up: docker-demo-env ## Build and start the self-contained two-Keycloak demo
+docker-demo-up: docker-demo-env ## Build and start the self-contained demo (AMFA=1 adds the AMFA tenant)
 	@$(call DOCKER_DEMO_UP,--build)
-	@port=$$(sed -n 's/^BUNDLED_WEB_PORT=//p' .env); \
+	@$(if $(DOCKER_DEMO_AMFA),$(MAKE) --no-print-directory docker-demo-amfa-seed)
+	@port=$(call DOCKER_DEMO_ENV_VALUE,BUNDLED_WEB_PORT); \
 	echo "Dashboard: http://localhost:$${port:-17880} (user and password: MONITORING_AUTH_SIMPLE_DEFAULT_USER and _PASS in .env)"
+	@$(if $(DOCKER_DEMO_AMFA),kc=$(call DOCKER_DEMO_ENV_VALUE,BUNDLED_AMFA_KC_PORT); mail=$(call DOCKER_DEMO_ENV_VALUE,BUNDLED_AMFA_MAIL_PORT); \
+	echo "AMFA: log in at http://localhost:$${kc:-18082}/realms/test-amfa/account as alice / Passw0rd!; email codes at http://localhost:$${mail:-18025}")
 
 docker-demo-down: docker-env-check ## Stop the bundled demo, retaining its data
-	@$(DOCKER_DEMO_COMPOSE) down
+	@$(DOCKER_DEMO_COMPOSE_ALL) down
 
-docker-demo-restart: docker-env-check ## Restart the bundled demo with retained data
-	@$(DOCKER_DEMO_COMPOSE) stop
+docker-demo-restart: docker-env-check ## Restart the bundled demo with retained data (AMFA=1 for the AMFA tenant)
+	@$(DOCKER_DEMO_COMPOSE_ALL) stop
 	@$(call DOCKER_DEMO_UP,--no-build)
+	@$(if $(DOCKER_DEMO_AMFA),$(MAKE) --no-print-directory docker-demo-amfa-seed)
 
 docker-demo-clean: docker-env-check ## Stop the bundled demo and remove only its volumes
-	@$(DOCKER_DEMO_COMPOSE) down -v
+	@$(DOCKER_DEMO_COMPOSE_ALL) down -v
 
 docker-demo-logs: docker-env-check ## Follow bundled demo logs
-	@$(DOCKER_DEMO_COMPOSE) logs -f
+	@$(DOCKER_DEMO_COMPOSE_ALL) logs -f
+
+# Seeds the AMFA tenant once, so its KPI cards and map have data: 15 demo-*
+# users in test-amfa and about 730 logins over 30 days in the AMFA database.
+# Skipped when the database already has the demo rows.
+docker-demo-amfa-seed: docker-env-check
+	@container=$(DOCKER_DEMO_PROJECT)-amfa-postgres; \
+	seeded=$$(docker exec $$container psql -U amfa -d adaptive_mfa -tAc \
+		"SELECT count(*) FROM auth_process WHERE id::text LIKE 'de300001-%'" 2>/dev/null); \
+	if [ "$${seeded:-0}" != 0 ]; then echo "AMFA demo data already seeded"; exit 0; fi; \
+	kc=$(call DOCKER_DEMO_ENV_VALUE,BUNDLED_AMFA_KC_PORT); \
+	user=$(call DOCKER_DEMO_ENV_VALUE,BUNDLED_KC_ADMIN_USER); \
+	log=$$(mktemp); \
+	if SKIP_RO_ROLE=1 AMFA_CONTAINER=$$container AMFA_SUPERUSER=amfa KC_REALM=test-amfa \
+		KC_URL=http://localhost:$${kc:-18082} KC_ADMIN=$${user:-admin} \
+		KC_ADMIN_PASSWORD=$(call DOCKER_DEMO_ENV_VALUE,BUNDLED_KC_ADMIN_PASSWORD) \
+		bash deployments/local/amfa-demo/seed.sh > $$log 2>&1; then \
+		rm -f $$log; echo "AMFA demo data seeded: 15 demo-* users, about 730 logins over 30 days"; \
+	else status=$$?; cat $$log; rm -f $$log; exit $$status; fi
 
 docker-down: docker-env-check ## Stop all services
 	@docker compose -f $(DOCKER_COMPOSE_LOCAL_FILE) down

@@ -31,6 +31,11 @@ AMFA_SUPERUSER="${AMFA_SUPERUSER:-keycloak}"
 # appears in the instructions printed at the end. There is no default: a
 # password every checkout shares is not one.
 RO_PASSWORD="${RO_PASSWORD:-}"
+# Set to 1 when KMT reads AMFA over its monitoring API rather than the
+# database, as the bundled demo's AMFA tenant does: no kmt_ro role is created,
+# RO_PASSWORD is not needed, and the config instructions at the end are left
+# out.
+SKIP_RO_ROLE="${SKIP_RO_ROLE:-}"
 
 # The engine stack serves Keycloak over HTTPS with an mkcert certificate.
 # curl does not always read the store `mkcert -install` writes to, so pass it
@@ -93,7 +98,7 @@ kc_token() {
 # ---------------------------------------------------------------------------
 echo "==> Checking prerequisites"
 
-[ -n "$RO_PASSWORD" ] || die "set RO_PASSWORD to the password the kmt_ro role should get, e.g. RO_PASSWORD=\$(openssl rand -hex 16)"
+[ -n "$SKIP_RO_ROLE" ] || [ -n "$RO_PASSWORD" ] || die "set RO_PASSWORD to the password the kmt_ro role should get, e.g. RO_PASSWORD=\$(openssl rand -hex 16)"
 
 docker inspect -f '{{.State.Running}}' "$AMFA_CONTAINER" 2>/dev/null | grep -q true \
     || die "AMFA Postgres container '${AMFA_CONTAINER}' is not running"
@@ -152,13 +157,15 @@ for i in "${!USERNAMES[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
-echo "==> Creating the kmt_ro role"
+if [ -z "$SKIP_RO_ROLE" ]; then
+    echo "==> Creating the kmt_ro role"
 
-docker exec -i "$AMFA_CONTAINER" \
-    psql -v ON_ERROR_STOP=1 -q -U "$AMFA_SUPERUSER" -d "$AMFA_DB" \
-    -v ro_password="$RO_PASSWORD" \
-    -v db="$AMFA_DB" \
-    < "${SCRIPT_DIR}/01-create-ro-role.sql"
+    docker exec -i "$AMFA_CONTAINER" \
+        psql -v ON_ERROR_STOP=1 -q -U "$AMFA_SUPERUSER" -d "$AMFA_DB" \
+        -v ro_password="$RO_PASSWORD" \
+        -v db="$AMFA_DB" \
+        < "${SCRIPT_DIR}/01-create-ro-role.sql"
+fi
 
 # ---------------------------------------------------------------------------
 echo "==> Seeding AMFA demo data"
@@ -170,6 +177,11 @@ docker exec -i "$AMFA_CONTAINER" \
     < "${SCRIPT_DIR}/02-seed-demo-data.sql"
 
 # ---------------------------------------------------------------------------
+if [ -n "$SKIP_RO_ROLE" ]; then
+    echo "==> Done seeding."
+    exit 0
+fi
+
 # The Alembic head this database is actually on. Printing a hardcoded value
 # instead sends you to config.yaml with the wrong expected_schema_version,
 # which KMT then reports as a schema-check warning. Absent on AMFA builds

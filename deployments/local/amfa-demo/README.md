@@ -5,7 +5,9 @@ the AMFA rows of the table) with plausible login data from a local AMFA engine
 stack, so the feature can be demoed or eyeballed without driving hundreds of
 real logins through Keycloak.
 The defaults fit the [open-source AMFA engine](https://github.com/DefensePoint/keycloak-adaptive-mfa-engine)'s
-Compose stack (`config/keycloak`), with its `test-amfa` realm.
+Compose stack (`config/keycloak`), with its `test-amfa` realm. The bundled
+demo's AMFA tenant (`make docker-demo-up AMFA=1`, see [Local setup](../../../docs/setup.md#with-amfa))
+runs this seed by itself on its first start.
 
 ```bash
 export CURL_CA_BUNDLE="$(mkcert -CAROOT)/rootCA.pem"   # its Keycloak uses an mkcert certificate
@@ -156,7 +158,9 @@ KC_ADMIN_PASSWORD  admin
 KC_CLIENT_ID       (empty; set it and KC_CLIENT_SECRET to use a service account instead)
 KC_REALM           test-amfa
 KMT_CONTAINER      kmt-server
-RO_PASSWORD        (seed.sh only, required)
+RO_PASSWORD        (seed.sh only, required unless SKIP_RO_ROLE is set)
+SKIP_RO_ROLE       (seed.sh only; 1 when KMT reads AMFA over its monitoring API:
+                    no kmt_ro role, no RO_PASSWORD, no config instructions)
 ```
 
 The realm matters: it is written into every row as
