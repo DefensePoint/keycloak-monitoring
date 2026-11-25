@@ -13,6 +13,7 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 SCRIPT = Path(__file__).resolve().parents[1] / "setup-keycloak.py"
+DEMO_REALM = json.loads((Path(__file__).resolve().parents[1] / "demo-realm.json").read_text())
 SPEC = importlib.util.spec_from_file_location("setup_keycloak", SCRIPT)
 setup = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(setup)
@@ -36,6 +37,11 @@ class FakeKeycloak:
         # 26.6.9): Admin API calls then need it among the client's default scopes.
         self.admin_api_scope = False
         self.default_scopes = set()
+        self.partial_imports = []
+        self.demo_logins = []
+        # Keycloak 26.7 answers a refused password grant with 400; older builds
+        # answered 401.
+        self.demo_refused_status = 400
         state = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -56,7 +62,9 @@ class FakeKeycloak:
                 data = {k: v[0] for k, v in parse_qs(raw.decode()).items()} if form else json.loads(raw or "null")
                 state.requests.append((self.command, path, data))
                 status, response = 200, {}
-                if path.endswith("/token"):
+                if path == "/realms/demo/protocol/openid-connect/token":
+                    status, response = state.demo_login(data)
+                elif path.endswith("/token"):
                     if state.token_failures:
                         status = state.token_failures.pop(0)
                         if status == "reset":
@@ -120,6 +128,13 @@ class FakeKeycloak:
                     else:
                         state.realms[data["realm"]] = data
                         status = 201
+                elif path == "/admin/realms/demo/partialImport" and self.command == "POST":
+                    state.partial_imports.append(data)
+                    realm = state.realms["demo"]
+                    for kind, key in (("users", "username"), ("clients", "clientId")):
+                        have = {item[key] for item in realm.get(kind, [])}
+                        realm.setdefault(kind, []).extend(i for i in data.get(kind, []) if i[key] not in have)
+                    response = {"added": len(data.get("users", [])) + len(data.get("clients", []))}
                 elif path.endswith("/events/config"):
                     state.events[path.split("/")[3]] = data
                     status = 204
@@ -135,6 +150,20 @@ class FakeKeycloak:
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def demo_login(self, data):
+        """A password grant in the demo realm, as Keycloak answers it."""
+        realm = self.realms.get("demo", {})
+        clients = {c["clientId"]: c for c in realm.get("clients", [])}
+        users = {u["username"]: u for u in realm.get("users", [])}
+        user = users.get(data.get("username"))
+        client = clients.get(data.get("client_id"))
+        ok = (client is not None and client.get("directAccessGrantsEnabled") and user is not None
+              and any(c.get("value") == data.get("password") for c in user.get("credentials", [])))
+        self.demo_logins.append((data.get("username"), ok))
+        if ok:
+            return 200, {"access_token": "user-token"}
+        return self.demo_refused_status, {"error": "invalid_grant", "error_description": "Invalid user credentials"}
 
     def close(self):
         self.server.shutdown()
@@ -283,6 +312,104 @@ class ProvisioningTests(unittest.TestCase):
         self.assertEqual(other.client["secret"], "two-$secret")
         self.assertNotIn("secret", output.getvalue())
         self.assertIn("Keycloak 2", output.getvalue())
+
+
+class DemoRealmTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = FakeKeycloak()
+        self.addCleanup(self.fake.close)
+        self.client = setup.Keycloak(self.fake.url)
+
+    def provision(self):
+        self.client.login("admin", "admin-pass", attempts=1)
+        self.client.provision("first-$secret")
+
+    def demo_users(self):
+        return [u["username"] for u in DEMO_REALM["users"]]
+
+    def test_export_is_a_ready_demo_realm(self):
+        self.assertEqual(DEMO_REALM["realm"], "demo")
+        self.assertTrue(DEMO_REALM["enabled"])
+        self.assertTrue(DEMO_REALM["eventsEnabled"])
+        self.assertTrue(DEMO_REALM["adminEventsEnabled"])
+        self.assertTrue({"LOGIN", "LOGIN_ERROR", "LOGOUT"} <= set(DEMO_REALM["enabledEventTypes"]))
+        self.assertGreaterEqual(len(DEMO_REALM["users"]), 3)
+        for user in DEMO_REALM["users"]:
+            self.assertTrue(user["enabled"], user["username"])
+            self.assertEqual(user.get("requiredActions", []), [], user["username"])
+            # An imported user gets only the roles listed for it, not the realm's
+            # default roles, and without them it cannot use its account console.
+            self.assertIn("default-roles-demo", user.get("realmRoles", []), user["username"])
+            [credential] = user["credentials"]
+            self.assertEqual(credential["type"], "password")
+            self.assertFalse(credential["temporary"])
+        [app] = [c for c in DEMO_REALM["clients"] if c["clientId"] == "demo-app"]
+        self.assertTrue(app["publicClient"])
+        self.assertTrue(app["directAccessGrantsEnabled"])
+
+    def test_new_demo_realm_is_created_from_the_export(self):
+        self.provision()
+        demo = self.fake.realms["demo"]
+        self.assertEqual([u["username"] for u in demo["users"]], self.demo_users())
+        self.assertIn("demo-app", [c["clientId"] for c in demo["clients"]])
+        self.assertEqual(self.fake.partial_imports, [])
+
+    def test_existing_empty_demo_realm_gets_users_and_client_without_recreating(self):
+        # The realm an earlier setup created: no users, no demo client.
+        self.fake.realms["demo"] = {"realm": "demo", "enabled": True}
+        self.provision()
+        self.provision()
+        creates = [r for r in self.fake.requests if r[:2] == ("POST", "/admin/realms")]
+        self.assertEqual(creates, [])
+        self.assertEqual(len(self.fake.partial_imports), 2)
+        self.assertTrue(all(i["ifResourceExists"] == "SKIP" for i in self.fake.partial_imports))
+        demo = self.fake.realms["demo"]
+        self.assertEqual([u["username"] for u in demo["users"]], self.demo_users())
+        self.assertEqual([c["clientId"] for c in demo["clients"]], ["demo-app"])
+
+    def test_activity_logs_every_demo_user_in_and_adds_failed_logins(self):
+        self.provision()
+        succeeded = [name for name, ok in self.fake.demo_logins if ok]
+        failed = [name for name, ok in self.fake.demo_logins if not ok]
+        self.assertEqual(sorted(succeeded), sorted(self.demo_users()))
+        # A wrong password for a real user and a user Keycloak does not have.
+        self.assertTrue(any(name in self.demo_users() for name in failed))
+        self.assertTrue(any(name not in self.demo_users() for name in failed))
+
+    def test_refused_logins_count_with_either_status_keycloak_uses(self):
+        for status in (400, 401):
+            self.fake.demo_refused_status = status
+            self.fake.demo_logins.clear()
+            self.provision()
+            self.assertEqual(sum(1 for _, ok in self.fake.demo_logins if not ok), 2, status)
+
+    def test_a_demo_user_whose_password_was_changed_is_skipped_with_a_warning(self):
+        # Changing a demo user's password in Keycloak is a normal thing to try
+        # in a demo; the next start must not fail on it.
+        self.provision()
+        self.fake.realms["demo"]["users"][0]["credentials"][0]["value"] = "changed"
+        self.fake.demo_logins.clear()
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            logins, failed = self.client.generate_activity()
+        self.assertEqual(logins, len(self.demo_users()) - 1)
+        self.assertEqual(failed, 2)
+        self.assertIn(self.demo_users()[0], output.getvalue())
+        self.assertNotIn("changed", output.getvalue())
+
+    def test_a_server_error_during_activity_still_fails_setup(self):
+        self.provision()
+        self.fake.demo_refused_status = 500
+        self.fake.realms["demo"]["users"][0]["credentials"][0]["value"] = "changed"
+        with self.assertRaisesRegex(setup.SetupError, "HTTP 500"):
+            self.client.generate_activity()
+
+    def test_activity_output_shows_no_passwords(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.provision()
+        for user in DEMO_REALM["users"]:
+            self.assertNotIn(user["credentials"][0]["value"], output.getvalue())
 
 
 if __name__ == "__main__":

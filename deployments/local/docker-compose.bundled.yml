@@ -64,6 +64,8 @@ services:
       BUNDLED_KC2_CLIENT_SECRET: ${BUNDLED_KC2_CLIENT_SECRET:?Set BUNDLED_KC2_CLIENT_SECRET in .env}
     volumes:
       - ./setup-keycloak.py:/setup/setup-keycloak.py:ro
+      # Imported into each Keycloak as the demo realm.
+      - ./demo-realm.json:/setup/demo-realm.json:ro
     networks:
       - kmt-network
     depends_on:

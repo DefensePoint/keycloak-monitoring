@@ -3,6 +3,7 @@ package local
 import (
 	"github.com/DefensePoint/keycloak-monitoring/internal/config"
 	"testing"
+	"time"
 )
 
 func TestBundledDemoConfigUsesEnvironmentSecrets(t *testing.T) {
@@ -46,5 +47,20 @@ func TestBundledDemoConfigUsesEnvironmentSecrets(t *testing.T) {
 	}
 	if cfg.Web.Server.Port != 7880 || cfg.Web.Server.APIHostURL != "http://api-server:7888" {
 		t.Fatal("demo web proxy configuration is incorrect")
+	}
+	// The demo shows alerts: both checkers on, every check at its default, and
+	// polled often enough that findings appear within a minute of startup.
+	checks := cfg.Keycloak.Global
+	if !checks.ConfigChecker.Enabled || checks.ConfigChecker.PollInterval != time.Minute {
+		t.Fatal("demo configuration checks are not on with a one-minute poll")
+	}
+	if !checks.ConfigChecker.Checks.RealmSecurity.Enabled {
+		t.Fatal("demo realm security check is not on")
+	}
+	if !checks.EventChecker.Enabled || checks.EventChecker.PollInterval != time.Minute {
+		t.Fatal("demo event checks are not on with a one-minute poll")
+	}
+	if !checks.EventChecker.Checks.LoginError.Enabled {
+		t.Fatal("demo login error check is not on")
 	}
 }

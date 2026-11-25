@@ -40,12 +40,34 @@ are healthy. Select each tenant and check its `master` and `demo` realms. Event
 logging is enabled, so monitoring client authentications also produce events.
 The Keycloak consoles use `admin` and `BUNDLED_KC_ADMIN_PASSWORD` by default.
 
+The dashboard has data from the start. Each Keycloak's `demo` realm comes from
+`deployments/local/demo-realm.json` with three users, and every start of the
+demo logs them in once and adds two failed logins, a wrong password and an
+unknown user, so the Events page and the metrics show activity. The
+configuration and event checks are on (`config.bundled.yaml`, polled every
+minute), so within a minute the Alerts page lists what they find in the demo
+Keycloaks, such as brute force protection being off. To create more activity,
+log in at `http://localhost:18080/realms/demo/account` (or `18081` for
+Keycloak 2) as one of the demo users:
+
+| User | Password |
+| --- | --- |
+| `demo-alice` | `Demo-Alice-2026!` |
+| `demo-bob` | `Demo-Bob-2026!` |
+| `demo-carol` | `Demo-Carol-2026!` |
+
+These are fixed, published passwords for a Keycloak bound to localhost; never
+reuse the realm file outside the demo. If you change one in Keycloak, the next
+start skips that user's login with a warning and starts as usual.
+
 The setup container waits for Keycloak authentication to become available,
 creates or updates each confidential `monitoring-service` client, adds the
 `kc-admin-api` client scope to it when the Keycloak build has one (RHBK 26.6.9
-and later), assigns its service account the master `admin` role, creates a
-`demo` realm, and verifies realm/user/client/event reads and server information
-access. The broad `admin`
+and later), assigns its service account the master `admin` role, imports the
+`demo` realm, verifies realm/user/client/event reads and server information
+access, and then logs the demo users in. A `demo` realm kept from an earlier
+demo gets the users and the `demo-app` client it lacks; nothing it already has
+is changed. The broad `admin`
 role is the existing deployment choice described in [Keycloak setup](keycloak-setup.md);
 this disposable local demo is not a production deployment template.
 

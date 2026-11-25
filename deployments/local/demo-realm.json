@@ -1,0 +1,54 @@
+{
+  "realm": "demo",
+  "displayName": "KMT demo",
+  "enabled": true,
+  "sslRequired": "external",
+  "eventsEnabled": true,
+  "eventsExpiration": 86400,
+  "enabledEventTypes": ["CLIENT_LOGIN", "CLIENT_LOGIN_ERROR", "LOGIN", "LOGIN_ERROR", "LOGOUT"],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": false,
+  "users": [
+    {
+      "username": "demo-alice",
+      "email": "alice@demo.example",
+      "firstName": "Alice",
+      "lastName": "Demo",
+      "emailVerified": true,
+      "enabled": true,
+      "realmRoles": ["default-roles-demo"],
+      "credentials": [{ "type": "password", "value": "Demo-Alice-2026!", "temporary": false }]
+    },
+    {
+      "username": "demo-bob",
+      "email": "bob@demo.example",
+      "firstName": "Bob",
+      "lastName": "Demo",
+      "emailVerified": true,
+      "enabled": true,
+      "realmRoles": ["default-roles-demo"],
+      "credentials": [{ "type": "password", "value": "Demo-Bob-2026!", "temporary": false }]
+    },
+    {
+      "username": "demo-carol",
+      "email": "carol@demo.example",
+      "firstName": "Carol",
+      "lastName": "Demo",
+      "emailVerified": true,
+      "enabled": true,
+      "realmRoles": ["default-roles-demo"],
+      "credentials": [{ "type": "password", "value": "Demo-Carol-2026!", "temporary": false }]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "demo-app",
+      "name": "KMT demo app",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true
+    }
+  ]
+}
