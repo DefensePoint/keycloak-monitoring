@@ -1,0 +1,167 @@
+# The bundled demo's optional AMFA tenant: a third Keycloak with the Adaptive
+# MFA plugin and admin UI, the AMFA engine, its PostgreSQL and Redis, and a
+# Mailpit that catches the email step-up codes. Every service here is in the
+# `amfa` profile, which make docker-demo-up AMFA=1 turns on; without it this
+# file adds nothing.
+#
+# One URL for everyone: the engine verifies the plugin's tokens by fetching
+# the signing keys from the token issuer, http://localhost:<port> (the realm's
+# frontendUrl). Keycloak listens on that same port inside its container, and
+# the engine runs in Keycloak's network namespace, so the browser on the host,
+# the plugin and the engine all reach Keycloak at that address, with no hosts
+# file entry and no certificate. If keycloak-amfa restarts on its own, the
+# engine loses its network until the next make docker-demo-up.
+
+services:
+  amfa-postgres:
+    image: postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    container_name: ${COMPOSE_PROJECT_NAME:-kmt-demo}-amfa-postgres
+    profiles: [amfa]
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: amfa
+      POSTGRES_PASSWORD: ${BUNDLED_AMFA_DB_PASSWORD:-}
+    volumes:
+      - kmt-amfa-postgres-data:/var/lib/postgresql/data
+      - ./amfa/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    networks:
+      - kmt-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amfa -d adaptive_mfa"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  amfa-redis:
+    image: redis:7-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+    container_name: ${COMPOSE_PROJECT_NAME:-kmt-demo}-amfa-redis
+    profiles: [amfa]
+    networks:
+      - kmt-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # The test-amfa realm sends its email codes to host "mailpit", port 1025.
+  mailpit:
+    image: axllent/mailpit:v1.34.0@sha256:23a2ef85bc50853ab3093645d1d64679afd8887e89da5e48a88940c172591a4e
+    container_name: ${COMPOSE_PROJECT_NAME:-kmt-demo}-mailpit
+    profiles: [amfa]
+    ports:
+      - "127.0.0.1:${BUNDLED_AMFA_MAIL_PORT:-18025}:8025"
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    networks:
+      - kmt-network
+
+  keycloak-amfa:
+    build:
+      context: ./amfa
+      dockerfile: Dockerfile.keycloak
+    image: kmt-demo-keycloak-amfa:local
+    container_name: ${COMPOSE_PROJECT_NAME:-kmt-demo}-keycloak-amfa
+    profiles: [amfa]
+    command: start-dev --import-realm --http-port=${BUNDLED_AMFA_KC_PORT:-18082}
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${BUNDLED_KC_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${BUNDLED_KC_ADMIN_PASSWORD:-}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://amfa-postgres:5432/keycloak
+      KC_DB_USERNAME: amfa
+      KC_DB_PASSWORD: ${BUNDLED_AMFA_DB_PASSWORD:-}
+      KC_HOSTNAME_STRICT: "false"
+      KC_HEALTH_ENABLED: "true"
+      # Keycloak 26.6.3's dev mode fails in the workflows feature.
+      KC_FEATURES_DISABLED: workflows
+      JAVA_OPTS_KC_HEAP: -Xms128m -Xmx512m
+      # The realm's frontendUrl is http://localhost:${BUNDLED_AMFA_KC_PORT}.
+      BUNDLED_AMFA_KC_PORT: ${BUNDLED_AMFA_KC_PORT:-18082}
+      # Must match the engine's AMFA_WEBHOOK_AUDIENCE.
+      AMFA_WEBHOOK_AUDIENCE: amfa-webhook-event
+    volumes:
+      - ./amfa/test-amfa-realm.json:/opt/keycloak/data/import/test-amfa-realm.json:ro
+    ports:
+      # The same port inside and out, so the issuer is one URL for everyone.
+      - "127.0.0.1:${BUNDLED_AMFA_KC_PORT:-18082}:${BUNDLED_AMFA_KC_PORT:-18082}"
+    mem_limit: 768m
+    networks:
+      - kmt-network
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/${BUNDLED_AMFA_KC_PORT:-18082} && exit 0 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 120s
+    depends_on:
+      amfa-postgres:
+        condition: service_healthy
+
+  amfa-engine:
+    # The published engine. The image is built for linux/amd64 only; on an
+    # ARM machine, such as Apple silicon, Docker runs it emulated, which makes
+    # its first start slower.
+    image: ghcr.io/defensepoint/keycloak-adaptive-mfa-engine:1.2.0@sha256:a638af35c523b2c1fcc91cf08a96c12cd4c6ee49a0c2f26b79c54c2db465c3a4
+    platform: linux/amd64
+    container_name: ${COMPOSE_PROJECT_NAME:-kmt-demo}-amfa-engine
+    profiles: [amfa]
+    network_mode: service:keycloak-amfa
+    environment:
+      POSTGRES_HOST: amfa-postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: adaptive_mfa
+      POSTGRES_USER: amfa
+      POSTGRES_PASSWORD: ${BUNDLED_AMFA_DB_PASSWORD:-}
+      REDIS_HOST: amfa-redis
+      REDIS_PORT: "6379"
+      # localhost: the plugin's tokens, whose issuer is the realm's frontendUrl.
+      # keycloak-amfa: KMT's, which it gets from the master realm by that name.
+      OIDC_TRUSTED_BASE_URLS: http://localhost:${BUNDLED_AMFA_KC_PORT:-18082},http://keycloak-amfa:${BUNDLED_AMFA_KC_PORT:-18082}
+      # KMT reads every realm's AMFA data with its master-realm monitoring client.
+      MONITORING_TRUSTED_READERS: http://keycloak-amfa:${BUNDLED_AMFA_KC_PORT:-18082}/realms/master|monitoring-service
+      OIDC_EXPECTED_AUDIENCE: amfa
+      OIDC_VERIFY_AUDIENCE: "true"
+      AMFA_WEBHOOK_AUDIENCE: amfa-webhook-event
+      # 1.2.0 defaults to 4 decisions per user a minute; past that a login takes
+      # the realm's fallback risk level instead of the engine's decision.
+      RATE_LIMIT: "true"
+      RATE_LIMIT_MAX_REQ: "30"
+      # Each worker holds its own copy of the bundled IP data in 1.2.0, about
+      # 250 MB; two are plenty for a demo.
+      WORKERS: "2"
+      LOG_LEVEL: INFO
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:80/health', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+    depends_on:
+      keycloak-amfa:
+        condition: service_started
+      amfa-postgres:
+        condition: service_healthy
+      amfa-redis:
+        condition: service_healthy
+
+  keycloak-setup:
+    environment:
+      BUNDLED_AMFA: ${BUNDLED_AMFA:-false}
+      BUNDLED_KC3_URL: http://keycloak-amfa:${BUNDLED_AMFA_KC_PORT:-18082}
+      BUNDLED_KC3_CLIENT_SECRET: ${BUNDLED_KC3_CLIENT_SECRET:-}
+    depends_on:
+      keycloak-amfa:
+        condition: service_healthy
+        required: false
+
+  api-server:
+    depends_on:
+      # KMT connects to AMFA and checks its schema once, at startup.
+      amfa-engine:
+        condition: service_healthy
+        required: false
+
+volumes:
+  kmt-amfa-postgres-data:

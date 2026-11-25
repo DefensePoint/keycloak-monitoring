@@ -94,3 +94,46 @@ func TestBundledDemo_ServicesGetTheDemoDatabasePassword(t *testing.T) {
 		t.Fatal("no demo service sets a database password; this test checks nothing")
 	}
 }
+
+// The AMFA tenant in config.bundled.yaml is switched by ${BUNDLED_AMFA} and
+// addressed with ${BUNDLED_AMFA_KC_PORT}. Neither is in .env, so every demo
+// service that loads that file must get both from the demo Compose file, with
+// a default: with only the two base files and no AMFA overlay, an unset
+// ${BUNDLED_AMFA} stays literal text, which is not a boolean.
+func TestBundledDemo_EveryConfigReaderGetsTheAmfaSwitch(t *testing.T) {
+	raw, err := os.ReadFile("docker-compose.bundled.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Services map[string]struct {
+			Volumes []string `yaml:"volumes"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	envs := serviceEnvironments(t, "docker-compose.bundled.yml")
+	readers := 0
+	for name, svc := range doc.Services {
+		mounts := false
+		for _, v := range svc.Volumes {
+			mounts = mounts || strings.HasPrefix(v, "./config.bundled.yaml:")
+		}
+		if !mounts {
+			continue
+		}
+		readers++
+		for key, want := range map[string]string{
+			"BUNDLED_AMFA":         "${BUNDLED_AMFA:-false}",
+			"BUNDLED_AMFA_KC_PORT": "${BUNDLED_AMFA_KC_PORT:-18082}",
+		} {
+			if got := envs[name].env[key]; got != want {
+				t.Errorf("%s loads config.bundled.yaml but gets %s=%q, want %q", name, key, got, want)
+			}
+		}
+	}
+	if readers < 3 {
+		t.Fatalf("expected the API, MCP and web servers to load config.bundled.yaml, found %d", readers)
+	}
+}

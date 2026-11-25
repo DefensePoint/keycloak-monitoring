@@ -18,6 +18,9 @@ var demoEnvKeys = []string{
 	"BUNDLED_KC1_CLIENT_SECRET",
 	"BUNDLED_KC2_CLIENT_SECRET",
 	"BUNDLED_SESSION_SECRET",
+	// The AMFA tenant's (make docker-demo-up AMFA=1).
+	"BUNDLED_KC3_CLIENT_SECRET",
+	"BUNDLED_AMFA_DB_PASSWORD",
 }
 
 func runDemoEnv(t *testing.T, dir string) string {
@@ -172,5 +175,75 @@ func TestDemoEnv_FillsValuesWrittenAsEmptyQuotes(t *testing.T) {
 		if v := values[key]; v == "" || v == "''" || v == `""` {
 			t.Fatalf("%s written as empty quotes was not filled: %q", key, v)
 		}
+	}
+}
+
+// runDemoEnvWithVolumes runs the script with a docker command that lists the
+// given volume names, the only docker call the script makes.
+func runDemoEnvWithVolumes(t *testing.T, dir string, volumes ...string) string {
+	t.Helper()
+	bin := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fake := "#!/bin/sh\nprintf '%s\\n' " + strings.Join(append([]string{"''"}, volumes...), " ") + "\n"
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "demo-env.sh", filepath.Join(dir, ".env"), "../../.env.example", "kmt-demo")
+	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin"}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("demo-env.sh failed: %v\n%s", err, out)
+	}
+	return string(out)
+}
+
+func TestDemoEnv_WarnsOnlyAboutVolumesWhosePasswordsItGenerated(t *testing.T) {
+	setAll := func(t *testing.T, dir string, except ...string) {
+		raw, err := os.ReadFile("../../.env.example")
+		if err != nil {
+			t.Fatal(err)
+		}
+		env := string(raw)
+		skip := map[string]bool{}
+		for _, key := range except {
+			skip[key] = true
+		}
+		for _, key := range demoEnvKeys {
+			if !skip[key] {
+				env = strings.Replace(env, key+"=\n", key+"=already-set-1A!\n", 1)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(env), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	demoVolumes := []string{"kmt-demo_kmt-postgres-data", "kmt-demo_kmt-keycloak-db-1-data"}
+	amfaVolume := "kmt-demo_kmt-amfa-postgres-data"
+
+	for _, c := range []struct {
+		name    string
+		missing []string
+		volumes []string
+		warn    bool
+	}{
+		// An .env from before the AMFA tenant: its AMFA values are new, but
+		// there is no AMFA database for them to disagree with.
+		{"new AMFA values, no AMFA volume", demoEnvKeys[6:], demoVolumes, false},
+		{"new AMFA values, AMFA volume kept", demoEnvKeys[6:], append(demoVolumes, amfaVolume), true},
+		{"new demo database password, demo volumes kept", []string{"BUNDLED_DB_PASSWORD"}, demoVolumes, true},
+		{"new Keycloak admin password, only the AMFA volume kept", []string{"BUNDLED_KC_ADMIN_PASSWORD"}, []string{amfaVolume}, true},
+		{"new client secret only", []string{"BUNDLED_KC3_CLIENT_SECRET"}, append(demoVolumes, amfaVolume), false},
+		{"new demo database password, no volumes", []string{"BUNDLED_DB_PASSWORD"}, nil, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			setAll(t, dir, c.missing...)
+			out := runDemoEnvWithVolumes(t, dir, c.volumes...)
+			if got := strings.Contains(out, "WARNING"); got != c.warn {
+				t.Fatalf("warning = %v, want %v:\n%s", got, c.warn, out)
+			}
+		})
 	}
 }

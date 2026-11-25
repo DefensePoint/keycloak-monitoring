@@ -173,7 +173,9 @@ AMFA has no page of its own. It appears on the Events page (`/{tenantId}/events`
 
 ## Running an end-to-end smoke locally
 
-The following walks through a local smoke of KMT's bundled demo (`make docker-demo-up`, two Keycloaks) reading a local AMFA engine through its database. It assumes `keycloak-adaptive-mfa-engine` is checked out alongside `keycloak-monitoring`.
+The quickest local setup is the bundled demo's AMFA tenant: `make docker-demo-up AMFA=1` starts a Keycloak with the Adaptive MFA plugin, the AMFA engine and seeded AMFA data, and KMT reads it over the monitoring API (see [Local setup](setup.md#with-amfa)).
+
+The following instead walks through a local smoke of KMT's bundled demo (`make docker-demo-up`, two Keycloaks) reading the engine's own quick-start stack through its database. It assumes `keycloak-adaptive-mfa-engine` is checked out alongside `keycloak-monitoring`.
 
 ### Prerequisites
 

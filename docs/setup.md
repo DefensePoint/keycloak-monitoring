@@ -60,6 +60,50 @@ These are fixed, published passwords for a Keycloak bound to localhost; never
 reuse the realm file outside the demo. If you change one in Keycloak, the next
 start skips that user's login with a warning and starts as usual.
 
+### With AMFA
+
+```bash
+make docker-demo-up AMFA=1
+```
+
+adds a third tenant, `Bundled Keycloak with AMFA`: a Keycloak 26.6 with the
+[Adaptive MFA](https://github.com/DefensePoint/keycloak-adaptive-mfa) plugin and
+its admin UI (1.1.0), the [AMFA engine](https://github.com/DefensePoint/keycloak-adaptive-mfa-engine)
+1.2.0 with its own PostgreSQL and Redis, and a Mailpit that catches the email
+step-up codes. Its `test-amfa` realm is the engine's 1.2.0 test realm
+(`deployments/local/amfa/test-amfa-realm.json`, with `frontendUrl`,
+`adaptiveAuthEndpoint` and the `test-login` redirect changed for this stack, and
+the user `alice` added). KMT reads it over the engine's monitoring API, with the
+AMFA mirror, the AMFA alert checks and the AMFA fallback check on. The first
+start seeds 15 `demo-*` users and about 730 AMFA logins over 30 days, so the
+Events page's AMFA KPI cards and map have data; later starts leave it alone.
+
+| What | Address |
+| --- | --- |
+| AMFA Keycloak and admin console | http://localhost:18082 |
+| A login through the AMFA flow | http://localhost:18082/realms/test-amfa/account, `alice` / `Passw0rd!` |
+| Email codes | http://localhost:18025 |
+
+On the Events page, select the tenant and the `test-amfa` realm: over the
+monitoring API, AMFA does not total its KPIs across all realms. A first login as
+`alice` gets Risk 3 and an email code, which appears in Mailpit; KMT then shows
+it with its risk level.
+
+It needs about 2 GB more Docker memory than the plain demo. The engine image is
+built for linux/amd64 only, so on an ARM machine, such as Apple silicon, Docker
+runs it emulated, and its first start is slower. Pass `AMFA=1` to every
+`docker-demo-up` and `docker-demo-restart`; without it the AMFA containers stay
+stopped and the tenant shows as disabled. `docker-demo-down`, `-clean` and
+`-logs` cover the AMFA containers either way.
+
+The browser, the plugin and the engine all reach this Keycloak at
+`http://localhost:18082`, the issuer of its tokens: Keycloak listens on that
+same port inside its container, and the engine runs in Keycloak's network
+namespace (`deployments/local/docker-compose.amfa.yml`). That is why no hosts
+file entry or certificate is needed. If the `keycloak-amfa` container restarts on
+its own, the engine loses its network until the next
+`make docker-demo-up AMFA=1`.
+
 The setup container waits for Keycloak authentication to become available,
 creates or updates each confidential `monitoring-service` client, adds the
 `kc-admin-api` client scope to it when the Keycloak build has one (RHBK 26.6.9
@@ -88,7 +132,11 @@ make docker-demo-up        # clean initialization using the retained .env
 
 The demo defaults avoid ports 8080/8081 and the ordinary platform's ports. Set
 `BUNDLED_KC1_PORT`, `BUNDLED_KC2_PORT`, `BUNDLED_API_PORT`, `BUNDLED_WEB_PORT`,
-or `BUNDLED_DB_PORT` in `.env` if those demo ports are occupied.
+`BUNDLED_DB_PORT`, `BUNDLED_AMFA_KC_PORT` or `BUNDLED_AMFA_MAIL_PORT` in `.env` if
+those demo ports are occupied. `BUNDLED_AMFA_KC_PORT` is also part of the
+`test-amfa` realm's address, which Keycloak imports once, on the first AMFA
+start: set it before that start, or run `make docker-demo-clean` after
+changing it.
 All demo ports bind only to localhost. For a second demo project use
 `make docker-demo-up DOCKER_DEMO_PROJECT=kmt-demo-other` with different ports;
 use that same project value for its down, restart and clean commands.

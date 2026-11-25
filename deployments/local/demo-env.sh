@@ -70,6 +70,9 @@ fill BUNDLED_KC_ADMIN_PASSWORD "$(hex 24)"
 fill BUNDLED_KC1_CLIENT_SECRET "$(hex 24)"
 fill BUNDLED_KC2_CLIENT_SECRET "$(hex 24)"
 fill BUNDLED_SESSION_SECRET "$(hex 24)"
+# Used only by the AMFA tenant (make docker-demo-up AMFA=1).
+fill BUNDLED_KC3_CLIENT_SECRET "$(hex 24)"
+fill BUNDLED_AMFA_DB_PASSWORD "$(hex 24)"
 
 [ -n "$generated" ] || exit 0
 
@@ -81,13 +84,24 @@ if [ "$password_generated" = yes ]; then
 fi
 
 # The database and Keycloak admin passwords are set when their volumes are
-# first created. New ones do not match volumes kept from an earlier demo.
+# first created. New ones do not match volumes kept from an earlier demo. The
+# Keycloak admin password is in every Keycloak database, the AMFA tenant's too;
+# the AMFA database password only in the AMFA database.
+volumes() {
+	command -v docker >/dev/null 2>&1 && docker volume ls -q 2>/dev/null
+}
+stale=no
 case $generated in
 *BUNDLED_DB_PASSWORD* | *BUNDLED_KC_ADMIN_PASSWORD*)
-	if command -v docker >/dev/null 2>&1 &&
-		docker volume ls -q 2>/dev/null | grep -q "^${project}_"; then
-		echo "WARNING: demo volumes from an earlier run exist (project $project), and their"
-		echo "passwords do not match the new values. Remove them with: make docker-demo-clean"
-	fi
+	volumes | grep -q "^${project}_" && stale=yes
 	;;
 esac
+case $generated in
+*BUNDLED_AMFA_DB_PASSWORD*)
+	volumes | grep -q "^${project}_kmt-amfa-postgres-data\$" && stale=yes
+	;;
+esac
+if [ "$stale" = yes ]; then
+	echo "WARNING: demo volumes from an earlier run exist (project $project), and their"
+	echo "passwords do not match the new values. Remove them with: make docker-demo-clean"
+fi

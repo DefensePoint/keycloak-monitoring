@@ -86,7 +86,7 @@ class Keycloak:
                 time.sleep(2)
         raise SetupError(f"did not become ready after {attempts} attempts, last error: {last_error}")
 
-    def provision(self, secret):
+    def provision(self, secret, amfa_audience=False):
         realm_path = "/admin/realms/master"
         client_query = "/clients?" + urlencode({"clientId": "monitoring-service"})
         clients = self.request("GET", realm_path + client_query)
@@ -104,6 +104,8 @@ class Keycloak:
             raise SetupError(f"expected one monitoring-service client, found {len(clients)}")
         client_id = clients[0]["id"]
         self.request("PUT", realm_path + "/clients/" + client_id, settings)
+        if amfa_audience:
+            self.add_amfa_audience(realm_path + "/clients/" + client_id)
         # Builds with the kc-admin-api client scope (RHBK 26.6.9 and later) reject
         # Admin API tokens without it, and only admin-cli gets it by default.
         scopes = self.request("GET", realm_path + "/client-scopes")
@@ -122,6 +124,22 @@ class Keycloak:
             })
         self.verify(secret)
         return self.generate_activity()
+
+    def add_amfa_audience(self, client_path):
+        """Put the AMFA engine in the client's token audience.
+
+        The engine accepts only tokens for its audience, and KMT reads AMFA over
+        its monitoring API with this client's service-account token.
+        """
+        path = client_path + "/protocol-mappers/models"
+        if any(m.get("name") == "amfa-audience" for m in self.request("GET", path)):
+            return
+        self.request("POST", path, {
+            "name": "amfa-audience", "protocol": "openid-connect",
+            "protocolMapper": "oidc-audience-mapper",
+            "config": {"included.custom.audience": "amfa", "access.token.claim": "true",
+                       "id.token.claim": "false"},
+        })
 
     def import_demo_realm(self):
         demo = load_demo_realm()
@@ -186,16 +204,19 @@ class Keycloak:
 
 
 def main():
-    required = ["BUNDLED_KC_ADMIN_PASSWORD", "BUNDLED_KC1_CLIENT_SECRET", "BUNDLED_KC2_CLIENT_SECRET"]
+    # The third Keycloak is the AMFA tenant, there only with make docker-demo-up AMFA=1.
+    numbers = (1, 2, 3) if os.environ.get("BUNDLED_AMFA") == "true" else (1, 2)
+    required = ["BUNDLED_KC_ADMIN_PASSWORD"] + [f"BUNDLED_KC{number}_CLIENT_SECRET" for number in numbers]
     missing = [key for key in required if not os.environ.get(key)]
     if missing:
         raise SetupError("set " + ", ".join(missing) + " in .env")
     username = os.environ.get("BUNDLED_KC_ADMIN_USER", "admin")
-    for number in (1, 2):
+    for number in numbers:
         client = Keycloak(os.environ.get(f"BUNDLED_KC{number}_URL", f"http://keycloak-{number}:8080"))
         try:
             client.login(username, os.environ["BUNDLED_KC_ADMIN_PASSWORD"])
-            logins, failed = client.provision(os.environ[f"BUNDLED_KC{number}_CLIENT_SECRET"])
+            logins, failed = client.provision(os.environ[f"BUNDLED_KC{number}_CLIENT_SECRET"],
+                                              amfa_audience=number == 3)
         except (SetupError, LookupError, TypeError, ValueError) as exc:
             detail = exc if isinstance(exc, SetupError) else f"{type(exc).__name__}: {exc}"
             raise SetupError(f"Keycloak {number} at {client.url}, {client.step}: {detail}") from None

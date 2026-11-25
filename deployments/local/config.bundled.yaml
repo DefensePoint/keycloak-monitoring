@@ -77,6 +77,24 @@ keycloak:
             - REGISTER_ERROR
             - RESET_PASSWORD_ERROR
             - LOGOUT_ERROR
+        amfa_fallback:
+          enabled: true
+          threshold: 1
+          time_window: 5m
+    # The AMFA mirror and alert checks, for the AMFA tenant below; without
+    # AMFA=1 they have nothing to read. The seeded AMFA history spans 30 days,
+    # so the mirror's first run looks that far back.
+    amfa_mirror:
+      enabled: true
+      backfill_days: 30
+    amfa_checker:
+      enabled: true
+      checks:
+        risk_rejected: { enabled: true }
+        repeated_risky: { enabled: true, threshold: 3, window: 24h, min_risk_level: 2 }
+        vpn_risky: { enabled: true }
+        login_error: { enabled: true, threshold: 5, window: 5m }
+        client_login_error: { enabled: true, threshold: 5, window: 5m }
   tenants:
     demo1:
       enabled: true
@@ -93,3 +111,19 @@ keycloak:
       admin_realm: master
       client_id: monitoring-service
       client_secret: "${BUNDLED_KC2_CLIENT_SECRET}"
+    # The AMFA tenant, on with make docker-demo-up AMFA=1 and disabled without
+    # it. See docker-compose.amfa.yml.
+    demo3:
+      enabled: ${BUNDLED_AMFA}
+      name: Bundled Keycloak with AMFA
+      server_url: http://keycloak-amfa:${BUNDLED_AMFA_KC_PORT}
+      admin_realm: master
+      client_id: monitoring-service
+      client_secret: "${BUNDLED_KC3_CLIENT_SECRET}"
+      amfa:
+        enabled: ${BUNDLED_AMFA}
+        events_lookback_days: 30
+        # The engine's monitoring API, on port 80 in the AMFA Keycloak's
+        # network namespace.
+        api:
+          base_url: http://keycloak-amfa
