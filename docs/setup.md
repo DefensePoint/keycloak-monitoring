@@ -9,15 +9,17 @@ connects both tenants without manual Keycloak administration.
 From a clean checkout:
 
 ```bash
-cp .env.example .env
-# Edit .env: set MONITORING_AUTH_SIMPLE_DEFAULT_PASS and all five BUNDLED_* secrets.
-# Generate independent bundled secrets with: openssl rand -hex 24
 make docker-demo-up
 ```
 
-The dashboard password must satisfy the requirements in `.env.example`. The
-example dashboard user is `operator`. Values containing `$` must be single
-quoted in `.env`. Keep this file private and retain it between restarts.
+On the first run this creates `.env` from `.env.example` and fills the dashboard
+password (`MONITORING_AUTH_SIMPLE_DEFAULT_PASS`) and all five `BUNDLED_*` secrets
+with random values, then prints the dashboard login. It fills only values that
+are empty or missing: a value you set yourself is never changed, so you can
+still choose them before the first run. A password you set must satisfy the
+requirements in `.env.example`, and values containing `$` must be single quoted.
+The example dashboard user is `operator`. Keep `.env` private and retain it
+between restarts.
 
 No root `config.yaml` is needed for the demo. It mounts
 `deployments/local/config.bundled.yaml`, whose secrets come from `.env`, and uses
