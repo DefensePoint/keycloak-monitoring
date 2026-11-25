@@ -37,6 +37,46 @@ keycloak:
       metrics_interval: 15s
       health_interval: 10s
       realm_info_interval: 30s
+    # On in the demo, so the Alerts page shows what the checks find in the demo
+    # Keycloaks within a minute of startup. The configuration checks run at
+    # their defaults; the event checks have none, so they are listed with the
+    # values of config.yaml.example.
+    config_checker:
+      enabled: true
+      poll_interval: 1m
+    event_checker:
+      enabled: true
+      poll_interval: 1m
+      checks:
+        login_error:
+          enabled: true
+          threshold: 10
+          time_window: 5m
+        idp_error:
+          enabled: true
+          threshold: 1
+          time_window: 5m
+          event_types:
+            - IDENTITY_PROVIDER_LOGIN_ERROR
+            - IDENTITY_PROVIDER_POST_LOGIN_ERROR
+            - IDENTITY_PROVIDER_RESPONSE_ERROR
+            - IDENTITY_PROVIDER_RETRIEVE_TOKEN_ERROR
+        code_to_token:
+          enabled: true
+          threshold: 1
+          time_window: 5m
+        client_error:
+          enabled: true
+          threshold: 10
+          time_window: 5m
+        common_errors:
+          enabled: true
+          threshold: 50
+          time_window: 5m
+          event_types:
+            - REGISTER_ERROR
+            - RESET_PASSWORD_ERROR
+            - LOGOUT_ERROR
   tenants:
     demo1:
       enabled: true
