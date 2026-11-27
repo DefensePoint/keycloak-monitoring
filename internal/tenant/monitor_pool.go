@@ -2,6 +2,7 @@ package tenant
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -17,6 +18,12 @@ import (
 // unhealthy and skipped rather than blocking the rest of the app from
 // starting.
 const createClientTimeout = 5 * time.Second
+
+// errMonitorRunning is a start for a tenant whose monitor already runs, for
+// example when the notice of a tenant's creation arrives after startup has
+// started its monitor from the list. The tenant is monitored, so it is not a
+// failure.
+var errMonitorRunning = errors.New("monitor already running")
 
 // MetricsRecorder is a local interface for recording monitor metrics.
 // This decouples tenant from the concrete metrics implementation.
@@ -58,6 +65,11 @@ type MonitorPoolManager struct {
 	healthAlertManager  HealthAlertManager
 	metrics             MetricsRecorder
 	mu                  sync.RWMutex
+
+	// changedDuringStart holds, while Start runs, the tenants a change has
+	// arrived for. Start leaves those to the change handler, which has the
+	// newer state. Guarded by mu.
+	changedDuringStart map[string]bool
 
 	// Failed starts awaiting a retry (monitor_pool_retry.go).
 	retryMu      sync.Mutex
@@ -120,9 +132,20 @@ func NewMonitorPoolManager(
 func (m *MonitorPoolManager) Start(ctx context.Context) error {
 	m.logger.Info("Starting Monitor Pool Manager")
 
-	// Get all enabled tenants
+	// Follow tenant changes before listing the tenants. A tenant created after
+	// the list was read, while the monitors below start, is then announced
+	// rather than left unmonitored until the next restart. A tenant changed
+	// before its turn below is left to the change handler.
+	m.mu.Lock()
+	m.changedDuringStart = map[string]bool{}
+	m.mu.Unlock()
+	m.service.RegisterCallback(m.handleTenantChange)
+
 	tenants, err := m.service.ListEnabledTenants(ctx)
 	if err != nil {
+		m.mu.Lock()
+		m.changedDuringStart = nil
+		m.mu.Unlock()
 		return fmt.Errorf("failed to list enabled tenants: %w", err)
 	}
 
@@ -134,9 +157,14 @@ func (m *MonitorPoolManager) Start(ctx context.Context) error {
 	// A tenant that fails here is retried in the background rather than left
 	// unmonitored until the next restart.
 	m.startRetryLoop()
-	started := 0
+	started, requested := 0, 0
 	for _, tenant := range tenants {
-		if err := m.startMonitorForTenant(ctx, tenant); err != nil {
+		attempted, err := m.startListedTenant(ctx, tenant)
+		if !attempted {
+			continue
+		}
+		requested++
+		if err != nil {
 			m.logger.Error("Failed to start monitor for tenant",
 				"tenant_id", tenant.TenantID,
 				"error", err)
@@ -145,24 +173,47 @@ func (m *MonitorPoolManager) Start(ctx context.Context) error {
 		}
 		started++
 	}
-
-	// Register callback for tenant changes
-	m.service.RegisterCallback(m.handleTenantChange)
+	m.mu.Lock()
+	m.changedDuringStart = nil
+	m.mu.Unlock()
 
 	switch {
-	case started == len(tenants):
+	case started == requested:
 		m.logger.Info("Monitor Pool Manager started",
 			"active_monitors", started)
-	case started == 0 && len(tenants) > 0:
+	case started == 0 && requested > 0:
 		m.logger.Error("Monitor Pool Manager started with no working monitors",
 			"active_monitors", started,
-			"requested_monitors", len(tenants))
+			"requested_monitors", requested)
 	default:
 		m.logger.Warn("Monitor Pool Manager started with some monitors unavailable",
 			"active_monitors", started,
-			"requested_monitors", len(tenants))
+			"requested_monitors", requested)
 	}
 	return nil
+}
+
+// startListedTenant starts a monitor for a tenant from Start's list, unless a
+// change for it has arrived since; the change handler applies that change
+// with the tenant's newer state. attempted reports whether a start was tried.
+func (m *MonitorPoolManager) startListedTenant(ctx context.Context, tenant *domain.KeycloakTenant) (attempted bool, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.changedDuringStart[tenant.TenantID] {
+		m.logger.Debug("Tenant changed during startup, leaving it to the change handler",
+			"tenant_id", tenant.TenantID)
+		return false, nil
+	}
+	return true, m.startMonitorLocked(ctx, tenant)
+}
+
+// noteChange records, while Start runs, that a change arrived for a tenant.
+func (m *MonitorPoolManager) noteChange(tenantID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.changedDuringStart != nil {
+		m.changedDuringStart[tenantID] = true
+	}
 }
 
 // Stop gracefully stops all monitors
@@ -208,6 +259,7 @@ func (m *MonitorPoolManager) Stop() error {
 // handleTenantChange handles tenant change events
 func (m *MonitorPoolManager) handleTenantChange(event Event, tenant *domain.KeycloakTenant) {
 	ctx := context.Background()
+	m.noteChange(tenant.TenantID)
 
 	switch event {
 	case EventAdded:
@@ -215,7 +267,10 @@ func (m *MonitorPoolManager) handleTenantChange(event Event, tenant *domain.Keyc
 			"tenant_id", tenant.TenantID)
 		if tenant.Enabled {
 			m.cancelRetry(tenant.TenantID)
-			if err := m.startMonitorForTenant(ctx, tenant); err != nil {
+			if err := m.startMonitorForTenant(ctx, tenant); errors.Is(err, errMonitorRunning) {
+				m.logger.Debug("Monitor for new tenant already running",
+					"tenant_id", tenant.TenantID)
+			} else if err != nil {
 				m.logger.Error("Failed to start monitor for new tenant",
 					"tenant_id", tenant.TenantID,
 					"error", err)
@@ -227,7 +282,10 @@ func (m *MonitorPoolManager) handleTenantChange(event Event, tenant *domain.Keyc
 		m.logger.Info("Tenant enabled, starting monitor",
 			"tenant_id", tenant.TenantID)
 		m.cancelRetry(tenant.TenantID)
-		if err := m.startMonitorForTenant(ctx, tenant); err != nil {
+		if err := m.startMonitorForTenant(ctx, tenant); errors.Is(err, errMonitorRunning) {
+			m.logger.Debug("Monitor for enabled tenant already running",
+				"tenant_id", tenant.TenantID)
+		} else if err != nil {
 			m.logger.Error("Failed to start monitor for enabled tenant",
 				"tenant_id", tenant.TenantID,
 				"error", err)
@@ -277,10 +335,13 @@ func (m *MonitorPoolManager) handleTenantChange(event Event, tenant *domain.Keyc
 func (m *MonitorPoolManager) startMonitorForTenant(ctx context.Context, tenant *domain.KeycloakTenant) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.startMonitorLocked(ctx, tenant)
+}
 
-	// Check if monitor already exists
+// startMonitorLocked starts a monitor for a tenant; the caller holds mu.
+func (m *MonitorPoolManager) startMonitorLocked(ctx context.Context, tenant *domain.KeycloakTenant) error {
 	if _, exists := m.monitors.Load(tenant.TenantID); exists {
-		return fmt.Errorf("monitor for tenant %s already exists", tenant.TenantID)
+		return fmt.Errorf("tenant %s: %w", tenant.TenantID, errMonitorRunning)
 	}
 
 	m.logger.Info("Starting monitor for tenant",
